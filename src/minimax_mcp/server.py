@@ -9,14 +9,26 @@ Exposes ComfyUI + MiniMax H3 as MCP tools for OpenCode:
   * list_outputs()                    -> list generated videos in the output dir
   * compose_final(scene_paths, ...)   -> ffmpeg concat of scenes into a final video
 
+  # New: Audiovisual Studio tools
+  * download_video(url, ...)          -> download video from Instagram/YT using yt-dlp + browser cookies
+  * transcribe_video(path, ...)       -> transcribe audio using faster-whisper (local, GPU)
+  * create_cinematic_prompt(text, ...) -> convert transcription into MiniMax H3 prompt
+  * generate_video(prompt, ...)       -> submit prompt to MiniMax H3 via ComfyUI
+  * studio_pipeline(url, ...)         -> full pipeline: URL → download → transcribe → prompt → video
+
 Run (stdio, for OpenCode MCP):
   uv run --directory <project> python src/minimax_mcp/server.py
 
 Configuration (env vars / .env):
-  COMFYUI_URL     http://127.0.0.1:8188
-  WORKFLOW_PATH   path to API-format workflow JSON (default workflows/minimax_h3_t2v_api.json)
-  MODELS_DIR      host models dir (for health checks)
-  OUTPUT_DIR      host output dir where ComfyUI writes .mp4 (default <project>/output)
+  COMFYUI_URL           http://127.0.0.1:8188
+  WORKFLOW_PATH         path to API-format workflow JSON (default workflows/minimax_h3_t2v_api.json)
+  MODELS_DIR            host models dir (for health checks)
+  OUTPUT_DIR            host output dir where ComfyUI writes .mp4 (default <project>/output)
+  STUDIO_DOWNLOADS_DIR  directory for downloaded videos (default <project>/downloads)
+  WHISPER_MODEL         whisper model size: tiny, base, small, medium, large-v3 (default: small)
+  WHISPER_DEVICE        cuda or cpu (default: cuda)
+  WHISPER_COMPUTE_TYPE  float16 (GPU), int8 (CPU), float32 (default: float16)
+  STUDIO_BROWSER        browser for cookies: chrome, firefox, edge, brave (default: chrome)
 """
 from __future__ import annotations
 
@@ -35,6 +47,20 @@ from fastmcp import FastMCP
 from pydantic import Field
 
 from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError
+from minimax_mcp.downloader import VideoDownloader
+from minimax_mcp.transcriber import AudioTranscriber
+from minimax_mcp.orchestrator import AudiovisualStudio
+from minimax_mcp.core import (
+    load_workflow,
+    duration_to_frames,
+    inject_scene,
+    submit_scene_core,
+    wait_for_video_core,
+    compose_final_core,
+    output_dir_abs,
+    to_host_path,
+    to_container_path,
+)
 
 # ---------------- logging ----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -49,15 +75,20 @@ WORKFLOW_PATH = Path(os.environ.get("WORKFLOW_PATH", PROJECT_ROOT / "workflows" 
 MODELS_DIR = Path(os.environ.get("MODELS_DIR") or
                   ("/opt/minimax/models" if os.path.isdir("/opt/minimax/models") else "/var/tmp/minimax/models"))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", PROJECT_ROOT / "output"))
-# When the MCP server runs INSIDE a container (docker exec) but reports paths to
-# the host orchestrator, OUTPUT_HOST_DIR is the host-side view of OUTPUT_DIR.
 OUTPUT_HOST_DIR = os.environ.get("OUTPUT_HOST_DIR") or str(OUTPUT_DIR)
 OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "video/factory")
-H3_NODE_ID = "5"            # MiniMaxH3ImageToVideo (T2V) node in the expanded API workflow
-NOISE_NODE_ID = "6"         # RandomNoise node (carries the seed)
+
+# Studio config
+STUDIO_DOWNLOADS_DIR = Path(os.environ.get("STUDIO_DOWNLOADS_DIR", PROJECT_ROOT / "downloads"))
+WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
+WHISPER_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "float16")
+STUDIO_BROWSER = os.environ.get("STUDIO_BROWSER", "chrome")
+
+H3_NODE_ID = "5"
+NOISE_NODE_ID = "6"
 SAVE_NODE_CLASS = "SaveVideo"
 
-# Model set — overridable via .env (MODEL_DIFFUSION etc.) so bigger variants work.
 DIFFUSION_MODEL = os.environ.get("MODEL_DIFFUSION", "minimax_h3_fl2va_pruned_int4_convrot.safetensors")
 TEXT_ENCODER = os.environ.get("MODEL_TEXT_ENCODER", "qwen3vl_32b_minimax_h3_int4_convrot.safetensors")
 VIDEO_VAE = os.environ.get("MODEL_VIDEO_VAE", "minimax_h3_video_vae_fp16.safetensors")
@@ -73,70 +104,12 @@ mcp = FastMCP("minimax-video-factory")
 
 
 # ---------------- helpers ----------------
-def load_workflow() -> dict[str, Any]:
-    if not WORKFLOW_PATH.exists():
-        raise FileNotFoundError(f"workflow not found: {WORKFLOW_PATH} (run scripts/ui2api.py first)")
-    with open(WORKFLOW_PATH) as f:
-        return json.load(f)
-
-
-def duration_to_frames(duration: float, fps: int = 24) -> int:
-    """Snap seconds to the model's 17k+5 frame grid at 24fps (same as ComfyMathExpression)."""
-    frames = max(5, round(duration * fps))
-    return frames + (5 - (frames % 17)) % 17
-
-
-def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
-                 width: int, height: int, seed: int, filename_prefix: str) -> dict[str, Any]:
-    """Patch the expanded T2V workflow with per-scene values.
-
-    Sets the model loader nodes (UNET/CLIP/VAE) to the configured model set, then
-    overrides the H3 node inputs (prompt/width/height/length), the RandomNoise
-    seed, and the SaveVideo output prefix.
-    """
-    import copy
-    wf = copy.deepcopy(workflow)
-
-    # loader nodes: 1=UNET, 2=CLIP, 3=video VAE, 4=audio VAE (expanded workflow)
-    loaders = {
-        "1": ("UNETLoader", "unet_name", DIFFUSION_MODEL),
-        "2": ("CLIPLoader", "clip_name", TEXT_ENCODER),
-        "3": ("VAELoader", "vae_name", VIDEO_VAE),
-        "4": ("VAELoader", "vae_name", AUDIO_VAE),
-    }
-    for nid, (cls, key, value) in loaders.items():
-        node = wf.get(nid)
-        if node is not None and node.get("class_type") == cls and key in node.get("inputs", {}):
-            node["inputs"][key] = value
-
-    h3 = wf.get(H3_NODE_ID)
-    if h3 is None:
-        raise KeyError(f"H3 node id '{H3_NODE_ID}' not found in workflow; adjust H3_NODE_ID")
-    inputs = h3["inputs"]
-    inputs["prompt"] = prompt
-    inputs["width"] = width
-    inputs["height"] = height
-    inputs["length"] = duration_to_frames(duration)
-
-    noise = wf.get(NOISE_NODE_ID)
-    if noise is not None and "noise_seed" in noise.get("inputs", {}):
-        noise["inputs"]["noise_seed"] = seed
-
-    # SaveVideo node: set filename_prefix
-    for nid, node in wf.items():
-        if node.get("class_type") == SAVE_NODE_CLASS:
-            node["inputs"]["filename_prefix"] = filename_prefix
-
-    return wf
-
-
 def output_dir_abs() -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     return OUTPUT_DIR
 
 
 def to_host_path(p: str | os.PathLike[str]) -> str:
-    """Map a container-side path under OUTPUT_DIR to the host-side view."""
     s = str(p)
     if OUTPUT_HOST_DIR != str(OUTPUT_DIR):
         try:
@@ -148,7 +121,6 @@ def to_host_path(p: str | os.PathLike[str]) -> str:
 
 
 def to_container_path(p: str | os.PathLike[str]) -> str:
-    """Map a host-side path under OUTPUT_HOST_DIR back into the container view."""
     s = str(p)
     if OUTPUT_HOST_DIR != str(OUTPUT_DIR):
         try:
@@ -163,6 +135,7 @@ def to_container_path(p: str | os.PathLike[str]) -> str:
 @mcp.tool()
 def health_check() -> dict[str, Any]:
     """Check ComfyUI backend health and required MiniMax H3 models presence."""
+    from minimax_mcp.comfyui_client import ComfyUIClient
     client = ComfyUIClient(COMFYUI_URL)
     backend = client.health()
     if not backend.get("ok"):
@@ -196,28 +169,21 @@ def submit_scene(
 
     Returns {"prompt_id": ...}. Use wait_for_video() to await completion.
     """
-    if seed is None:
-        seed = random.randint(0, 2**31 - 1)
-    workflow = load_workflow()
-    wf = inject_scene(workflow, prompt=prompt, duration=duration,
-                      width=width, height=height, seed=seed,
-                      filename_prefix=filename_prefix)
-    client = ComfyUIClient(COMFYUI_URL)
-    try:
-        prompt_id = client.submit(wf)
-    except ComfyUIError as e:
-        return {"ok": False, "error": str(e)}
-    return {"ok": True, "prompt_id": prompt_id, "seed": seed,
-            "duration": duration, "width": width, "height": height}
+    from minimax_mcp.core import submit_scene_core
+    return submit_scene_core(
+        prompt=prompt, duration=duration, width=width, height=height,
+        seed=seed, filename_prefix=filename_prefix,
+    )
 
 
 @mcp.tool()
 def get_status(prompt_id: str) -> dict[str, Any]:
     """Get the current status of a submitted ComfyUI prompt."""
+    from minimax_mcp.comfyui_client import ComfyUIClient
     client = ComfyUIClient(COMFYUI_URL)
     try:
         hist = client.get_history(prompt_id)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"ok": False, "error": str(e)}
     rec = hist.get(prompt_id)
     if rec is None:
@@ -240,16 +206,8 @@ async def wait_for_video(
     timeout: float = Field(default=1200.0, description="Max seconds to wait"),
 ) -> dict[str, Any]:
     """Block until the prompt finishes rendering; returns path to the generated .mp4."""
-    client = ComfyUIClient(COMFYUI_URL)
-    try:
-        rec = await client.wait_for_execution(prompt_id, timeout=timeout)
-    except ComfyUIError as e:
-        return {"ok": False, "error": str(e)}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"unexpected: {e}"}
-    path = client.resolve_output(rec, str(output_dir_abs()))
-    return {"ok": path is not None, "prompt_id": prompt_id,
-            "output_path": to_host_path(path) if path else None, "outputs": rec.get("outputs")}
+    from minimax_mcp.core import wait_for_video_core
+    return await wait_for_video_core(prompt_id, timeout=timeout)
 
 
 @mcp.tool()
@@ -268,33 +226,90 @@ def compose_final(
     output_path: str = Field(default="output/final.mp4", description="Where to write the composed video"),
 ) -> dict[str, Any]:
     """Concatenate scene .mp4 files with ffmpeg into a final video (re-encode, crossfade-free)."""
-    if len(scene_paths) < 2:
-        return {"ok": False, "error": "need at least 2 scenes to compose"}
+    from minimax_mcp.core import compose_final_core
+    return compose_final_core(scene_paths, output_path)
 
-    out_abs = Path(to_container_path(output_path))
-    if not out_abs.is_absolute():
-        out_abs = OUTPUT_DIR / output_path
-    out_abs.parent.mkdir(parents=True, exist_ok=True)
 
-    if not shutil.which("ffmpeg"):
-        return {"ok": False, "error": "ffmpeg not found on PATH"}
+# =============================================================================
+# NEW: Audiovisual Studio Tools
+# =============================================================================
 
-    concat_file = output_dir_abs() / "_concat_list.txt"
-    concat_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(concat_file, "w") as f:
-        for sp in scene_paths:
-            p = Path(to_container_path(sp))
-            if not p.exists():
-                return {"ok": False, "error": f"scene file not found: {sp}"}
-            f.write(f"file '{p.resolve()}'\n")
+@mcp.tool()
+def download_video(
+    url: str = Field(description="Video URL (Instagram Reel, YouTube, etc.)"),
+    browser: str = Field(default="chrome", description="Browser for cookies: chrome, firefox, edge, brave"),
+) -> dict[str, Any]:
+    """Download a video from Instagram Reels, YouTube, or other platforms using yt-dlp with browser cookies."""
+    from minimax_mcp.orchestrator import AudiovisualStudio
+    from minimax_mcp.downloader import VideoDownloader
+    downloader = VideoDownloader(output_dir=STUDIO_DOWNLOADS_DIR, browser=browser)
+    return downloader.download(url)
 
-    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-           "-i", str(concat_file), "-c", "copy", str(out_abs)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        return {"ok": False, "error": f"ffmpeg failed: {proc.stderr[-800:]}"}
-    return {"ok": True, "output_path": to_host_path(out_abs),
-            "scenes": len(scene_paths)}
+
+@mcp.tool()
+def transcribe_video(
+    video_path: str = Field(description="Path to video file to transcribe"),
+    model_size: str = Field(default="small", description="Whisper model: tiny, base, small, medium, large-v3"),
+    device: str = Field(default="cuda", description="cuda or cpu"),
+    language: str = Field(default="pt", description="Language code (pt for Portuguese)"),
+) -> dict[str, Any]:
+    """Transcribe audio from a video file using faster-whisper (local, GPU-accelerated)."""
+    from minimax_mcp.transcriber import AudioTranscriber
+    if model_size != "small" or device != "cuda":
+        transcriber = AudioTranscriber(model_size=model_size, device=device)
+        return transcriber.transcribe(video_path)
+    # Use default studio transcriber
+    studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
+    return studio.transcriber.transcribe(video_path)
+
+
+@mcp.tool()
+def create_cinematic_prompt(
+    transcription: str = Field(description="Full transcription text from video"),
+    style: str = Field(default="cinematic", description="Prompt style: cinematic, educational, social"),
+) -> dict[str, Any]:
+    """Convert a transcription into a cinematic MiniMax H3 structured prompt."""
+    from minimax_mcp.orchestrator import AudiovisualStudio
+    studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
+    prompt = studio.create_cinematic_prompt(transcription, style=style)
+    return {"ok": True, "prompt": prompt, "style": style, "length": len(prompt)}
+
+
+@mcp.tool()
+def generate_video(
+    prompt: str = Field(description="MiniMax H3 structured prompt (shots + camera + audio)"),
+    duration: float = Field(default=10.0, description="Clip duration in seconds (4-15; snaps to 17-frame grid)"),
+    width: int = Field(default=1344, description="Output width (multiple of 32)"),
+    height: int = Field(default=768, description="Output height (multiple of 32)"),
+    seed: Optional[int] = Field(default=None, description="Random seed"),
+    filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
+) -> dict[str, Any]:
+    """Generate a video using the MiniMax H3 model via ComfyUI."""
+    from minimax_mcp.core import submit_scene_core
+    from minimax_mcp.orchestrator import AudiovisualStudio
+    studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
+    return studio.generate_video(
+        prompt=prompt, duration=duration, width=width, height=height, seed=seed,
+    )
+
+
+@mcp.tool()
+def studio_pipeline(
+    url: str = Field(description="Video URL (Instagram Reel, YouTube, etc.)"),
+    style: str = Field(default="cinematic", description="Prompt style: cinematic, educational, social"),
+    duration: float = Field(default=10.0, description="Generated clip duration in seconds"),
+    width: int = Field(default=1344, description="Output width"),
+    height: int = Field(default=768, description="Output height"),
+) -> dict[str, Any]:
+    """
+    Run the complete audiovisual studio pipeline:
+    URL → download → transcribe → create prompt → generate video.
+    """
+    from minimax_mcp.orchestrator import AudiovisualStudio
+    studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
+    return studio.run_full_pipeline(
+        url=url, style=style, duration=duration, width=width, height=height,
+    )
 
 
 # ---------------- entrypoint ----------------

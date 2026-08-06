@@ -1,4 +1,4 @@
-# INSTALLATION.md — MiniMax Video Factory
+# INSTALLATION.md — MiniMax Video Factory + Audiovisual Studio
 
 Verified install procedure on a 12 GB VRAM Linux machine (tested: RTX 4080 Laptop,
 30 GB RAM). Follow the phases **in order**. The OpenCode/agent integration is LAST.
@@ -6,6 +6,8 @@ Verified install procedure on a 12 GB VRAM Linux machine (tested: RTX 4080 Lapto
 > For an AI agent configuring this on a fresh machine, read `AGENTS.md` first — it
 > encodes every pitfall hit during the original build (subgraph hash, torch 2.8,
 > `--listen`, VAE subfolder URLs, etc.).
+
+---
 
 ## 0. Hardware & OS floor
 
@@ -15,6 +17,8 @@ Verified install procedure on a 12 GB VRAM Linux machine (tested: RTX 4080 Lapto
 | System RAM | 16 GB free (30 GB used here; `--fast-disk` mandatory on ≤ 32 GB) |
 | Disk | ~45 GB free (models ≈ 32 GB + image ≈ 12 GB) |
 | OS | Linux with working `docker` + `nvidia-container-toolkit` |
+
+---
 
 ## 1. Host prerequisites
 
@@ -29,6 +33,8 @@ docker compose version && ffmpeg -version | head -1
 `/opt/mcp-venv`) is baked into the Docker image. Install `uv` only if you want to
 run the MCP server or the fastmcp client on the host (dev mode).
 
+---
+
 ## 2. Configure `.env` (central config)
 
 ```bash
@@ -37,10 +43,18 @@ cp .env.example .env
 #   PROJECT_ROOT=/path/to/minimax-video-factory   (absolute — used for the /workspace mount)
 #   MODELS_DIR=/var/tmp/minimax/models            (where weights live)
 #   OUTPUT_DIR=/path/to/minimax-video-factory/output
+#   STUDIO_DOWNLOADS_DIR=/path/to/minimax-video-factory/downloads  # new: downloaded videos
+#   WHISPER_MODEL=small      # tiny/base/small/medium/large-v3
+#   WHISPER_DEVICE=cuda      # cuda/cpu
+#   WHISPER_COMPUTE_TYPE=float16
+#   STUDIO_BROWSER=chrome    # chrome/firefox/edge/brave
 ```
 
-Everything (paths, model set, ports, MCP transport) is read from this one file by
-`scripts/config.sh`, `download_models.sh`, the Docker compose file and the MCP server.
+Everything (paths, model set, ports, MCP transport, studio config) is read from this
+one file by `scripts/config.sh`, `download_models.sh`, the Docker compose file and
+the MCP server.
+
+---
 
 ## 3. Models directory
 
@@ -53,6 +67,8 @@ sudo mkdir -p /opt/minimax/models && sudo chown -R "$USER" /opt/minimax
 # or, no-sudo fallback:
 #   mkdir -p /var/tmp/minimax/models
 ```
+
+---
 
 ## 4. Download models (~32 GB)
 
@@ -71,6 +87,8 @@ Downloads with resume (`curl -C -`) and size-verified skip. Sources:
 
 Verify: `./scripts/diagnose.sh 03` (checks exact sizes ±2%).
 
+---
+
 ## 5. Build image + start ComfyUI
 
 ```bash
@@ -87,12 +105,14 @@ What the image does (see `docker/Dockerfile`):
   the container; `/workspace` is a read-only bind-mount of the repo.
 - Runs `main.py --listen 0.0.0.0 --port 8188` + `COMFYUI_EXTRA_ARGS` from `.env`.
   `0.0.0.0` *inside* the container is required (127.0.0.1 breaks docker-proxy);
-  compose maps `127.0.0.1:8188:8188` on the host.
+  compose maps it to `127.0.0.1:8188` on the host.
 
 > **Compose env gotcha:** always start/stop via `./scripts/start_comfyui.sh` /
 > `./scripts/stop_comfyui.sh` (they pass `--project-directory` + `--env-file`). A bare
 > `docker compose -f docker/docker-compose.yml` reads `.env` from `docker/` (absent)
 > and resolves relative mounts one level too high.
+
+---
 
 ## 6. Validate workflow + smoke render
 
@@ -104,17 +124,53 @@ What the image does (see `docker/Dockerfile`):
 verifies the `.mp4` has a video stream **and stereo audio** (MiniMax H3 native audio).
 First render takes ~4–5 min (model load + 20 steps).
 
+---
+
 ## 7. MCP server + E2E
 
 ```bash
 ./scripts/diagnose.sh 06   # stdio handshake via `docker exec` (in-container MCP)
-./scripts/diagnose.sh 07   # full agent flow: health -> submit 2 scenes -> wait -> compose
+./scripts/diagnose.sh 07   # full agent flow: health → submit 2 scenes → wait → compose
 ```
 
-## 8. OpenCode integration (LAST)
+---
 
-Add the MCP entry to your `opencode.json`. Three options (see README "OpenCode MCP
-config"):
+## 8. Audiovisual Studio (NEW) — Install Whisper + Test Pipeline
+
+```bash
+# 1. Install Whisper model (small=244MB, good PT-BR)
+./scripts/setup_whisper.sh small   # or base/medium/large-v3
+
+# 2. Install extra deps (yt-dlp, faster-whisper, requests) — already in pyproject.toml
+./scripts/install_deps.sh
+
+# 3. Test the studio pipeline with a local file (save_only mode, no GPU render)
+cd minimax-video-factory
+uv run python -c "
+from minimax_mcp.orchestrator import AudiovisualStudio
+studio = AudiovisualStudio(downloads_dir='downloads')
+result = studio.run_full_pipeline(
+    url='local_test',
+    style='cinematic',
+    duration=5.0,
+    width=512,
+    height=320,
+    save_only=True,
+    output_dir='output/transcriptions'
+)
+print('OK:', result.get('ok'))
+print('Transcription:', result.get('transcription_file'))
+print('Prompt:', result.get('prompt_file'))
+"
+```
+
+Expected output: transcription + prompt saved to `output/transcriptions/`.
+
+---
+
+## 5. OpenCode integration (LAST)
+
+Add the MCP entry to your `opencode.json`. Three options:
 
 ```jsonc
 // A) docker exec (recommended, no host uv)
@@ -122,14 +178,30 @@ config"):
   "type": "local",
   "command": ["docker", "exec", "-i", "minimax-comfyui", "bash", "/workspace/scripts/mcp_runner.sh"]
 }
-// B) host uv   C) remote HTTPS — see docs/MCP_REMOTE.md
+
+// B) host uv
+"minimax-video-factory": {
+  "type": "local",
+  "command": ["uv", "run", "--directory", "/path/to/minimax-video-factory", "python", "src/minimax_mcp/server.py"],
+  "environment": { "MODELS_DIR": "/opt/minimax/models", "COMFYUI_URL": "http://127.0.0.1:8188" }
+}
+
+// C) remote HTTPS (VPS) — see docs/MCP_REMOTE.md
+"minimax-video-factory": {
+  "type": "remote",
+  "url": "https://mcp.example.com/mcp"
+}
 ```
+
+---
 
 ## 9. Remote MCP over HTTPS (VPS)
 
 Optional. To expose the MCP as `https://…` from a VPS (run container there, add a
 Caddy/nginx TLS reverse proxy in front of `127.0.0.1:${MCP_PORT:-8848}`), follow
 `docs/MCP_REMOTE.md`. Configure OpenCode with `"type": "remote", "url": "https://…/mcp"`.
+
+---
 
 ## Troubleshooting cheat-sheet
 
@@ -145,3 +217,31 @@ Caddy/nginx TLS reverse proxy in front of `127.0.0.1:${MCP_PORT:-8848}`), follow
 | MCP stdio handshake hangs / boots uvicorn | `MCP_TRANSPORT` left at `streamable-http` — `mcp_runner.sh` forces `stdio`; don't override it. |
 | Container mounts look wrong (`OUTPUT_HOST_DIR=../output`) | Started compose with a bare `-f` (no `--project-directory`/`--env-file`). Use `./scripts/start_comfyui.sh`. |
 | Remote MCP `GET /mcp` → 406 | Expected — needs `Accept: application/json, text/event-stream` (a POST client works). |
+
+---
+
+## 9. Audiovisual Studio Quick Reference
+
+| Tool | MCP Call Example |
+|---|---|
+| `download_video` | `{"url": "https://instagram.com/p/...", "browser": "chrome"}` |
+| `transcribe_video` | `{"video_path": "downloads/video.mp4", "model_size": "small"}` |
+| `create_cinematic_prompt` | `{"transcription": "...", "style": "cinematic"}` |
+| `generate_video` | `{"prompt": "...", "duration": 10, "width": 1344, "height": 768}` |
+| `studio_pipeline` | `{"url": "https://instagram.com/p/...", "save_only": true}` |
+
+**Full pipeline example (save_only):**
+```json
+{
+  "tool": "studio_pipeline",
+  "arguments": {
+    "url": "https://www.instagram.com/p/DbHIZl5Pk_0/",
+    "style": "cinematic",
+    "duration": 10,
+    "width": 1344,
+    "height": 768,
+    "save_only": true,
+    "output_dir": "output/transcriptions"
+  }
+}
+```

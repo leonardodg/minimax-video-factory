@@ -1,6 +1,8 @@
-# MiniMax H3 · INT4 ConvRot — Local Video Factory
+# MiniMax H3 · INT4 ConvRot — Local Video Factory + Audiovisual Studio
 
 > Orchestrate **MiniMax H3** (text → video **+ native stereo audio**, single diffusion pass) on a local GPU, driven by **OpenCode** through an **MCP server** that talks to a **ComfyUI** backend via its HTTP/WebSocket API.
+>
+> **New:** Full audiovisual studio pipeline — download videos (Instagram Reels, YouTube), transcribe locally with Whisper, generate cinematic prompts, and render with MiniMax H3 — all via MCP tools.
 
 ## Architecture
 
@@ -18,9 +20,16 @@
 [ Final .mp4  (video + stereo audio) ]
 ```
 
-The MCP server and ComfyUI run in the **same container** (no host uv/Python). For
-remote VPS use, the MCP can also be exposed over HTTPS — see
-[docs/MCP_REMOTE.md](docs/MCP_REMOTE.md).
+**New: Audiovisual Studio Pipeline**
+```
+[Instagram Reel / YouTube URL]
+        │
+        ▼
+[Download] ──► [Transcribe (Whisper)] ──► [Prompt Engineering] ──► [MiniMax H3 Render]
+        │              │                      │                        │
+        ▼              ▼                      ▼                        ▼
+    .mp4 file    .txt transcription      .txt prompt             .mp4 output
+```
 
 ## Components
 
@@ -30,6 +39,9 @@ remote VPS use, the MCP can also be exposed over HTTPS — see
 | **Local Agent** | MCP server; injects prompt into the API workflow JSON, submits jobs, monitors, retrieves files | Python + FastMCP (`src/minimax_mcp/server.py`, in-image venv `/opt/mcp-venv`) |
 | **Render Engine** | Loads MiniMax H3 into VRAM, runs the diffusion pass, saves `.mp4` | ComfyUI ≥ 0.30.0 (Docker) |
 | **Model** | MiniMax H3 Base FL2VA, pruned **INT4** ConvRot (tuned for 12 GB VRAM) | `Merserk/MiniMax-H3-INT4-ConvRot` |
+| **Downloader** | Instagram Reels, YouTube, etc. with browser cookies | yt-dlp |
+| **Transcriber** | Local GPU-accelerated Whisper (PT-BR + timestamps) | faster-whisper |
+| **Prompt Engineer** | Template-based cinematic/educational/social prompt generation | Python (pluggable LLM later) |
 
 ## Configuration (`.env`)
 
@@ -44,9 +56,16 @@ OUTPUT_PREFIX=video/factory                   # default filename prefix
 COMFYUI_TAG=v0.30.2  COMFYUI_PORT=8188  COMFYUI_EXTRA_ARGS=--lowvram --fast-disk ...
 MCP_TRANSPORT=streamable-http  MCP_HOST=0.0.0.0  MCP_PORT=8848   # remote/VPS MCP
 DOCKER_HUB_USER=leonardodg  DOCKER_HUB_REPO=minimax-video-factory
+
+# Studio config
+STUDIO_DOWNLOADS_DIR=.../downloads            # downloaded videos
+WHISPER_MODEL=small                           # tiny/base/small/medium/large-v3
+WHISPER_DEVICE=cuda                           # cuda/cpu
+WHISPER_COMPUTE_TYPE=float16                  # float16/int8/float32
+STUDIO_BROWSER=chrome                         # chrome/firefox/edge/brave
 ```
 
-## Quick start
+## Quick Start
 
 ```bash
 cd minimax-video-factory
@@ -65,9 +84,12 @@ cp .env.example .env     # edit PROJECT_ROOT, MODELS_DIR, OUTPUT_DIR
 
 # 4. Full validation suite (models, workflow, real smoke render, MCP, E2E)
 ./scripts/diagnose.sh                 # runs 00..07; needs a few minutes for the renders
+
+# 5. Optional: Install Whisper model for studio pipeline
+./scripts/setup_whisper.sh small      # or base/medium/large-v3
 ```
 
-## Validation suite (`./scripts/diagnose.sh [NN ...]`)
+## Validation Suite (`./scripts/diagnose.sh [NN ...]`)
 
 | # | Checks | Status |
 |---|---|---|
@@ -80,6 +102,40 @@ cp .env.example .env     # edit PROJECT_ROOT, MODELS_DIR, OUTPUT_DIR
 | 06 | MCP server stdio initialize handshake (in-container) | PASS |
 | 07 | E2E agent flow: health → 2×submit_scene → wait → list → compose_final | PASS |
 
+## New: Audiovisual Studio MCP Tools
+
+| Tool | Description |
+|---|---|
+| `download_video(url, browser?)` | Download Instagram Reels, YouTube, etc. using yt-dlp + browser cookies |
+| `transcribe_video(path, model_size?, device?, language?)` | Local Whisper transcription with timestamps (GPU) |
+| `create_cinematic_prompt(transcription, style?)` | Convert transcription → cinematic/educational/social prompt |
+| `generate_video(prompt, duration, width, height, seed?)` | Submit to MiniMax H3 via ComfyUI |
+| `studio_pipeline(url, style?, duration?, width?, height?, save_only?)` | **Full pipeline**: URL → download → transcribe → prompt → video (or save_only) |
+
+### Example: Full Pipeline from Instagram Reel
+
+```python
+# In OpenCode chat:
+"Baixe o Reel https://www.instagram.com/p/DbHIZl5Pk_0/, 
+ transcreva, crie um prompt cinematográfico e salve 
+ transcrição + prompt em output/transcriptions/ (save_only=True)"
+```
+
+Or via MCP directly:
+```json
+{
+  "tool": "studio_pipeline",
+  "arguments": {
+    "url": "https://www.instagram.com/p/DbHIZl5Pk_0/",
+    "style": "cinematic",
+    "duration": 10,
+    "width": 1344,
+    "height": 768,
+    "save_only": true
+  }
+}
+```
+
 ## Requirements (hardware floor)
 
 | Resource | Minimum | Notes |
@@ -89,7 +145,7 @@ cp .env.example .env     # edit PROJECT_ROOT, MODELS_DIR, OUTPUT_DIR
 | Disk | ~45 GB free on the models partition | Models ≈ 32 GB + Docker image ≈ 12 GB |
 | Software | Docker + NVIDIA Container Toolkit, `curl`, `ffmpeg` | `uv` only needed for host-side dev/MCP-client tests |
 
-## Verified stack & key gotchas
+## Verified Stack & Key Gotchas
 
 - ComfyUI pinned at **`v0.30.2`**; base `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`
   with **torch upgraded to `2.8.0+cu128`** in-image. torch ≥ 2.8 enables ComfyUI's
@@ -108,7 +164,7 @@ See [docs/INSTALLATION.md](docs/INSTALLATION.md), [docs/ARCHITECTURE.md](docs/AR
 [docs/MCP_REMOTE.md](docs/MCP_REMOTE.md) (VPS/HTTPS MCP) and
 **[AGENTS.md](AGENTS.md)** (operating manual for AI agents).
 
-## OpenCode MCP config (3 ways)
+## OpenCode MCP Config (3 ways)
 
 ```jsonc
 // A) stdio via docker exec (no host uv) — RECOMMENDED local

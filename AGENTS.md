@@ -1,4 +1,4 @@
-# AGENTS.md — MiniMax Video Factory
+# AGENTS.md — MiniMax Video Factory + Audiovisual Studio
 
 Operating manual for AI agents configuring and operating this project on a new machine.
 It encodes **everything learned while building the original factory**: the architecture,
@@ -14,6 +14,9 @@ A local "video factory": an orchestrator (OpenCode) talks over MCP to a local ag
 MiniMax H3 open-weights model — a text-to-video model with **native stereo audio**
 (voice, SFX, music in one forward pass). Output: final `.mp4`.
 
+**New: Audiovisual Studio** — Full pipeline: download videos (Instagram Reels, YouTube),
+transcribe locally with Whisper, generate cinematic prompts, and render with MiniMax H3.
+
 **Stack & versions (verified):**
 
 | Component | Version / choice | Why |
@@ -25,6 +28,8 @@ MiniMax H3 open-weights model — a text-to-video model with **native stereo aud
 | Video VAE | `Comfy-Org/MiniMax-H3` → `vae/minimax_h3_video_vae_fp16.safetensors` (4.85 GB) | official, **stored in `vae/` subfolder** |
 | Audio VAE | same → `vae/minimax_h3_audio_vae_fp32.safetensors` (0.58 GB) | official, **stored in `vae/` subfolder** |
 | MCP | FastMCP 3.x (Python 3.14, `uv`) | stdio transport |
+| Downloader | yt-dlp + browser cookies | Instagram Reels, YouTube, etc. |
+| Transcriber | faster-whisper (GPU) | local, free, PT-BR + timestamps |
 | Docker | Compose v2, `--gpus all`, nvidia-container-toolkit | GPU passthrough tested |
 
 **Hardware floor:** 12 GB VRAM (RTX 4080 Laptop worked), ~12 GB free RAM for ComfyUI,
@@ -48,7 +53,7 @@ minimax-video-factory/
 ├── docs/INSTALLATION.md      <- verified step-by-step install
 ├── docs/ARCHITECTURE.md      <- component + decision notes
 ├── docs/MCP_REMOTE.md        <- VPS / HTTPS MCP deployment (Caddy/nginx)
-├── pyproject.toml            <- uv project (fastmcp, httpx, websockets, pydantic)
+├── pyproject.toml            <- uv project (fastmcp, httpx, websockets, pydantic, yt-dlp, faster-whisper, requests)
 ├── docker/
 │   ├── Dockerfile            <- pinned v0.30.2, base pytorch 2.5.1, torch 2.8, IN-IMAGE uv venv (/opt/mcp-venv)
 │   └── docker-compose.yml    <- .env-driven mounts (MODELS_DIR/OUTPUT_DIR/PROJECT_ROOT), gpus all, MCP port
@@ -60,14 +65,25 @@ minimax-video-factory/
 │   ├── mcp_runner.sh         <- MCP stdio INSIDE container (docker exec entrypoint)
 │   ├── mcp_http_runner.sh    <- MCP streamable-http INSIDE container (for VPS/HTTPS)
 │   ├── publish_image.sh      <- build + tag + push to Docker Hub (DOCKER_HUB_USER/REPO)
+│   ├── setup_whisper.sh      <- NEW: download Whisper models (tiny/base/small/medium/large-v3)
+│   ├── install_deps.sh       <- NEW: pip install yt-dlp, faster-whisper, requests
 │   └── ui2api.py             <- litegraph UI JSON -> API JSON converter
 ├── workflows/
 │   └── minimax_h3_t2v_api.json   <- EXPANDED T2V workflow (14 nodes), see §6
 ├── src/minimax_mcp/
-│   ├── server.py             <- FastMCP app, 6 tools; model set + prefix from env; path mapping host<->container
-│   └── comfyui_client.py     <- ComfyUIClient (submit/history/websocket/download)
+│   ├── server.py             <- FastMCP app, 11 tools; model set + prefix from env; path mapping host<->container
+│   ├── comfyui_client.py     <- ComfyUIClient (submit/history/websocket/download)
+│   ├── downloader.py         <- NEW: yt-dlp wrapper with browser cookies
+│   ├── transcriber.py        <- NEW: faster-whisper wrapper (GPU, PT-BR)
+│   ├── transcriber.py        <- NEW: faster-whisper wrapper (GPU, PT-BR)
+│   ├── orchestrator.py       <- NEW: pipeline URL → download → transcribe → prompt → video
+│   ├── orchestrator.py       <- NEW: pipeline URL → download → transcribe → prompt → video
+│   ├── core.py               <- NEW: shared ComfyUI functions (no circular imports)
+│   └── server.py             <- FastMCP app, 11 tools (original + studio tools)
 ├── tests/                    <- 00..07 bash tests, each echoes [ok]/[MISS]/[BAD]
-└── output/                   <- generated .mp4 (host side of the mount)
+├── output/                   <- generated .mp4 (host side of the mount)
+├── downloads/                <- downloaded videos (gitignored)
+└── output/transcriptions/    <- saved transcriptions + prompts (gitignored)
 ```
 
 ---
@@ -115,8 +131,11 @@ from `Merserk/MiniMax-H3-INT4-ConvRot` are at the repo root.
 8. **Docs** (README EN) and **only then** the OpenCode `opencode.json` integration
    (docker-exec entry; uv + remote-https variants kept as disabled examples).
 
-Never reorder: the OpenCode/computer config must come after infra+models+E2E work,
-per explicit user decision.
+**New: Audiovisual Studio (run after step 7)**
+9. **Install Whisper model:** `./scripts/setup_whisper.sh small` (or base/medium/large-v3)
+10. **Install deps:** `./scripts/install_deps.sh` (yt-dlp, faster-whisper, requests)
+11. **Test studio pipeline:** `uv run python -c "from minimax_mcp.orchestrator import AudiovisualStudio; studio = AudiovisualStudio(downloads_dir='downloads'); result = studio.run_full_pipeline(url='local_test', save_only=True, output_dir='output/transcriptions'); print(result)"`
+12. **Only then** OpenCode `opencode.json` integration.
 
 ---
 
@@ -126,7 +145,7 @@ per explicit user decision.
   connects to the container's interface IP, not its loopback → host `curl` gets
   `Connection reset by peer` while it works inside the container. The image MUST run
   ComfyUI with `--listen 0.0.0.0`; the compose file maps the port to
-  `127.0.0.1:8188:8188` on the host, so it stays local. (First build shipped
+  `127.0.0.1:8188:8188` on the host. (First build shipped
   `--listen 127.0.0.1` and we debugged exactly this.)
 - **Version comparison bug:** `0.30.2` → `MAJOR=0`, `MINOR=30`. Test must treat
   `major==0 && minor>=30` as OK, not `major>=1`.
@@ -242,6 +261,7 @@ configured model set (`MODEL_DIFFUSION`/`MODEL_TEXT_ENCODER`/`MODEL_VIDEO_VAE`/
 
 ## 7. MCP tools (FastMCP; stdio locally, streamable-http for VPS)
 
+### Original Video Factory Tools
 - `health_check()` — ComfyUI `/system_stats` + required model files presence/sizes.
 - `submit_scene(prompt, duration, width, height, seed, filename_prefix)` — injects into
   the workflow, POST `/prompt`, returns `{prompt_id, seed}`. `filename_prefix` defaults
@@ -249,9 +269,22 @@ configured model set (`MODEL_DIFFUSION`/`MODEL_TEXT_ENCODER`/`MODEL_VIDEO_VAE`/
 - `get_status(prompt_id)` — history poll: queued / running / completed / error.
 - `wait_for_video(prompt_id, timeout)` — websocket-driven block until render done,
   returns path to `.mp4` (host view via `OUTPUT_HOST_DIR` when running in-container).
-- `list_outputs()` — newest `.mp4` in `output/`.
-- `compose_final(scene_paths, output_path)` — ffmpeg concat of scenes (paths mapped
-  back into the container when running in-container).
+- `list_outputs()` — list generated videos in the output dir.
+- `compose_final(scene_paths, output_path)` — ffmpeg concat of scenes into a final video
+  (re-encode, crossfade-free).
+
+### New: Audiovisual Studio Tools
+- `download_video(url, browser?)` — Download Instagram Reels, YouTube, etc. using yt-dlp
+  with browser cookies. Returns `{ok, filepath, title, duration, uploader}`.
+- `transcribe_video(path, model_size?, device?, language?)` — Transcribe audio from video
+  using faster-whisper (local, GPU). Returns `{ok, text, segments, language}` with timestamps.
+- `create_cinematic_prompt(transcription, style?)` — Convert transcription into a
+  cinematic/educational/social MiniMax H3 structured prompt. Returns `{ok, prompt, style, length}`.
+- `generate_video(prompt, duration, width, height, seed?, filename_prefix?)` — Submit
+  prompt to MiniMax H3 via ComfyUI. Returns `{ok, output_path, prompt_id, seed}`.
+- `studio_pipeline(url, style?, duration?, width?, height?, save_only?, output_dir?)`
+  — **Full pipeline**: URL → download → transcribe → prompt → video (or save_only).
+  Returns all intermediate results + final video path or saved files.
 
 **Running (3 modes):**
 
@@ -265,7 +298,8 @@ Transport selection: env `MCP_TRANSPORT` (`stdio` default; `http`, `streamable-h
 `sse` also supported) + `MCP_HOST`/`MCP_PORT` (default `0.0.0.0:8848`, path `/mcp`).
 
 Config env vars: `COMFYUI_URL`, `WORKFLOW_PATH`, `MODELS_DIR`, `OUTPUT_DIR`,
-`OUTPUT_PREFIX`, `OUTPUT_HOST_DIR`, `MODEL_*`.
+`OUTPUT_PREFIX`, `OUTPUT_HOST_DIR`, `MODEL_*`, `STUDIO_DOWNLOADS_DIR`,
+`WHISPER_MODEL`, `WHISPER_DEVICE`, `WHISPER_COMPUTE_TYPE`, `STUDIO_BROWSER`.
 
 **Client-side note:** when connecting with `fastmcp.Client` + `StdioTransport`, pass
 `env=dict(os.environ)` (and ensure `MODELS_DIR`) to the transport — the child process
@@ -292,3 +326,95 @@ curl -s -X POST http://127.0.0.1:8848/mcp -H 'Content-Type: application/json' -H
 
 If `/prompt` returns 400: read `node_errors` — `value_not_in_list` = missing model file;
 anything else (bad_link/required_input_missing) = workflow wiring bug (§6.2).
+
+---
+
+## 9. Tutorial: Como pedir ao OpenCode via MCP para baixar/transcrever/gerar vídeo
+
+### Configuração no `opencode.json`
+
+```jsonc
+{
+  "mcp": {
+    "minimax-video-factory": {
+      "type": "local",
+      "command": ["docker", "exec", "-i", "minimax-comfyui", "bash", "/workspace/scripts/mcp_runner.sh"],
+      "description": "MiniMax H3 video factory + Audiovisual Studio"
+    }
+  }
+}
+```
+
+### Exemplos de uso no chat do OpenCode
+
+#### 1. Baixar apenas (Instagram Reel)
+> "Baixe este Reel do Instagram: https://www.instagram.com/p/DbHIZl5Pk_0/"
+
+O OpenCode chamará `download_video` com o URL. O arquivo será salvo em `downloads/`.
+
+#### 2. Transcrever um vídeo local
+> "Transcreva o vídeo `downloads/Video by anajcodes.mp4` usando Whisper small em GPU"
+
+Chama `transcribe_video` com `model_size="small"`, `device="cuda"`, `language="pt"`.
+
+#### 3. Criar prompt cinematográfico a partir de transcrição
+> "Crie um prompt cinematográfico para MiniMax H3 baseado nesta transcrição: [cole a transcrição aqui]"
+
+Usa `create_cinematic_prompt` com `style="cinematic"` (ou "educational", "social").
+
+#### 4. Pipeline completo (download → transcrever → prompt → salvar)
+> "Baixe este Reel https://www.instagram.com/p/DbHIZl5Pk_0/, transcreva com Whisper, crie prompt cinematográfico e salve transcrição + prompt em output/transcriptions/ (não gere vídeo)"
+
+Chama `studio_pipeline` com `save_only=true`, `output_dir="output/transcriptions"`.
+
+#### 4b. Pipeline completo com geração de vídeo (requer GPU livre)
+> "Baixe este Reel, transcreva, crie prompt e gere o vídeo de 10s 1344x768"
+
+Chama `studio_pipeline` com `save_only=false` (padrão). **Atenção:** consome GPU por ~5 min/clip.
+
+#### 5. Gerar vídeo a partir de prompt pronto
+> "Gere um vídeo de 5s: 'A beautiful sunset over the ocean, gentle waves, cinematic lighting'"
+
+Usa `generate_video` direto (pula download/transcrição).
+
+### Dicas importantes
+
+1. **Container deve estar rodando** para ferramentas que usam GPU (generate_video, transcribe_video com GPU). Verifique: `docker ps | grep minimax-comfyui`
+
+2. **Cookies do navegador** — `download_video` usa `cookiesfrombrowser=('chrome',)`. Feche o Chrome antes se der erro de "database locked".
+
+3. **GPU memory** — Com `--lowvram` em 12 GB, cada clip de 5s leva ~4-5 min. Reiniciar o container (`./scripts/stop_comfyui.sh && ./scripts/start_comfyui.sh`) limpa fragmentação VRAM entre clips pesados.
+
+4. **save_only=True** — pula a geração de vídeo (não precisa de GPU). Útil para só baixar/transcrever/criar prompt.
+
+5. **Output paths** — O MCP retorna paths relativos ao host via `OUTPUT_HOST_DIR`. Arquivos salvos em `output/transcriptions/` e vídeos em `output/`.
+
+### Exemplo completo no chat
+
+> **Você:** "Quero transformar este Reel em um vídeo educativo: https://www.instagram.com/p/DbHIZl5Pk_0/
+> 1. Baixe o vídeo
+> 2. Transcreva com Whisper small
+> 3. Crie um prompt estilo 'educational' (explicativo, 15s)
+> 4. Salve a transcrição e o prompt em output/transcriptions/
+> 5. NÃO gere o vídeo ainda (save_only=true)"
+
+> **OpenCode:** [executa studio_pipeline com save_only=true...]
+> ✅ Transcrição salva em: output/transcriptions/transcription_20260806_XXXXX.txt
+> ✅ Prompt salvo em: output/transcriptions/prompt_20260806_XXXXX.txt
+
+> **Você (depois):** "Ok, agora gere o vídeo com esse prompt salvo, 15s, 1344x768"
+
+> **OpenCode:** [executa generate_video com o prompt...]
+> ✅ Vídeo gerado em: output/studio/...
+
+### Resumo dos comandos MCP disponíveis
+
+| Ferramenta | Quando usar | Precisa GPU? |
+|---|---|---|
+| `download_video` | Baixar Reel/YT | Não |
+| `transcribe_video` | Transcrever arquivo local | Sim (GPU) |
+| `create_cinematic_prompt` | Criar prompt a partir de texto | Não |
+| `generate_video` | Renderizar vídeo no MiniMax H3 | Sim (GPU) |
+| `studio_pipeline` | Pipeline completo (tudo junto) | Só se `save_only=false` |
+| `health_check` | Verificar ComfyUI + modelos | Não |
+| `compose_final` | Concatenar cenas | Não (ffmpeg CPU) |

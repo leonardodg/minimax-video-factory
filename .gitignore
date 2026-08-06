@@ -12,6 +12,7 @@ models/
 *.ckpt
 
 # Generated videos & outputs
+downloads/
 output/
 comfyui/output/
 

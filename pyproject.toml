@@ -1,7 +1,7 @@
 [project]
 name = "minimax-video-factory"
 version = "0.1.0"
-description = "OpenCode + MCP + ComfyUI orchestration for local MiniMax H3 video+audio generation"
+description = "OpenCode + MCP + ComfyUI orchestration for local MiniMax H3 video+audio generation + Instagram/YT downloader + Whisper transcriber"
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.28.1",
@@ -10,6 +10,16 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "typing-extensions>=4.12.2",
     "websockets>=13.0",
+    "yt-dlp>=2024.1.0",
+    "faster-whisper>=1.0.0",
+    "requests>=2.31.0",
+    "torch>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
 ]
 
 [project.scripts]
