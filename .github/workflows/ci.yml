@@ -118,6 +118,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Normalize line endings (LF)
+        run: |
+          find scripts tests -name "*.sh" -exec sed -i 's/\r$//' {} +
+          find .github/workflows -name "*.yml" -exec sed -i 's/\r$//' {} +
+
       - name: Ensure ComfyUI stack is up
         run: |
           set -euo pipefail
