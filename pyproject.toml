@@ -1,0 +1,23 @@
+[project]
+name = "minimax-video-factory"
+version = "0.1.0"
+description = "OpenCode + MCP + ComfyUI orchestration for local MiniMax H3 video+audio generation"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.28.1",
+    "fastmcp>=3.0.0",
+    "pydantic>=2.11.4",
+    "python-dotenv>=1.0.1",
+    "typing-extensions>=4.12.2",
+    "websockets>=13.0",
+]
+
+[project.scripts]
+minimax-factory = "minimax_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

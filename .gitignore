@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+
+# Models & weights (large, downloaded by scripts/download_models.sh)
+models/
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+
+# Generated videos & outputs
+output/
+comfyui/output/
+
+# Environment / secrets
+.env
+.env.local
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

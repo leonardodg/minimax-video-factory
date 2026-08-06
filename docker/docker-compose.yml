@@ -1,0 +1,66 @@
+# docker-compose.yml — ComfyUI + MiniMax H3 (GPU) + in-image MCP server
+# All paths/config come from the project-root .env (via config.sh vars). The host
+# only needs Docker + the models dir; uv/Python/MCP run inside the image.
+#
+# ComfyUI writes output into /comfy/ComfyUI/output, which is the same bind-mount as
+# ${OUTPUT_DIR}. The MCP server runs in the SAME container via `docker compose exec`
+# (stdio, for OpenCode) or exposed over HTTP on ${MCP_PORT} (remote/VPS access) —
+# so it shares the ComfyUI process, models and output — no host uv required.
+
+services:
+  comfyui:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        COMFYUI_TAG: ${COMFYUI_TAG:-v0.30.2}
+    image: ${COMFY_IMAGE:-minimax-comfyui:local}
+    container_name: ${COMFY_CONTAINER:-minimax-comfyui}
+    ports:
+      - "127.0.0.1:${COMFYUI_PORT:-8188}:8188"
+      # Remote MCP over HTTP (streamable-http). Keep it on 127.0.0.1 and front with
+      # a TLS reverse proxy (Caddy/nginx) for VPS use; see docs/MCP_REMOTE.md.
+      - "127.0.0.1:${MCP_PORT:-8848}:${MCP_PORT:-8848}"
+    volumes:
+      # host models dir (set MODELS_DIR in .env) -> container models dir (read-only)
+      - ${MODELS_DIR:-/opt/minimax/models}:/comfy/ComfyUI/models:ro
+      # host output dir (gitignored) -> container output dir
+      - ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}:/comfy/ComfyUI/output
+      # host input dir (optional; for I2V/R2V reference media)
+      - ${INPUT_DIR:-${PROJECT_ROOT:-..}/input}:/comfy/ComfyUI/input
+      # project source -> /workspace so `docker compose exec` can run the MCP server
+      # using the in-image uv/venv without needing a host uv.
+      # NOTE: use an ABSOLUTE host path (PROJECT_ROOT from .env) — relative paths
+      # with --project-directory resolve one level too high.
+      - ${PROJECT_ROOT:-..}:/workspace:ro
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+      # MCP server + ComfyUI client read these (also exported by config.sh)
+      MODELS_DIR: /comfy/ComfyUI/models
+      OUTPUT_DIR: /comfy/ComfyUI/output
+      INPUT_DIR: /comfy/ComfyUI/input
+      OUTPUT_PREFIX: ${OUTPUT_PREFIX:-video/factory}
+      COMFYUI_URL: http://127.0.0.1:8188
+      WORKFLOW_PATH: /workspace/workflows/minimax_h3_t2v_api.json
+      # Host-side view of the output dir (MCP reports host paths to OpenCode)
+      OUTPUT_HOST_DIR: ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}
+      # Model set (bigger variants via .env)
+      MODEL_DIFFUSION: ${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int4_convrot.safetensors}
+      MODEL_TEXT_ENCODER: ${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}
+      MODEL_VIDEO_VAE: ${MODEL_VIDEO_VAE:-minimax_h3_video_vae_fp16.safetensors}
+      MODEL_AUDIO_VAE: ${MODEL_AUDIO_VAE:-minimax_h3_audio_vae_fp32.safetensors}
+      # Remote MCP transport settings
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-8848}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+    # Extra CLI flags come from .env COMFYUI_EXTRA_ARGS (overridable on the CLI too).
+    command: ["bash", "-c", "cd /comfy/ComfyUI && python main.py --listen 0.0.0.0 --port 8188 ${COMFYUI_EXTRA_ARGS:-}"]

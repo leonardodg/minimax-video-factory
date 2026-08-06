@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Static checks (cloud runner, no GPU) — fast, catches syntax/structure bugs
+  # ---------------------------------------------------------------------------
+  static-lint:
+    name: Static Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: bash syntax check
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh tests/*.sh; do
+            echo "Checking $f..."
+            bash -n "$f"
+          done
+          echo "✅ bash -n clean"
+
+      - name: shellcheck (optional, soft-fail)
+        run: |
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck scripts/*.sh tests/*.sh || true
+            echo "✅ shellcheck done"
+          else
+            echo "⚠️  shellcheck not installed; skipping"
+          fi
+
+      - name: jq workflow JSON validate
+        run: |
+          jq -e . workflows/minimax_h3_t2v_api.json
+          echo "✅ workflow JSON parses"
+
+      - name: Python syntax compile
+        run: |
+          python3 -m py_compile src/minimax_mcp/server.py src/minimax_mcp/comfyui_client.py
+          echo "✅ Python syntax OK"
+
+  # ---------------------------------------------------------------------------
+  # Pure-logic unit tests (cloud runner, no GPU) — duration math, path mapping,
+  # inject_scene workflow patching
+  # ---------------------------------------------------------------------------
+  unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: uv sync (install deps)
+        run: uv sync --frozen
+
+      - name: Run unit_pure.py
+        run: uv run python tests/unit_pure.py
+
+  # ---------------------------------------------------------------------------
+  # MCP handshake via host uv (cloud runner, no GPU, no container)
+  # Verifies the FastMCP server starts and initialize handshake succeeds
+  # ---------------------------------------------------------------------------
+  mcp-handshake:
+    name: MCP Handshake
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: uv sync (install deps)
+        run: uv sync --frozen
+
+      - name: MCP stdio handshake (host uv, no container)
+        run: |
+          set -euo pipefail
+          INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}'
+          RESP=$(printf '%s\n' "$INIT" | timeout 30 uv run --quiet python src/minimax_mcp/server.py 2>/dev/null | head -1) || RESP=""
+          if echo "$RESP" | grep -q 'protocolVersion'; then
+            echo "✅ MCP initialize handshake OK"
+          else
+            echo "❌ MCP handshake failed"
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Full GPU validation (self-hosted runner with GPU + models) — runs the
+  # complete diagnose.sh 00–07 suite including E2E render. Requires the
+  # self-hosted runner to be registered with labels [self-hosted, linux, gpu].
+  # ---------------------------------------------------------------------------
+  gpu-validation:
+    name: GPU Validation (self-hosted)
+    needs: [static-lint, unit, mcp-handshake]
+    if: always()
+    runs-on: [self-hosted, linux, gpu]
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure ComfyUI stack is up
+        run: |
+          set -euo pipefail
+          if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^minimax-comfyui$'; then
+            echo "Stack not running; starting..."
+            ./scripts/start_comfyui.sh
+          else
+            echo "Stack already running"
+          fi
+
+      - name: Run full diagnose.sh (00–07)
+        run: |
+          set -euo pipefail
+          ./scripts/diagnose.sh
