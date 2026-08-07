@@ -12,6 +12,33 @@ fi
 
 echo "== Knowledge base (MCP stdio, host uv) =="
 
+# --- skip when the backing services are absent ------------------------------
+# diagnose.sh reads exit 78 (EX_CONFIG) as SKIP. A knowledge-base test with no
+# database is not a defect in this repo, it is a test that cannot run -- and
+# reporting it as PASS would be worse than either, because it would hide a real
+# regression behind a green tick. This mirrors what tests/conftest.py already
+# does for the pytest integration markers.
+skip() { echo "  [SKIP] $1"; exit 78; }
+
+[ -n "${KB_DATABASE_URL:-}" ] || \
+    skip "KB_DATABASE_URL not set (cp .env.example .env, or export it)"
+
+# postgresql+psycopg://user:pass@host:port/db -> host, port
+KB_HOSTPORT="${KB_DATABASE_URL##*@}"
+KB_HOSTPORT="${KB_HOSTPORT%%/*}"
+KB_HOST="${KB_HOSTPORT%%:*}"
+KB_PORT="${KB_HOSTPORT##*:}"
+[ "$KB_PORT" = "$KB_HOST" ] && KB_PORT=5432
+
+if ! timeout 2 bash -c "exec 3<>/dev/tcp/${KB_HOST}/${KB_PORT}" 2>/dev/null; then
+    skip "Postgres unreachable at ${KB_HOST}:${KB_PORT} (docker compose -f docker/docker-compose.yml up -d postgres)"
+fi
+
+OLLAMA_BASE="${OLLAMA_URL:-http://localhost:11434}"
+if ! curl -fsS --max-time 3 "${OLLAMA_BASE}/api/tags" >/dev/null 2>&1; then
+    skip "Ollama unreachable at ${OLLAMA_BASE}"
+fi
+
 SAMPLE_TEXT="Hoje vou mostrar como instalar o Docker no Ubuntu. Primeiro, atualize os pacotes com apt update. Depois, instale com apt install docker.io. Por fim, adicione seu usuario ao grupo docker para nao precisar de sudo."
 
 uv run --directory "$ROOT" python - "$ROOT" "$SAMPLE_TEXT" <<'PY' || FAIL=1

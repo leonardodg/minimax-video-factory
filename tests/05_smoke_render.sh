@@ -39,7 +39,9 @@ workflow_path, smoke_dir = sys.argv[1], sys.argv[2]
 root = os.path.dirname(os.path.dirname(os.path.abspath(workflow_path)))
 sys.path.insert(0, os.path.join(root, "src"))
 
-from minimax_mcp.server import inject_scene, load_workflow  # noqa: E402
+# These live in core, not server: importing from server also pulls the whole
+# FastMCP tool registry, which this smoke test does not need.
+from minimax_mcp.core import inject_scene, load_workflow  # noqa: E402
 from minimax_mcp.comfyui_client import ComfyUIClient  # noqa: E402
 
 # Low-res short smoke clip: 512x320 (multiple of 32), 5s -> 124 frames on the 17k+5 grid.

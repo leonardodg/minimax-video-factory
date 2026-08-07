@@ -9,14 +9,18 @@ if [ -f "$(dirname "${BASH_SOURCE[0]}")/../scripts/config.sh" ]; then
     source "$(dirname "${BASH_SOURCE[0]}")/../scripts/config.sh"
 fi
 COMFY_CONTAINER="${COMFY_CONTAINER:-minimax-comfyui}"
-IMAGE_NAME="${IMAGE_NAME:-pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime}"
+# The image the stack actually runs, not the Dockerfile's FROM. Once
+# minimax-comfyui:local is built, the pytorch base layer no longer needs to
+# exist as a tagged image -- checking for it reported a broken stack while the
+# container was up and the GPU was answering.
+COMFY_IMAGE="${COMFY_IMAGE:-minimax-comfyui:local}"
 
 echo "== Docker + GPU =="
 
-if docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    echo "  [ok]   base image present: $IMAGE_NAME"
+if docker image inspect "$COMFY_IMAGE" >/dev/null 2>&1; then
+    echo "  [ok]   image built: $COMFY_IMAGE"
 else
-    echo "  [MISS] base image not pulled: $IMAGE_NAME"
+    echo "  [MISS] image not built: $COMFY_IMAGE (run scripts/start_comfyui.sh)"
     FAIL=$((FAIL+1))
 fi
 
