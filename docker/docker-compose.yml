@@ -10,7 +10,7 @@
 services:
   comfyui:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
       args:
         COMFYUI_TAG: ${COMFYUI_TAG:-v0.30.2}

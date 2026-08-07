@@ -1,8 +1,6 @@
 name: Publish Docker Image
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -20,6 +18,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Normalize line endings (LF) + fix permissions
+        run: |
+          find scripts tests -name "*.sh" -exec sed -i 's/\r$//' {} +
+          chmod +x scripts/*.sh tests/*.sh
 
       - name: Docker Hub login
         if: env.DOCKER_HUB_USER != '' && env.DOCKER_HUB_TOKEN != ''

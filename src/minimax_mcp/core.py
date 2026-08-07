@@ -1,6 +1,7 @@
 """Core ComfyUI operations shared between server and orchestrator."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import random
@@ -138,7 +139,7 @@ def submit_scene_core(
 
 
 async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[str, Any]:
-    client = ComfyUIClient(os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"))
+    client = ComfyUIClient(COMFYUI_URL)
     try:
         rec = await client.wait_for_execution(prompt_id, timeout=timeout)
     except ComfyUIError as e:
@@ -146,42 +147,33 @@ async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[s
     except Exception as e:
         return {"ok": False, "error": f"unexpected: {e}"}
 
-    # Resolve output path
-    output_dir = Path(os.environ.get("OUTPUT_DIR", "$PROJECT_ROOT/output"))
-    path = client.resolve_output(rec, str(output_dir))
-    output_host_dir = os.environ.get("OUTPUT_HOST_DIR", str(output_dir))
-    
-    def to_host(p: str) -> str:
-        s = str(p)
-        if output_host_dir != str(Path(os.environ.get("OUTPUT_DIR", "$PROJECT_ROOT/output"))):
-            try:
-                rel = Path(s).relative_to(output_dir)
-                return str(Path(output_host_dir) / rel)
-            except ValueError:
-                pass
-        return s
-
+    # Resolve output path (container view) then translate to the host view for the client.
+    path = client.resolve_output(rec, str(OUTPUT_DIR))
     return {"ok": path is not None, "prompt_id": prompt_id,
-            "output_path": to_host(str(path)) if path else None, "outputs": rec.get("outputs")}
+            "output_path": to_host_path(str(path)) if path else None, "outputs": rec.get("outputs")}
 
 
 def compose_final_core(scene_paths: list[str], output_path: str = "output/final.mp4") -> dict[str, Any]:
-    import shutil
     if len(scene_paths) < 2:
         return {"ok": False, "error": "need at least 2 scenes to compose"}
 
-    out_abs = Path(output_path)
-    if not out_abs.is_absolute():
-        out_abs = Path(os.environ.get("OUTPUT_DIR", "$PROJECT_ROOT/output")) / output_path
+    # When the MCP runs inside the container, scene_paths arrive in HOST form
+    # (OUTPUT_HOST_DIR). Translate them back to this process's view before
+    # checking existence, so the same code works on host (no-op) and in-container.
+    container_scenes = [to_container_path(p) for p in scene_paths]
+
+    out_host = Path(output_path)
+    if not out_host.is_absolute():
+        out_host = Path(OUTPUT_HOST_DIR) / out_host
+    out_abs = Path(to_container_path(str(out_host)))
     out_abs.parent.mkdir(parents=True, exist_ok=True)
 
     if not shutil.which("ffmpeg"):
         return {"ok": False, "error": "ffmpeg not found on PATH"}
 
-    concat_file = Path(os.environ.get("OUTPUT_DIR", "$PROJECT_ROOT/output")) / "_concat_list.txt"
-    concat_file.parent.mkdir(parents=True, exist_ok=True)
+    concat_file = out_abs.parent / "_concat_list.txt"
     with open(concat_file, "w") as f:
-        for sp in scene_paths:
+        for sp in container_scenes:
             p = Path(sp)
             if not p.exists():
                 return {"ok": False, "error": f"scene file not found: {sp}"}
@@ -192,4 +184,4 @@ def compose_final_core(scene_paths: list[str], output_path: str = "output/final.
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         return {"ok": False, "error": f"ffmpeg failed: {proc.stderr[-800:]}"}
-    return {"ok": True, "output_path": str(out_abs), "scenes": len(scene_paths)}
+    return {"ok": True, "output_path": to_host_path(str(out_abs)), "scenes": len(scene_paths)}

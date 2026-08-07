@@ -100,12 +100,15 @@ async def main() -> int:
         print(f"  [ok]   list_outputs: {len(rd)} mp4 files")
 
         # 5. compose_final
-        final = os.path.join(root, "output", f"{PREFIX}_final.mp4")
-        r = await client.call_tool("compose_final", {"scene_paths": paths, "output_path": final})
+        # Use a RELATIVE output path so the server resolves it under its own
+        # OUTPUT_DIR/OUTPUT_HOST_DIR (host<->container mapping is handled server-side).
+        final_rel = f"output/{PREFIX}_final.mp4"
+        r = await client.call_tool("compose_final", {"scene_paths": paths, "output_path": final_rel})
         rd = json.loads(r.content[0].text)
-        if not rd.get("ok") or not os.path.exists(final):
+        if not rd.get("ok") or not rd.get("output_path") or not os.path.exists(rd["output_path"]):
             print(f"  [BAD] compose_final failed: {json.dumps(rd)[:400]}")
             return 1
+        final = rd["output_path"]
         print(f"  [ok]   compose_final -> {final} ({os.path.getsize(final)//1024} KB, {rd.get('scenes')} scenes)")
         print(f"  [PASS] full E2E agent flow OK")
         return 0
