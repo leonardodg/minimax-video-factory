@@ -170,7 +170,7 @@ else:
     bad("_extract_section should return None when no ## Summary heading")
 
 print("== unit_knowledge: llm system messages ==")
-from minimax_mcp import llm  # noqa: E402
+from minimax_mcp import llm
 
 ingest_sys = llm._system_message(force_json=True)
 answer_sys = llm._system_message(force_json=False)
