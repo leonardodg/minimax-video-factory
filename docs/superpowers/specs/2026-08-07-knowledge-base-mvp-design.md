@@ -46,7 +46,8 @@ LLM  ──(interface plugável: Ollama local | OpenAI-compatible cloud free)
   │  (cópia legível, opcional: nota .md no Obsidian)
   ▼
 knowledge_search(query)  → full-text (tsvector/GIN) + cosseno (pgvector, mxbai-embed-large)
-knowledge_ask(query)     → RAG: contexto da base + resposta do LLM
+                          → rerank (CrossEncoder local, BAAI/bge-reranker-base)
+knowledge_ask(query)     → RAG: contexto (pós-rerank) + resposta do LLM com citação de fonte
 ```
 
 - Busca e ingestão só via MCP/OpenCode — nada de site/CLI no MVP.
@@ -80,6 +81,18 @@ knowledge_ask(query)     → RAG: contexto da base + resposta do LLM
    `127.0.0.1:5432` (porta configurável) — o MCP em modo host conecta nele
    como em qualquer Postgres local, sem precisar entrar na rede Docker do
    ComfyUI.
+5. **Reranking local via CrossEncoder** (`rerank.py`, `BAAI/bge-reranker-base`
+   via `sentence-transformers`, ~100 MB, CPU): técnica validada no projeto de
+   aprendizado `~/localhost/rag-private` (Ollama + ChromaDB + rerank +
+   citação estrita). A busca híbrida (full-text + cosseno) traz um pool maior
+   de candidatos (ex. 20) por proximidade matemática rápida; o CrossEncoder
+   reordena esse pool pela relevância real à pergunta e só então corta para
+   `top_k`. Mantido independente do ChromaDB do `rag-private` — aqui o pool
+   vem do Postgres/pgvector, só a técnica de rerank é reaproveitada.
+6. **Prompt de `knowledge_ask` com citação estrita**: também inspirado no
+   `rag-private` — o LLM é instruído a responder somente com base no contexto
+   recuperado (pós-rerank) e a citar explicitamente a fonte (título/documento)
+   de cada afirmação, em vez de só "usar o contexto" de forma vaga.
 
 ## Schema Postgres (via ORM SQLAlchemy)
 
@@ -119,10 +132,12 @@ quando aplicável:
 - `knowledge_ingest_text(text, source_url?, title?)` — pula download/transcrição;
   útil para colar uma transcrição já pronta ou texto de outra origem.
 - `knowledge_search(query, top_k?)` — full-text Postgres (palavra-chave) +
-  similaridade de cosseno via pgvector (semântica) combinadas, retorna
-  documentos/chunks mais relevantes.
-- `knowledge_ask(query)` — RAG: busca contexto relevante via `knowledge_search`,
-  monta prompt com esse contexto, pede resposta ao LLM configurado.
+  similaridade de cosseno via pgvector (semântica) combinadas num pool de
+  candidatos, **reordenado por um CrossEncoder local** (rerank) e cortado
+  para `top_k`.
+- `knowledge_ask(query)` — RAG: busca contexto relevante via `knowledge_search`
+  (já pós-rerank), monta prompt exigindo citação de fonte por afirmação, pede
+  resposta ao LLM configurado.
 - `knowledge_reindex()` — recalcula embeddings/FTS para documentos existentes
   (útil após trocar de modelo de embedding ou corrigir dados).
 
@@ -137,16 +152,20 @@ quando aplicável:
 - `alembic/` (+ `alembic.ini`) — migrações do schema Postgres.
 - `src/minimax_mcp/vault.py` — escrita opcional de cópia `.md` no Obsidian
   (best-effort; falha aqui não deve derrubar a ingestão).
+- `src/minimax_mcp/rerank.py` — reordena candidatos de `knowledge_search`/
+  `knowledge_ask` via CrossEncoder local (`BAAI/bge-reranker-base`), técnica
+  trazida do `~/localhost/rag-private`.
 - `docker/docker-compose.yml` — novo serviço `postgres` (imagem com
   `pgvector` pré-instalado, ex. `pgvector/pgvector:pg16`), volume nomeado
   para persistência, porta `127.0.0.1:5432` publicada.
 - `pyproject.toml` — novas dependências: `sqlalchemy`, `psycopg[binary]`,
-  `pgvector`, `alembic`.
+  `pgvector`, `alembic`, `sentence-transformers` (rerank).
 - `tests/08_knowledge.sh` — teste de fumaça: ingest → search → ask, seguindo o
   padrão dos testes `0N_*.sh` existentes (pré-requisito: container `postgres`
   rodando, igual os testes 01-03 já exigem o container do ComfyUI).
 - Novas vars em `.env`/`.env.example`: `LLM_PROVIDER`, `OLLAMA_URL`, `LLM_MODEL`,
-  `OPENAI_API_URL`, `OPENAI_API_KEY`, `EMBEDDING_MODEL`, `KB_DATABASE_URL`
+  `OPENAI_API_URL`, `OPENAI_API_KEY`, `EMBEDDING_MODEL`, `RERANK_MODEL`
+  (default `BAAI/bge-reranker-base`), `KB_DATABASE_URL`
   (connection string SQLAlchemy, ex.
   `postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge`), `VAULT_PATH`
   (opcional — se ausente, pula a cópia `.md`).
