@@ -227,7 +227,7 @@ Caddy/nginx TLS reverse proxy in front of `127.0.0.1:${MCP_PORT:-8848}`), follow
 | `download_video` | `{"url": "https://instagram.com/p/...", "browser": "chrome"}` |
 | `transcribe_video` | `{"video_path": "downloads/video.mp4", "model_size": "small"}` |
 | `create_cinematic_prompt` | `{"transcription": "...", "style": "cinematic"}` |
-| `generate_video` | `{"prompt": "...", "duration": 10, "width": 1344, "height": 768}` |
+| `generate_video` | `{"prompt": "...", "duration": 10, "width": 1024, "height": 576}` |
 | `studio_pipeline` | `{"url": "https://instagram.com/p/...", "save_only": true}` |
 
 **Full pipeline example (save_only):**
@@ -238,8 +238,8 @@ Caddy/nginx TLS reverse proxy in front of `127.0.0.1:${MCP_PORT:-8848}`), follow
     "url": "https://www.instagram.com/p/DbHIZl5Pk_0/",
     "style": "cinematic",
     "duration": 10,
-    "width": 1344,
-    "height": 768,
+    "width": 1024,
+    "height": 576,
     "save_only": true,
     "output_dir": "output/transcriptions"
   }

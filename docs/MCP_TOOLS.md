@@ -38,8 +38,8 @@ Generate a video using the MiniMax H3 model via ComfyUI.
 |---|---|---|---|
 | `prompt` | string | yes | MiniMax H3 structured prompt (shots + camera + audio) |
 | `duration` | number | no | Clip duration in seconds (4-15; snaps to 17-frame grid) |
-| `width` | integer | no | Output width (multiple of 32) |
-| `height` | integer | no | Output height (multiple of 32) |
+| `width` | integer | no | Output width (multiple of 32). Default 1024: 1344x768 OOMs the sampler on 12 GB VRAM |
+| `height` | integer | no | Output height (multiple of 32). Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM |
 | `seed` | any | no | Random seed |
 | `filename_prefix` | string | no | Output filename prefix |
 
@@ -137,8 +137,8 @@ URL → download → transcribe → create prompt → generate video.
 | `url` | string | yes | Video URL (Instagram Reel, YouTube, etc.) |
 | `style` | string | no | Prompt style: cinematic, educational, social |
 | `duration` | number | no | Generated clip duration in seconds |
-| `width` | integer | no | Output width |
-| `height` | integer | no | Output height |
+| `width` | integer | no | Output width. Default 1024: 1344x768 OOMs the sampler on 12 GB VRAM |
+| `height` | integer | no | Output height. Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM |
 
 ## `submit_scene`
 
@@ -150,8 +150,8 @@ Returns {"prompt_id": ...}. Use wait_for_video() to await completion.
 |---|---|---|---|
 | `prompt` | string | yes | MiniMax H3 structured prompt (shots + camera + audio) |
 | `duration` | number | no | Clip duration in seconds (4-15; snaps to 17-frame grid) |
-| `width` | integer | no | Output width (multiple of 32; H3 canvas is 768 short edge capped 768x1344) |
-| `height` | integer | no | Output height (multiple of 32; H3 canvas is 768 short edge capped 768x1344) |
+| `width` | integer | no | Output width (multiple of 32). Default 1024: 1344x768 OOMs the sampler on 12 GB VRAM |
+| `height` | integer | no | Output height (multiple of 32). Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM |
 | `seed` | any | no | Random seed (defaults to random) |
 | `filename_prefix` | string | no | Output filename prefix (default from OUTPUT_PREFIX env) |
 

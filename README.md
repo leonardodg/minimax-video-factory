@@ -129,8 +129,8 @@ Or via MCP directly:
     "url": "https://www.instagram.com/p/DbHIZl5Pk_0/",
     "style": "cinematic",
     "duration": 10,
-    "width": 1344,
-    "height": 768,
+    "width": 1024,
+    "height": 576,
     "save_only": true
   }
 }

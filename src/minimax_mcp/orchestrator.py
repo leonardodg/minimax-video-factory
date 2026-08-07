@@ -83,8 +83,8 @@ class AudiovisualStudio:
         self,
         prompt: str,
         duration: float = 10.0,
-        width: int = 1344,
-        height: int = 768,
+        width: int = 1024,
+        height: int = 576,
         seed: int | None = None,
     ) -> dict[str, Any]:
         """Generate video using the existing MiniMax H3 pipeline."""
@@ -165,8 +165,8 @@ class AudiovisualStudio:
         url: str,
         style: str = "cinematic",
         duration: float = 10.0,
-        width: int = 1344,
-        height: int = 768,
+        width: int = 1024,
+        height: int = 576,
         save_only: bool = False,
         output_dir: str | Path | None = None,
     ) -> dict[str, Any]:
@@ -264,8 +264,8 @@ def run_studio_pipeline(
     downloads_dir: str | Path,
     style: str = "cinematic",
     duration: float = 10.0,
-    width: int = 1344,
-    height: int = 768,
+    width: int = 1024,
+    height: int = 576,
     whisper_model: str = "small",
     whisper_device: str = "cuda",
     browser: str = "chrome",

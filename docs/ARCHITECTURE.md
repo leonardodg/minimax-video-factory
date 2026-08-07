@@ -62,5 +62,8 @@ How the pieces fit together and where the rendering decisions live.
 
 - 512×320, 5 s, 20 steps, INT4: ~4 min wall (≈ 12.8 s/it + init) for the **first** run
   (includes model load); later runs reuse the staged cache.
-- 1344×768 at 20 steps is roughly 6–8× the compute of the smoke resolution — budget
-  accordingly per scene.
+- 1024×576 at 20 steps is roughly 4–5× the compute of the smoke resolution — budget
+  accordingly per scene. This is the **default** and the largest resolution that
+  renders reliably here.
+- 1344×768 is the H3 canvas maximum but **OOMs the sampler on 12 GB of VRAM**
+  (`torch.OutOfMemoryError`). Only use it on a larger card.

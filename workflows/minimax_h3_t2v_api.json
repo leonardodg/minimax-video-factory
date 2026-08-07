@@ -32,8 +32,8 @@
       "clip": ["2", 0],
       "vae": ["3", 0],
       "prompt": "A cinematic one-shot of a lone rider cutting through a violent arctic storm, 5 seconds.",
-      "width": 1344,
-      "height": 768,
+      "width": 1024,
+      "height": 576,
       "length": 124
     }
   },

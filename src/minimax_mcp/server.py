@@ -172,8 +172,8 @@ def health_check() -> dict[str, Any]:
 def submit_scene(
     prompt: str = Field(description="MiniMax H3 structured prompt (shots + camera + audio)"),
     duration: float = Field(default=5.0, description="Clip duration in seconds (4-15; snaps to 17-frame grid)"),
-    width: int = Field(default=1344, description="Output width (multiple of 32; H3 canvas is 768 short edge capped 768x1344)"),
-    height: int = Field(default=768, description="Output height (multiple of 32; H3 canvas is 768 short edge capped 768x1344)"),
+    width: int = Field(default=1024, description="Output width (multiple of 32). Default 1024: 1344x768 OOMs the sampler on 12 GB VRAM"),
+    height: int = Field(default=576, description="Output height (multiple of 32). Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM"),
     seed: int | None = Field(default=None, description="Random seed (defaults to random)"),
     filename_prefix: str = Field(default=OUTPUT_PREFIX, description="Output filename prefix (default from OUTPUT_PREFIX env)"),
 ) -> dict[str, Any]:
@@ -288,8 +288,8 @@ def create_cinematic_prompt(
 def generate_video(
     prompt: str = Field(description="MiniMax H3 structured prompt (shots + camera + audio)"),
     duration: float = Field(default=10.0, description="Clip duration in seconds (4-15; snaps to 17-frame grid)"),
-    width: int = Field(default=1344, description="Output width (multiple of 32)"),
-    height: int = Field(default=768, description="Output height (multiple of 32)"),
+    width: int = Field(default=1024, description="Output width (multiple of 32). Default 1024: 1344x768 OOMs the sampler on 12 GB VRAM"),
+    height: int = Field(default=576, description="Output height (multiple of 32). Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM"),
     seed: int | None = Field(default=None, description="Random seed"),
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
 ) -> dict[str, Any]:
@@ -306,8 +306,8 @@ def studio_pipeline(
     url: str = Field(description="Video URL (Instagram Reel, YouTube, etc.)"),
     style: str = Field(default="cinematic", description="Prompt style: cinematic, educational, social"),
     duration: float = Field(default=10.0, description="Generated clip duration in seconds"),
-    width: int = Field(default=1344, description="Output width"),
-    height: int = Field(default=768, description="Output height"),
+    width: int = Field(default=1024, description="Output width. Default 1024: 1344x768 OOMs the sampler on 12 GB VRAM"),
+    height: int = Field(default=576, description="Output height. Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM"),
 ) -> dict[str, Any]:
     """
     Run the complete audiovisual studio pipeline:

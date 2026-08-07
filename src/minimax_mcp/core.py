@@ -118,8 +118,10 @@ def to_container_path(p: str | os.PathLike[str]) -> str:
 def submit_scene_core(
     prompt: str,
     duration: float = 5.0,
-    width: int = 1344,
-    height: int = 768,
+    # 1024x576, not the 1344x768 H3 canvas maximum: the larger canvas OOMs the
+    # sampler on 12 GB of VRAM. Callers with more VRAM can still pass 1344x768.
+    width: int = 1024,
+    height: int = 576,
     seed: int | None = None,
     filename_prefix: str = "video/factory",
 ) -> dict[str, Any]:
