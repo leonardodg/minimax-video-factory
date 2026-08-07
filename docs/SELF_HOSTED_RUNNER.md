@@ -1,7 +1,8 @@
 # Self-hosted Runner Setup (GPU label)
 
-Esta máquina (máquina com GPU) deve ser registrada como self-hosted runner do GitHub Actions
-para rodar o job `gpu-validation` e o CD `build-push`.
+A máquina com GPU deve ser registrada como self-hosted runner do GitHub Actions
+para rodar o job `gpu-validation` e o CD `build-push`. Os requisitos de hardware
+estão no fim desta página.
 
 ## 1. Instalar o runner
 
@@ -44,7 +45,7 @@ sudo ./svc.sh status
 # https://github.com/leonardodg/minimax-video-factory/settings/actions/runners
 ```
 
-## 5. Pré-requisitos da máquina (já atendidos)
+## 5. Pré-requisitos da máquina
 
 - Docker + docker compose plugin
 - nvidia-container-toolkit (`sudo apt install nvidia-container-toolkit && sudo systemctl restart docker`)
