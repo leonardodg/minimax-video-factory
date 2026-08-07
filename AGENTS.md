@@ -434,3 +434,62 @@ Definidos em `.opencode/command/` (carregados no start do opencode — precisa r
 | `studio_pipeline` | Pipeline completo (tudo junto) | Só se `save_only=false` |
 | `health_check` | Verificar ComfyUI + modelos | Não |
 | `compose_final` | Concatenar cenas | Não (ffmpeg CPU) |
+## 10. Knowledge Base (Postgres + pgvector + local LLM)
+
+**Setup:**
+1. `docker compose $COMPOSE_ARGS up -d postgres` — brings up Postgres with pgvector.
+2. `uv run alembic upgrade head` — creates `documents`/`chunks`/`embeddings` tables.
+3. Ensure Ollama is running (`ollama list` should show `LLM_MODEL` and
+   `EMBEDDING_MODEL` from `.env`, default `lfm2:24b` and `mxbai-embed-large`).
+   `LLM_TIMEOUT` (default 900 s) bounds each generation call; the slow 32B-class
+   models can exceed even 900 s on a swapping 30 GB box — prefer `lfm2:24b`.
+4. The MCP server runs in **host mode** for these tools (`uv run --directory
+   <project> python src/minimax_mcp/server.py`), not inside the `comfyui`
+   container — it needs direct access to `localhost:11434` (Ollama) and
+   `127.0.0.1:${KB_POSTGRES_PORT}` (Postgres).
+
+**Data model:** one `documents` row per ingested item (`type`: video/audio/text),
+each split into `chunks`, each chunk with one `embeddings` row (pgvector,
+`mxbai-embed-large`, 1024 dims). `knowledge_search` combines Postgres full-text
+search (`to_tsvector`/`plainto_tsquery`, GIN index) with pgvector cosine
+similarity.
+
+**LLM provider:** `LLM_PROVIDER=ollama` (default) or `openai-compatible`
+(set `OPENAI_API_URL`/`OPENAI_API_KEY`, e.g. OpenRouter/Groq free tier).
+Embeddings are always local via Ollama regardless of `LLM_PROVIDER`.
+
+**Obsidian export:** optional, controlled by `VAULT_PATH` in `.env`. Leave
+empty to skip — the existing vault at `~/Documents/Obsidian Vault` was flagged
+as possibly unhealthy, so Postgres (not Obsidian) is the source of truth.
+Failures writing the markdown copy never fail the ingest call.
+
+**Validation:** `./tests/08_knowledge.sh` (requires Postgres + Ollama running).
+`uv run pytest -m unit` / `-m integration_db` / `-m integration_llm` for
+selective marker-based runs. `tests/integration_knowledge_db.py` is idempotent
+(cleans up its own `example.com/test` documents via `db.delete_documents`), so
+repeated runs don't accumulate stale docs that break top-result assertions.
+
+**Full tutorial & reference:** `docs/KNOWLEDGE_BASE.md` — the 6 `knowledge_*`
+tools with all parameters and best options, recommended flows, chat-prompt
+examples for OpenCode, the Postgres schema (`documents`/`chunks`/`embeddings`),
+`.env` knobs and troubleshooting. The complete 17-tool auto-generated reference
+lives in `docs/MCP_TOOLS.md`.
+
+### 10.1 Tutorial: pedir via chat (OpenCode)
+
+MCP entry: `minimax-knowledge-base` (host-uv, `enabled: true`). **Restart the
+opencode session** after config changes. Requer Postgres + Ollama de pé.
+
+| Prompt no chat | Tool chamada |
+|---|---|
+| "Documente este texto na minha base: [texto]" | `knowledge_ingest_text` |
+| "Baixe, transcreva e salve este Reel na base: <URL>" | `knowledge_ingest_video` |
+| "Transcreva e documente este podcast: /path/x.mp3" | `knowledge_ingest_audio` |
+| "Pesquise na minha base por 'Docker Ubuntu'" | `knowledge_search` |
+| "O que eu já salvei sobre Docker? Responda com base na base." | `knowledge_ask` |
+| "Troquei o modelo de embedding; reindexe tudo." | `knowledge_reindex` |
+
+**Melhores escolhas de parâmetros:**
+- `whisper_model`: `small` (padrão, bom equilíbrio) → `medium`/`large-v3` p/ fidelidade (mais lento, mais VRAM).
+- `top_k` em `knowledge_search`: `5–10` para explorar; `knowledge_ask` usa `3` por padrão.
+- `LLM_MODEL`: `lfm2:24b` recomendado em 30 GB RAM; `qwen2.5-coder:14b` mais rápido; 32B só se não se importar com 15+ min/ingest.

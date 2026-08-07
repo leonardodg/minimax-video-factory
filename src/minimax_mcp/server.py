@@ -344,6 +344,81 @@ def studio_pipeline(
     return result
 
 
+# =============================================================================
+# NEW: Knowledge Base Tools
+# =============================================================================
+
+@mcp.tool()
+def knowledge_ingest_text(
+    text: str = Field(description="Texto/transcrição já pronta para processar"),
+    source_url: Optional[str] = Field(default=None, description="URL de origem, se houver"),
+    title: Optional[str] = Field(default=None, description="Título do documento"),
+    platform: str = Field(default="manual", description="Origem: manual, instagram, youtube, podcast"),
+) -> dict[str, Any]:
+    """Gera resumo+tutorial via LLM local e salva um texto/transcrição já pronto na base de conhecimento."""
+    from minimax_mcp import knowledge
+    return knowledge.ingest_text(text, source_url=source_url, title=title, platform=platform)
+
+
+@mcp.tool()
+def knowledge_ingest_video(
+    url: str = Field(description="URL do vídeo (Instagram Reel, YouTube, etc.)"),
+    browser: str = Field(default=STUDIO_BROWSER, description="Navegador para cookies"),
+    whisper_model: str = Field(default=WHISPER_MODEL, description="Tamanho do modelo Whisper"),
+) -> dict[str, Any]:
+    """Baixa, transcreve e documenta um vídeo na base de conhecimento (resumo + tutorial via LLM)."""
+    from minimax_mcp import knowledge
+    return knowledge.ingest_video(
+        url, browser=browser, downloads_dir=STUDIO_DOWNLOADS_DIR,
+        whisper_model=whisper_model, whisper_device=WHISPER_DEVICE,
+    )
+
+
+@mcp.tool()
+def knowledge_ingest_audio(
+    path_or_url: str = Field(description="Caminho local de um áudio/podcast, ou URL para baixar"),
+    browser: str = Field(default=STUDIO_BROWSER, description="Navegador para cookies (se for URL)"),
+    whisper_model: str = Field(default=WHISPER_MODEL, description="Tamanho do modelo Whisper"),
+) -> dict[str, Any]:
+    """Transcreve e documenta um áudio/podcast na base de conhecimento (resumo + tutorial via LLM)."""
+    from minimax_mcp import knowledge
+    return knowledge.ingest_audio(
+        path_or_url, browser=browser, downloads_dir=STUDIO_DOWNLOADS_DIR,
+        whisper_model=whisper_model, whisper_device=WHISPER_DEVICE,
+    )
+
+
+@mcp.tool()
+def knowledge_search(
+    query: str = Field(description="Termo ou pergunta para buscar na base de conhecimento"),
+    top_k: int = Field(default=5, description="Número máximo de resultados"),
+) -> dict[str, Any]:
+    """Busca na base de conhecimento (palavra-chave + semântica) e retorna os documentos mais relevantes."""
+    from minimax_mcp import knowledge
+    return knowledge.search(query, top_k=top_k)
+
+
+@mcp.tool()
+def knowledge_ask(
+    query: str = Field(description="Pergunta em linguagem natural sobre o que já foi salvo"),
+    top_k: int = Field(default=3, description="Quantos documentos usar como contexto"),
+) -> dict[str, Any]:
+    """Responde a uma pergunta usando RAG sobre a base de conhecimento (busca + LLM)."""
+    from minimax_mcp import knowledge
+    return knowledge.ask(query, top_k=top_k)
+
+
+@mcp.tool()
+def knowledge_reindex(
+    embedding_model: Optional[str] = Field(
+        default=None, description="Modelo de embedding a usar (default: EMBEDDING_MODEL do .env)"
+    ),
+) -> dict[str, Any]:
+    """Recalcula chunks e embeddings de todos os documentos (use após trocar de modelo de embedding)."""
+    from minimax_mcp import knowledge
+    return knowledge.reindex(embedding_model=embedding_model)
+
+
 # ---------------- entrypoint ----------------
 def main() -> None:
     transport = os.environ.get("MCP_TRANSPORT", "stdio")

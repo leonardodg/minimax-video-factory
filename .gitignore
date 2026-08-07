@@ -26,3 +26,6 @@ comfyui/output/
 .idea/
 .vscode/
 .hf-cache/
+
+# Postgres data (docker volume for knowledge base)
+.pgdata/

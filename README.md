@@ -136,6 +136,32 @@ Or via MCP directly:
 }
 ```
 
+## New: Knowledge Base MCP Tools
+
+Personal knowledge base backed by Postgres + pgvector, with a local LLM (Ollama by
+default) turning transcriptions into structured summaries/tutorials.
+
+| Tool | Description |
+|---|---|
+| `knowledge_ingest_text(text, source_url?, title?, platform?)` | Summarize+document a ready-made text/transcription |
+| `knowledge_ingest_video(url, browser?, whisper_model?)` | Download + transcribe + document a video |
+| `knowledge_ingest_audio(path_or_url, browser?, whisper_model?)` | Transcribe + document a local/downloaded audio (podcasts) |
+| `knowledge_search(query, top_k?)` | Full-text + semantic (pgvector) search |
+| `knowledge_ask(query, top_k?)` | RAG: answer a question using the knowledge base as context |
+| `knowledge_reindex(embedding_model?)` | Recompute chunks/embeddings for every document |
+
+Setup: `docker compose $COMPOSE_ARGS up -d postgres` then `uv run alembic upgrade head`
+(see `AGENTS.md` §10). Requires Ollama running locally with `LLM_MODEL` and
+`EMBEDDING_MODEL` pulled.
+
+Full parameter-level reference for every tool (this table and the original
+Audiovisual Studio one) is auto-generated — see
+[`docs/MCP_TOOLS.md`](docs/MCP_TOOLS.md), regenerated via
+`uv run python scripts/generate_mcp_docs.py`. Don't hand-edit that file.
+
+For a step-by-step tutorial, chat-prompt examples, and the database schema see
+[`docs/KNOWLEDGE_BASE.md`](docs/KNOWLEDGE_BASE.md).
+
 ## Requirements (hardware floor)
 
 | Resource | Minimum | Notes |
@@ -188,6 +214,26 @@ See [docs/INSTALLATION.md](docs/INSTALLATION.md), [docs/ARCHITECTURE.md](docs/AR
 ```
 
 All three are present (disabled where applicable) in `~/.config/opencode/opencode.json`.
+
+### Knowledge base MCP entry
+
+The `knowledge_*` tools need host access to Postgres and Ollama, so they get a
+dedicated entry (same server binary, different env):
+
+```jsonc
+"minimax-knowledge-base": {
+  "type": "local",
+  "command": ["uv", "run", "--directory", "/path/to/minimax-video-factory", "python", "src/minimax_mcp/server.py"],
+  "environment": {
+    "MCP_TRANSPORT": "stdio",
+    "KB_DATABASE_URL": "postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge",
+    "LLM_PROVIDER": "ollama",
+    "OLLAMA_URL": "http://localhost:11434",
+    "LLM_MODEL": "lfm2:24b",
+    "EMBEDDING_MODEL": "mxbai-embed-large"
+  }
+}
+```
 
 ## License
 

@@ -71,3 +71,19 @@ services:
     restart: unless-stopped
     # Extra CLI flags come from .env COMFYUI_EXTRA_ARGS (overridable on the CLI too).
     command: ["bash", "-c", "cd /comfy/ComfyUI && python main.py --listen 0.0.0.0 --port 8188 ${COMFYUI_EXTRA_ARGS:-}"]
+
+  # Knowledge base storage — Postgres with the pgvector extension. Independent of
+  # comfyui (no GPU, no dependency on the render container). The MCP server reaches
+  # it from HOST mode (uv) at 127.0.0.1:${KB_POSTGRES_PORT}.
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ${KB_POSTGRES_CONTAINER:-minimax-kb-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${KB_POSTGRES_USER:-kb}
+      POSTGRES_PASSWORD: ${KB_POSTGRES_PASSWORD:-kb}
+      POSTGRES_DB: ${KB_POSTGRES_DB:-knowledge}
+    ports:
+      - "127.0.0.1:${KB_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ${KB_POSTGRES_DATA_DIR:-${PROJECT_ROOT:-..}/.pgdata}:/var/lib/postgresql/data
