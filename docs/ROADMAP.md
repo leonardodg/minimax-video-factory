@@ -1,130 +1,131 @@
-# Roadmap — Base de Conhecimento Pessoal → Produto
+# Roadmap — Personal Knowledge Base → Product
 
-Este documento complementa o plano de implementação do MVP
-(`docs/superpowers/plans/2026-08-07-knowledge-base-mvp.md`) e a spec técnica
-(`docs/superpowers/specs/2026-08-07-knowledge-base-mvp-design.md`). Aquele
-plano cobre **o que será construído nesta semana**; este documento cobre
-**por que**, e o caminho até o objetivo final.
+This document complements the MVP implementation plan
+(`docs/superpowers/plans/2026-08-07-knowledge-base-mvp.md`) and the technical
+spec (`docs/superpowers/specs/2026-08-07-knowledge-base-mvp-design.md`). That
+plan covers **what will be built this week**; this document covers **why**, and
+the path to the end goal.
 
-## Objetivo final
+## End goal
 
-Hoje: uma ferramenta pessoal que transforma vídeos salvos (Instagram),
-podcasts/áudio e sites salvos numa base de conhecimento única, pesquisável e
-"perguntável" via IA local.
+Today: a personal tool that turns saved videos (Instagram), podcasts/audio,
+and saved sites into one searchable, "askable" knowledge base powered by
+local AI.
 
-No futuro: o mesmo serviço, oferecido para outras pessoas — um produto pelo
-qual o usuário possa cobrar e que ajude outras pessoas a organizar o próprio
-conhecimento, hoje espalhado entre favoritos do navegador, vídeos salvos e
-podcasts que "somem" depois de salvos.
+In the future: the same service offered to other people — a product you can
+charge for that helps people organize their own knowledge, today scattered
+across browser bookmarks, saved videos, and podcasts that "disappear" after
+being saved.
 
-**Decisão explícita (confirmada com o usuário):** as próximas semanas são só
-sobre validar o valor pessoalmente (dogfooding). Nada de multi-tenant, auth,
-billing ou site público agora — construir isso cedo demais, antes de saber se
-a ferramenta resolve o problema nem para o próprio criador, é o maior risco
-de desperdiçar a semana.
+**Explicit decision (confirmed with the user):** the next few weeks are only
+about validating the value personally (dogfooding). No multi-tenant, auth,
+billing, or public site now — building that too early, before knowing whether
+the tool even solves the problem for its own creator, is the biggest risk of
+wasting the week.
 
-## Por que essa ordem
+## Why this order
 
-O risco maior não é técnico (Postgres, pgvector, LLM local — tudo isso é bem
-conhecido). O risco é validação: será que ter a base + busca/pergunta
-realmente resolve a dor citada ("uso o Google pra lembrar um comando que já
-vi", "salvei um site/vídeo e nunca mais achei")? Só uso real responde isso.
-Por isso as fases abaixo priorizam colocar a ferramenta em uso o quanto antes
-e só then investir em cada extensão.
+The biggest risk is not technical (Postgres, pgvector, local LLM — all well
+understood). The risk is validation: does having the base + search/ask
+actually solve the stated pain ("I use Google to recall a command I already
+saw", "I saved a site/video and never found it again")? Only real use answers
+that. So the phases below prioritize getting the tool into use as soon as
+possible and only then investing in each extension.
 
-## Fases
+## Phases
 
-### Fase 1 — MVP de ingestão + busca (esta semana)
+### Phase 1 — Ingest + search MVP (this week)
 
-**O quê:** pipeline de ingestão (vídeo/áudio/texto → LLM → resumo+tutorial)
-gravando em Postgres local (pgvector), com `knowledge_search`/`knowledge_ask`
-via MCP. Detalhado em `docs/superpowers/plans/2026-08-07-knowledge-base-mvp.md`.
+**What:** ingest pipeline (video/audio/text → LLM → summary+tutorial) writing
+to local Postgres (pgvector), with `knowledge_search`/`knowledge_ask` over
+MCP. Detailed in
+`docs/superpowers/plans/2026-08-07-knowledge-base-mvp.md`.
 
-**Decisões que preservam opcionalidade para as fases seguintes** (sem custo
-extra de engenharia agora, mas evitam retrabalho depois):
-- Acesso ao banco só via ORM (SQLAlchemy) — trocar de Postgres local para um
-  Postgres gerenciado (Fase 4/5) é mudar uma connection string, não reescrever
-  queries.
-- Cliente LLM abstrato (`llm.py`) com `LLM_PROVIDER=ollama|openai-compatible`
-  — trocar de modelo local para uma API paga (necessário se um dia virar
-  produto para pessoas sem GPU) é configuração, não reescrita.
-- `documents.type` genérico (`video`/`audio`/`text`, extensível a `site`) —
-  a Fase 3 (Karakeep) não exige migração de schema, só um novo ingestor.
-- Camada de ingestão (`knowledge.py`) separada da camada MCP (`server.py`) —
-  se um dia a interface deixar de ser "chat com OpenCode" e virar uma API
-  HTTP de verdade (Fase 5), a lógica de negócio não muda de lugar.
+**Decisions that preserve optionality for later phases** (no extra
+engineering cost now, but avoid rework later):
 
-**Critério de sucesso para avançar:** MVP rodando, `knowledge_ingest_*` e
-`knowledge_search`/`knowledge_ask` funcionando de ponta a ponta (validado por
+- Database access only through the ORM (SQLAlchemy) — moving from local
+  Postgres to a managed Postgres (Phase 4/5) is changing a connection string,
+  not rewriting queries.
+- Abstract LLM client (`llm.py`) with `LLM_PROVIDER=ollama|openai-compatible`
+  — moving from a local model to a paid API (needed if this ever becomes a
+  product for people without GPUs) is configuration, not a rewrite.
+- Generic `documents.type` (`video`/`audio`/`text`, extensible to `site`) —
+  Phase 3 (Karakeep) needs no schema migration, just a new ingestor.
+- Ingest layer (`knowledge.py`) separate from the MCP layer (`server.py`) —
+  if the interface ever stops being "chat with OpenCode" and becomes a real
+  HTTP API (Phase 5), the business logic doesn't move.
+
+**Success criterion to move on:** MVP running, `knowledge_ingest_*` and
+`knowledge_search`/`knowledge_ask` working end-to-end (validated by
 `tests/08_knowledge.sh`).
 
-### Fase 2 — Uso real (semanas seguintes, sem prazo fixo)
+### Phase 2 — Real use (following weeks, no fixed deadline)
 
-**O quê:** nada de código novo por padrão — usar a ferramenta no dia a dia
-(cada Reel salvo, cada podcast ouvido) e prestar atenção em:
-- A qualidade do resumo/tutorial gerado é boa o suficiente, ou o prompt em
-  `llm.py::SUMMARY_PROMPT_TEMPLATE` precisa de ajuste?
-- `knowledge_ask` realmente responde "o que eu já salvei sobre X" de forma
-  útil, ou a busca híbrida (full-text + cosseno) precisa de reranking?
-- Que tipo de pergunta você faz que a base ainda não cobre (ex.: "que
-  comando eu vi naquele vídeo sobre Docker?")?
+**What:** no new code by default — use the tool daily (every saved Reel, every
+listened podcast) and pay attention to:
 
-**Critério de sucesso para avançar:** pelo menos algumas semanas de uso real,
-volume suficiente de documentos para a busca fazer sentido, e uma lista clara
-do que mais atrapalha no dia a dia — essa lista vira a próxima fase.
+- Is the generated summary/tutorial quality good enough, or does the prompt in
+  `llm.py::SUMMARY_PROMPT_TEMPLATE` need tuning?
+- Does `knowledge_ask` actually answer "what have I saved about X" usefully,
+  or does the hybrid search (full-text + cosine) need reranking?
+- What kinds of questions do you ask that the base doesn't cover yet (e.g.
+  "which command did I see in that Docker video?")?
 
-### Fase 3 — Trazer os sites (Karakeep) para a mesma base
+**Success criterion to move on:** at least a few weeks of real use, enough
+document volume for search to make sense, and a clear list of what else gets
+in the way daily — that list becomes the next phase.
 
-**O quê:** hoje os sites salvos vivem só no Obsidian (`Hoarder/`, sincronizado
-do Karakeep) — fora da base estruturada. Escrever um ingestor que lê os
-bookmarks do Karakeep (API ou os próprios `.md` da pasta `Hoarder/`) e cria
-`documents` com `type="site"`, reaproveitando `llm.generate_structured` (com
-um prompt adaptado — sites não têm "tutorial passo a passo" da mesma forma
-que um vídeo) e o mesmo `knowledge_search`/`knowledge_ask`.
+### Phase 3 — Bring saved sites (Karakeep) into the same base
 
-**Por que depois da Fase 2, não junto com a Fase 1:** o schema já foi
-desenhado para caber isso sem migração; não há motivo técnico para
-apressar — só faz sentido depois de confirmar que a Fase 1 (vídeo/áudio)
-realmente resolve o problema, pra não gastar a semana de MVP em três
-integrações ao mesmo tempo.
+**What:** today saved sites live only in Obsidian (`Hoarder/`, synced from
+Karakeep) — outside the structured base. Write an ingestor that reads Karakeep
+bookmarks (API or the `.md` files in the `Hoarder/` folder) and creates
+`documents` with `type="site"`, reusing `llm.generate_structured` (with an
+adapted prompt — sites don't have a step-by-step "tutorial" the way a video
+does) and the same `knowledge_search`/`knowledge_ask`.
 
-**Critério de sucesso para avançar:** busca/pergunta unificada cobrindo
-vídeos + sites + podcasts sem o usuário precisar saber onde a informação
-"mora".
+**Why after Phase 2, not with Phase 1:** the schema was already designed to fit
+this without migration; there's no technical reason to rush it — it only makes
+sense after confirming Phase 1 (video/audio) actually solves the problem, so
+as not to spend the MVP week on three integrations at once.
 
-### Fase 4 — Preparação para produto (sem construir o produto ainda)
+**Success criterion to move on:** unified search/ask covering videos + sites +
+podcasts without the user needing to know where the information "lives".
 
-**O quê:** com as três fontes provadas e em uso real, revisar as decisões da
-Fase 1 que hoje assumem "só eu uso isso":
-- Autenticação/isolamento de dados por usuário (schema multi-tenant ou
-  banco por usuário?).
-- Modelo de custo de IA: Ollama local não existe para um usuário sem GPU —
-  decidir entre (a) produto self-hosted/open-source (usuário roda o próprio
-  Ollama) ou (b) serviço hospedado pagando por chamadas de LLM/embedding por
-  usuário.
-- Hospedagem do Postgres (gerenciado) e do futuro serviço.
+### Phase 4 — Product preparation (without building the product yet)
 
-Esta fase é decisão e desenho, não implementação — o resultado é um novo
-documento de design (spec) para a Fase 5, não código.
+**What:** with the three sources proven and in real use, revisit the Phase 1
+decisions that today assume "only I use this":
 
-### Fase 5 — Produto (SaaS)
+- Per-user authentication/data isolation (multi-tenant schema or per-user
+  database?).
+- AI cost model: local Ollama doesn't exist for a user without a GPU — decide
+  between (a) a self-hosted/open-source product (user runs their own Ollama)
+  or (b) a hosted service paying per-user LLM/embedding calls.
+- Postgres hosting (managed) and hosting of the future service.
 
-Fora do escopo de qualquer plano atual. Só começa depois da Fase 4 responder
-as perguntas em aberto acima. Vira seu próprio conjunto spec → plano →
-implementação, tratado como projeto separado (auth, billing, multi-tenant,
-front-end, deploy, suporte).
+This phase is decision and design, not implementation — the output is a new
+design document (spec) for Phase 5, not code.
 
-## Não-objetivos (por enquanto)
+### Phase 5 — Product (SaaS)
 
-Para deixar explícito o que **não** entra em nenhuma fase até a Fase 5:
-site público, cadastro de outros usuários, cobrança, multi-tenant, hospedagem
-gerenciada, suporte a clientes.
+Out of scope for any current plan. Only starts after Phase 4 answers the open
+questions above. It becomes its own spec → plan → implementation set, treated
+as a separate project (auth, billing, multi-tenant, front-end, deploy,
+support).
 
-## Perguntas em aberto (não bloqueiam a Fase 1, mas vão precisar de resposta)
+## Non-goals (for now)
 
-- Self-hosted vs. hospedado: qual dos dois modelos de negócio faz mais
-  sentido pra você quando chegar na Fase 4?
-- O Obsidian continua tendo algum papel (cópia legível) no produto final, ou
-  é só uma muleta da fase pessoal?
-- Karakeep (Fase 3) é algo que outras pessoas já usam, ou seria substituído
-  por um "save de site" próprio no produto final?
+To make explicit what does **not** enter any phase until Phase 5: public site,
+sign-ups for other users, billing, multi-tenant, managed hosting, customer
+support.
+
+## Open questions (don't block Phase 1, but will need answers)
+
+- Self-hosted vs. hosted: which of the two business models makes more sense
+  to you by the time Phase 4 arrives?
+- Does Obsidian still have a role (readable copy) in the final product, or is
+  it just a crutch of the personal phase?
+- Is Karakeep (Phase 3) something other people already use, or would it be
+  replaced by a native "save a site" in the final product?

@@ -1,0 +1,51 @@
+site_name: MiniMax Video Factory
+site_description: Local video factory + Audiovisual Studio + personal knowledge base, orchestrated over MCP.
+docs_dir: docs
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - search.suggest
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+nav:
+  - Home: index.md
+  - User Guides:
+      - Installation: INSTALLATION.md
+      - Architecture: ARCHITECTURE.md
+      - Remote MCP (VPS): MCP_REMOTE.md
+      - Self-hosted Runner: SELF_HOSTED_RUNNER.md
+      - Knowledge Base Tutorial: KNOWLEDGE_BASE.md
+      - MCP Tools Reference: MCP_TOOLS.md
+  - Developer Docs:
+      - Overview: dev/index.md
+      - Development Environment: dev/dev-environment.md
+      - Module Guide: dev/modules.md
+      - Extending the System: dev/extending.md
+      - Contributing & Testing: dev/contributing.md
+  - Roadmap: ROADMAP.md
+  - Project Records:
+      - Design Spec (PT): superpowers/specs/2026-08-07-knowledge-base-mvp-design.md
+      - Implementation Plan (PT): superpowers/plans/2026-08-07-knowledge-base-mvp.md
+  - API Reference: api.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            show_source: true
+            show_root_heading: true

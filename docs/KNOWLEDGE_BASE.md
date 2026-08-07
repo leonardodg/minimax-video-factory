@@ -1,267 +1,276 @@
 # Knowledge Base — Tutorial & Reference
 
-Base de conhecimento pessoal alimentada por **Postgres + pgvector** (armazenamento
-e busca semântica) e um **LLM local (Ollama)** que transforma transcrições/textos em
-resumo, tutorial passo-a-passo, objetivos e tags. Tudo roda localmente (sem nuvem).
+Personal knowledge base powered by **Postgres + pgvector** (storage and
+semantic search) and a **local LLM (Ollama)** that turns transcriptions/text
+into a summary, step-by-step tutorial, objectives, and tags. Everything runs
+locally (no cloud).
 
-Neste documento:
-- [1. O que é / quando usar](#1-o-que-é--quando-usar)
-- [2. Prerequisitos & setup](#2-prerequisitos--setup)
-- [3. As 7 tools (referência completa + melhores opções)](#3-as-7-tools)
-- [4. Fluxos recomendados passo-a-passo](#4-fluxos-recomendados)
-- [5. Usar pelo chat do OpenCode (exemplos de prompts)](#5-usar-pelo-chat-do-opencode)
-- [6. Estrutura da base de dados](#6-estrutura-da-base-de-dados)
-- [7. Configuração (.env)](#7-configuração-env)
-- [8. Solução de problemas](#8-solução-de-problemas)
+In this document:
+- [1. What it is / when to use](#1-what-it-is-when-to-use)
+- [2. Prerequisites & setup](#2-prerequisites-setup)
+- [3. The 7 tools (full reference + best options)](#3-the-7-tools)
+- [4. Recommended flows step by step](#4-recommended-flows)
+- [5. Using it from the OpenCode chat (prompt examples)](#5-using-it-from-the-opencode-chat)
+- [6. Database structure](#6-database-structure)
+- [7. Configuration (.env)](#7-configuration-env)
+- [8. Troubleshooting](#8-troubleshooting)
 
 ---
 
-## 1. O que é / quando usar
+## 1. What it is / when to use
 
-O MCP de vídeo expõe **18 tools no total** (11 originais do MiniMax H3/Studio + 7 da
-knowledge base). As 7 novas:
+The video MCP exposes **18 tools in total** (11 original MiniMax H3/Studio + 7
+knowledge base). The 7 new ones:
 
-| Tool | O que faz | Precisa GPU? |
+| Tool | What it does | Needs GPU? |
 |---|---|---|
-| `knowledge_ingest_text` | Salva um texto/transcrição pronto na base (resumo+tutorial via LLM) | Não |
-| `knowledge_ingest_video` | Baixa + transcreve + documenta um vídeo (Reel/YouTube) | Sim (Whisper GPU) |
-| `knowledge_ingest_audio` | Transcreve + documenta um áudio/podcast | Sim (Whisper GPU) |
-| `knowledge_ingest_markdown` | Importa arquivos `.md` (Obsidian/tutoriais): frontmatter + `## Summary` ou LLM | Não |
-| `knowledge_search` | Busca por palavra-chave + semântica na base | Não |
-| `knowledge_ask` | Responde perguntas com RAG (busca + LLM) sobre o que já foi salvo | Não |
-| `knowledge_reindex` | Recalcula chunks + embeddings de todos os documentos | Não |
+| `knowledge_ingest_text` | Saves a ready text/transcription to the base (summary+tutorial via LLM) | No |
+| `knowledge_ingest_video` | Downloads + transcribes + documents a video (Reel/YouTube) | Yes (Whisper GPU) |
+| `knowledge_ingest_audio` | Transcribes + documents an audio/podcast | Yes (Whisper GPU) |
+| `knowledge_ingest_markdown` | Imports `.md` files (Obsidian/tutorials): frontmatter + `## Summary` or LLM | No |
+| `knowledge_search` | Keyword + semantic search in the base | No |
+| `knowledge_ask` | Answers questions with RAG (search + LLM) about what was saved | No |
+| `knowledge_reindex` | Recomputes chunks + embeddings for all documents | No |
 
-**Ciclo de vida típico:** `ingest_*` → `search`/`ask` → (troca de modelo de
-embedding?) → `reindex`.
+**Typical lifecycle:** `ingest_*` → `search`/`ask` → (switched embedding
+model?) → `reindex`.
 
 ---
 
-## 2. Prerequisitos & setup
+## 2. Prerequisites & setup
 
 ```bash
 cd $PROJECT_ROOT
 source scripts/config.sh
 
-# 1. Postgres + pgvector (container dedicado minimax-kb-postgres)
+# 1. Postgres + pgvector (dedicated minimax-kb-postgres container)
 docker compose $COMPOSE_ARGS up -d postgres
 
-# 2. Tabelas (alembic) — só uma vez
+# 2. Tables (alembic) — once
 uv run alembic upgrade head
 
-# 3. Ollama rodando com os modelos
-ollama list          # deve mostrar lfm2:24b e mxbai-embed-large
-# se faltar:
+# 3. Ollama running with the models
+ollama list          # should show lfm2:24b and mxbai-embed-large
+# if missing:
 # ollama pull lfm2:24b
 # ollama pull mxbai-embed-large
 ```
 
-> **Onde o servidor roda:** a knowledge base usa **host-uv** (`uv run python
-> src/minimax_mcp/server.py`), não o container do ComfyUI — precisa acessar
-> `localhost:11434` (Ollama) e `127.0.0.1:5432` (Postgres) direto do host.
+> **Where the server runs:** the knowledge base uses **host-uv** (`uv run python
+> src/minimax_mcp/server.py`), not the ComfyUI container — it needs direct
+> access to `localhost:11434` (Ollama) and `127.0.0.1:5432` (Postgres) from
+> the host.
 
 ---
 
-## 3. As 7 tools
+## 3. The 7 tools
 
 ### `knowledge_ingest_markdown`
 
-Importa arquivos **markdown** (obsidian, docs, tutoriais). Reusa o frontmatter YAML
-(`title`, `url`, `tags`, `aliases`) e uma seção `## Summary` quando existir; caso
-contrário, o LLM gera `resumo` + `tutorial` + `objetivos` + `tags`. Aceita um arquivo
-ou um diretório (pula subpastas com ponto, ex. `.trash`/`.obsidian`).
+Imports **markdown** files (obsidian, docs, tutorials). Reuses the YAML
+frontmatter (`title`, `url`, `tags`, `aliases`) and a `## Summary` section
+when present; otherwise the LLM generates `summary` + `tutorial` + `objectives`
++ `tags`. Accepts a single file or a directory (skips dot-prefixed subfolders,
+e.g. `.trash`/`.obsidian`).
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `path` | ✅ | — | caminho do `.md` ou da pasta |
-| `recursive` | ❌ | `false` | `true` para incluir subpastas |
+| `path` | ✅ | — | path to the `.md` or the folder |
+| `recursive` | ❌ | `false` | `true` to include subfolders |
 | `doc_type` | ❌ | `document` | `document`, `tutorial`, `manual` |
-| `platform` | ❌ | `obsidian` | origem dos arquivos |
-| `language` | ❌ | `pt` | idioma do conteúdo |
-| `reindex_if_exists` | ❌ | `false` | regenera embeddings se o arquivo já existe na base |
+| `platform` | ❌ | `obsidian` | source of the files |
+| `language` | ❌ | `pt` | content language |
+| `reindex_if_exists` | ❌ | `false` | regenerate embeddings if the file already exists in the base |
 
-> **Dica:** para migrar uma coleção Obsidian inteira, aponte `path` para a pasta e use
-> `recursive=true`. O upload de 26 tutoriais leva ~1–2 min com `lfm2:24b`.
+> **Tip:** to migrate an entire Obsidian collection, point `path` at the
+> folder and use `recursive=true`. Uploading ~27 tutorials takes ~1–2 min
+> with `lfm2:24b`.
 
 ### `knowledge_ingest_text`
 
-Guarda um texto/transcrição **já pronto** (colado, arquivo, transcrição de outro
-lugar) e gera `resumo` + `tutorial` + `objetivos` + `tags` via LLM.
+Stores a **ready** text/transcription (pasted, from a file, transcribed
+elsewhere) and generates `summary` + `tutorial` + `objectives` + `tags` via
+LLM.
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `text` | ✅ | — | A transcrição completa; quanto mais contexto, melhor o tutorial |
-| `source_url` | ❌ | `null` | URL de origem (Reel, YT, artigo) para linkar no resultado |
-| `title` | ❌ | resumo[0:80] | Título curto e descritivo |
+| `text` | ✅ | — | The full transcription; more context = better tutorial |
+| `source_url` | ❌ | `null` | source URL (Reel, YT, article) to link in the result |
+| `title` | ❌ | summary[0:80] | short, descriptive title |
 | `platform` | ❌ | `manual` | `manual`, `instagram`, `youtube`, `podcast` |
 
-**Retorna:** `{ok, document_id, title, summary, tutorial, tags, vault}`
+**Returns:** `{ok, document_id, title, summary, tutorial, tags, vault}`
 
 ### `knowledge_ingest_video`
 
-Baixa (yt-dlp + cookies), transcreve (Whisper GPU) e documenta um vídeo em um passo.
+Downloads (yt-dlp + cookies), transcribes (Whisper GPU) and documents a video
+in one step.
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `url` | ✅ | — | URL do Reel/YouTube |
-| `browser` | ❌ | `chrome` | `chrome`, `firefox`, `edge`, `brave` — use o navegador logado |
-| `whisper_model` | ❌ | `small` | `small` (bom equilíbrio), `medium` (mais preciso), `large-v3` (máx., lento) |
+| `url` | ✅ | — | Reel/YouTube URL |
+| `browser` | ❌ | `chrome` | `chrome`, `firefox`, `edge`, `brave` — use the logged-in browser |
+| `whisper_model` | ❌ | `small` | `small` (good balance), `medium` (more accurate), `large-v3` (max, slow) |
 
-> **Atenção GPU:** usa Whisper em `cuda`; cada ingest consome VRAM por alguns minutos.
+> **GPU note:** uses Whisper on `cuda`; each ingest consumes VRAM for a few
+> minutes.
 
 ### `knowledge_ingest_audio`
 
-Igual ao vídeo, mas para **áudio/podcast**. Aceita caminho local **ou** URL (baixa primeiro).
+Same as video, but for **audio/podcast**. Accepts a local path **or** a URL
+(downloads first).
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `path_or_url` | ✅ | — | `/path/audio.mp3` ou URL de podcast |
-| `browser` | ❌ | `chrome` | só relevante se passar URL |
-| `whisper_model` | ❌ | `small` | idem acima |
+| `path_or_url` | ✅ | — | `/path/audio.mp3` or podcast URL |
+| `browser` | ❌ | `chrome` | only relevant when passing a URL |
+| `whisper_model` | ❌ | `small` | same as above |
 
 ### `knowledge_search`
 
-Busca híbrida: **full-text em português** (Postgres `to_tsvector`) + **cosseno
-semântico** (pgvector `mxbai-embed-large`). Retorna snippets ranqueados.
+Hybrid search: **full-text in Portuguese** (Postgres `to_tsvector`) +
+**semantic cosine** (pgvector `mxbai-embed-large`). Returns ranked snippets.
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `query` | ✅ | — | termo ou frase curta |
-| `top_k` | ❌ | `5` | `5–10` para explorar, `3` para contexto de pergunta |
+| `query` | ✅ | — | term or short phrase |
+| `top_k` | ❌ | `5` | `5–10` to explore, `3` for question context |
 
 ### `knowledge_ask`
 
-RAG: busca os `top_k` documentos relevantes, monta contexto e o LLM responde **só
-com base nisso** (não inventa — diz se não sabe). Retorna também `sources`.
+RAG: searches the `top_k` relevant documents, builds context and the LLM
+answers **only from that** (doesn't make things up — says so if it doesn't
+know). Also returns `sources`.
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `query` | ✅ | — | pergunta em linguagem natural |
-| `top_k` | ❌ | `3` | `3` típico; aumente para perguntas amplas |
+| `query` | ✅ | — | natural-language question |
+| `top_k` | ❌ | `3` | `3` typical; increase for broad questions |
 
 ### `knowledge_reindex`
 
-Recalcula chunks + embeddings de **todos** os documentos. Use quando trocar o
-modelo de embedding (o `model` fica gravado por chunk).
+Recomputes chunks + embeddings for **all** documents. Use when switching the
+embedding model (the `model` is recorded per chunk).
 
-| Parâmetro | Obrigatório | Default | Melhor opção |
+| Parameter | Required | Default | Best option |
 |---|---|---|---|
-| `embedding_model` | ❌ | `EMBEDDING_MODEL` do `.env` | só informe se quiser forçar outro |
+| `embedding_model` | ❌ | `EMBEDDING_MODEL` from `.env` | only set it to force another one |
 
 ---
 
-## 4. Fluxos recomendados
+## 4. Recommended flows
 
-**Fluxo A — documentar um Reel de YouTube/Instagram e guardar:**
+**Flow A — document a YouTube/Instagram Reel and save it:**
 ```
 knowledge_ingest_video(url="https://www.youtube.com/watch?v=...", whisper_model="small")
 ```
 
-**Fluxo B — transcrever um áudio que já está no disco:**
+**Flow B — transcribe audio already on disk:**
 ```
-knowledge_ingest_audio(path_or_url="/path/meu_podcast.mp3")
-```
-
-**Fluxo C — guardar texto colado (notas, artigo, transcrição antiga):**
-```
-knowledge_ingest_text(text="<cole a transcrição>", title="Meu resumo", platform="manual")
+knowledge_ingest_audio(path_or_url="/path/my_podcast.mp3")
 ```
 
-**Fluxo D — perguntar à sua base (RAG):**
+**Flow C — save pasted text (notes, article, old transcription):**
 ```
-knowledge_ask(query="Como eu instalei o Docker no Ubuntu?")
+knowledge_ingest_text(text="<paste the transcription>", title="My summary", platform="manual")
 ```
 
-**Fluxo E — manutenção (troca de embedding):**
+**Flow D — ask your base (RAG):**
 ```
-# 1. mude EMBEDDING_MODEL no .env  2. depois:
+knowledge_ask(query="How did I install Docker on Ubuntu?")
+```
+
+**Flow E — maintenance (embedding switch):**
+```
+# 1. change EMBEDDING_MODEL in .env  2. then:
 knowledge_reindex()
 ```
 
 ---
 
-## 5. Usar pelo chat do OpenCode
+## 5. Using it from the OpenCode chat
 
-O servidor MCP `minimax-knowledge-base` já está configurado
-(`~/.config/opencode/opencode.json`, `enabled: true`). **Reinicie o opencode** para
-carregá-lo; depois é só conversar:
+The `minimax-knowledge-base` MCP server is already configured
+(`~/.config/opencode/opencode.json`, `enabled: true`). **Restart opencode** to
+load it; then just chat:
 
-> **"Documente este texto na minha base de conhecimento: [colar texto]"**
-> → OpenCode chama `knowledge_ingest_text` e mostra `document_id`, resumo, tutorial e tags.
+> **"Document this text in my knowledge base: [paste text]"**
+> → OpenCode calls `knowledge_ingest_text` and shows `document_id`, summary, tutorial and tags.
 
-> **"Baixe, transcreva e salve este Reel na base: https://www.instagram.com/p/DbHIZl5Pk_0/"**
-> → `knowledge_ingest_video(url=..., whisper_model="small")` (precisa GPU/Whisper).
+> **"Download, transcribe and save this Reel to the base: https://www.instagram.com/p/DbHIZl5Pk_0/"**
+> → `knowledge_ingest_video(url=..., whisper_model="small")` (needs GPU/Whisper).
 
-> **"Transcreve e documenta este podcast: /path/meu_podcast.mp3"**
+> **"Transcribe and document this podcast: /path/my_podcast.mp3"**
 > → `knowledge_ingest_audio(path_or_url=...)`.
 
-> **"Pesquise na minha base por 'Docker Ubuntu'"**
+> **"Search my base for 'Docker Ubuntu'"**
 > → `knowledge_search(query="Docker Ubuntu")`.
 
-> **"O que eu já salvei sobre Docker? Me responda com base na minha base."**
-> → `knowledge_ask(query="O que eu já salvei sobre Docker?")`.
+> **"What have I saved about Docker? Answer based on my base."**
+> → `knowledge_ask(query="What have I saved about Docker?")`.
 
-> **"Acabei de trocar o modelo de embedding; reindexe tudo."**
+> **"I just switched the embedding model; reindex everything."**
 > → `knowledge_reindex()`.
 
-**Dicas de chat:**
-1. Se o opencode não achar a tool, confirme que está numa **sessão nova** (MCP é
-   carregado no start) e que Postgres + Ollama estão de pé.
-2. Prefira `knowledge_ask` para **perguntas** e `knowledge_search` para **listar/explorar**.
-3. `ingest_video`/`ingest_audio` usam GPU (Whisper). Se a VRAM estiver ocupada com
-   render do H3, use `whisper_model="base"` (mais leve) ou espere terminar.
+**Chat tips:**
+1. If opencode doesn't find the tool, make sure you're in a **new session**
+   (MCP is loaded at startup) and that Postgres + Ollama are up.
+2. Prefer `knowledge_ask` for **questions** and `knowledge_search` for
+   **listing/exploring**.
+3. `ingest_video`/`ingest_audio` use GPU (Whisper). If VRAM is busy with an
+   H3 render, use `whisper_model="base"` (lighter) or wait for it to finish.
 
 ---
 
-## 6. Estrutura da base de dados
+## 6. Database structure
 
-Criada por `alembic upgrade head` (`alembic/versions/0001_initial.py`). Relação:
-**1 documento → N chunks → 1 embedding por chunk.**
+Created by `alembic upgrade head` (`alembic/versions/0001_initial.py`).
+Relationship: **1 document → N chunks → 1 embedding per chunk.**
 
-### `documents` — um registro por item ingerido
+### `documents` — one record per ingested item
 
-| Coluna | Tipo | Descrição |
+| Column | Type | Description |
 |---|---|---|
 | `id` | integer PK | |
 | `type` | varchar(20) | `text`, `video`, `audio` |
-| `source_url` | text nullable | URL de origem |
+| `source_url` | text nullable | source URL |
 | `platform` | varchar(50) nullable | `manual`, `instagram`, `youtube`, `podcast` |
 | `title` | text nullable | |
-| `language` | varchar(10) nullable | ex.: `pt` |
-| `transcription_text` | text nullable | texto/transcrição original |
-| `summary` | text nullable | resumo gerado pelo LLM |
-| `tutorial` | text nullable | tutorial passo-a-passo (markdown) |
-| `objectives` | text nullable | objetivos, um por linha |
-| `tags` | json nullable | lista de tags |
-| `raw_file_path` | text nullable | caminho do arquivo original baixado |
+| `language` | varchar(10) nullable | e.g. `pt` |
+| `transcription_text` | text nullable | original text/transcription |
+| `summary` | text nullable | LLM-generated summary |
+| `tutorial` | text nullable | step-by-step tutorial (markdown) |
+| `objectives` | text nullable | objectives, one per line |
+| `tags` | json nullable | list of tags |
+| `raw_file_path` | text nullable | path of the original downloaded file |
 | `llm_provider` | varchar(50) nullable | `ollama` |
-| `llm_model` | varchar(100) nullable | ex.: `lfm2:24b` |
+| `llm_model` | varchar(100) nullable | e.g. `lfm2:24b` |
 | `created_at` | datetime | default `now()` |
 
-### `chunks` — trechos de texto com overlap para embedding
+### `chunks` — overlapping text snippets for embedding
 
-| Coluna | Tipo | Descrição |
+| Column | Type | Description |
 |---|---|---|
 | `id` | integer PK | |
 | `document_id` | int FK → `documents.id` (ON DELETE CASCADE) | |
-| `chunk_text` | text | trecho (até ~1000 chars, overlap 100) |
-| `chunk_index` | integer | ordem dentro do documento |
+| `chunk_text` | text | snippet (up to ~700 chars, overlap 100) || `chunk_index` | integer | order within the document |
 
-### `embeddings` — vetor semântico por chunk
+### `embeddings` — semantic vector per chunk
 
-| Coluna | Tipo | Descrição |
+| Column | Type | Description |
 |---|---|---|
 | `id` | integer PK | |
 | `chunk_id` | int FK → `chunks.id` (ON DELETE CASCADE, UNIQUE) | 1:1 |
-| `model` | varchar(100) | modelo que gerou o vetor (ex.: `mxbai-embed-large`) |
+| `model` | varchar(100) | model that generated the vector (e.g. `mxbai-embed-large`) |
 | `vector` | `vector(1024)` (pgvector) | embedding |
 
-### Índices
+### Indexes
 
-- GIN full-text em `documents.transcription_text` (linguagem `portuguese`) para
+- GIN full-text on `documents.transcription_text` (language `portuguese`) for
   `to_tsvector`/`plainto_tsquery`.
-- Índice vetorial pgvector em `embeddings.vector` para cosseno.
+- pgvector index on `embeddings.vector` for cosine.
 
-### Como inspecionar
+### How to inspect
 
 ```bash
 docker exec minimax-kb-postgres psql -U kb -d knowledge -c "\dt"
@@ -271,32 +280,32 @@ docker exec minimax-kb-postgres psql -U kb -d knowledge \
 
 ---
 
-## 7. Configuração (.env)
+## 7. Configuration (.env)
 
-| Var | Default | Descrição |
+| Var | Default | Description |
 |---|---|---|
-| `KB_DATABASE_URL` | `postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge` | conexão SQLAlchemy |
-| `KB_POSTGRES_USER/PASSWORD/DB/PORT` | `kb`/`kb`/`knowledge`/`5432` | usadas pelo compose |
-| `LLM_PROVIDER` | `ollama` | ou `openai-compatible` |
-| `LLM_MODEL` | `lfm2:24b` | **melhor equilíbrio p/ ~30 GB RAM**. Alternativas: `qwen2.5-coder:14b` (mais rápido, ~1 min/ingest) ou `qwen2.5:32b-instruct-q4_K_M` (mais qualidade, porém 15+ min — swap). `gpt-oss:20b` **não funciona** (ignora `format=json`). |
-| `LLM_TIMEOUT` | `900` | timeout por chamada (s); aumente p/ modelos 32B |
+| `KB_DATABASE_URL` | `postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge` | SQLAlchemy connection |
+| `KB_POSTGRES_USER/PASSWORD/DB/PORT` | `kb`/`kb`/`knowledge`/`5432` | used by compose |
+| `LLM_PROVIDER` | `ollama` | or `openai-compatible` |
+| `LLM_MODEL` | `lfm2:24b` | **best balance for ~30 GB RAM**. Alternatives: `qwen2.5-coder:14b` (faster, ~1 min/ingest) or `qwen2.5:32b-instruct-q4_K_M` (better quality, but 15+ min — swap). `gpt-oss:20b` **doesn't work** (ignores `format=json`). |
+| `LLM_TIMEOUT` | `900` | timeout per call (s); increase for 32B models |
 | `OLLAMA_URL` | `http://localhost:11434` | |
-| `EMBEDDING_MODEL` | `mxbai-embed-large` | embeddings **sempre locais**, mesmo com `LLM_PROVIDER=openai-compatible` |
-| `EMBEDDING_DIM` | `1024` | dimensão do vetor (must combinar com o modelo) |
-| `VAULT_PATH` | vazio (desligado) | copia markdown p/ Obsidian, se preenchido |
-| `WHISPER_MODEL` / `WHISPER_DEVICE` | `small` / `cuda` | transcrição |
-| `STUDIO_DOWNLOADS_DIR` | `<projeto>/downloads` | onde arquivos baixados são salvos |
+| `EMBEDDING_MODEL` | `mxbai-embed-large` | embeddings are **always local**, even with `LLM_PROVIDER=openai-compatible` |
+| `EMBEDDING_DIM` | `1024` | vector dimension (must match the model) |
+| `VAULT_PATH` | empty (off) | markdown copy to Obsidian, if set |
+| `WHISPER_MODEL` / `WHISPER_DEVICE` | `small` / `cuda` | transcription |
+| `STUDIO_DOWNLOADS_DIR` | `<project>/downloads` | where downloaded files are saved |
 
 ---
 
-## 8. Solução de problemas
+## 8. Troubleshooting
 
-| Sintoma | Causa | Fix |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `knowledge_*` retorna erro de conexão com `127.0.0.1:5432` | Postgres não está de pé | `docker compose $COMPOSE_ARGS up -d postgres` |
-| Erro `42P01 relation "documents" does not exist` | migração não aplicada | `uv run alembic upgrade head` |
-| `LLM generation failed: timed out` | `LLM_TIMEOUT` curto p/ o modelo | use `lfm2:24b` ou aumente `LLM_TIMEOUT` |
-| `LLM generation failed: Expecting value... char 0` | modelo devolve texto não-JSON | troque `LLM_MODEL` (`gpt-oss:20b` é incompatível) |
-| Ollama não responde | daemon parado | `ollama serve` (ou systemd) |
-| OpenCode não vê as tools | sessão antiga / entry não carregado | reinicie o opencode; confira `enabled: true` |
-| Embeddings não batem após trocar modelo | chunks com `model` antigo | `knowledge_reindex()` |
+| `knowledge_*` returns a connection error to `127.0.0.1:5432` | Postgres is down | `docker compose $COMPOSE_ARGS up -d postgres` |
+| Error `42P01 relation "documents" does not exist` | migration not applied | `uv run alembic upgrade head` |
+| `LLM generation failed: timed out` | `LLM_TIMEOUT` too short for the model | use `lfm2:24b` or increase `LLM_TIMEOUT` |
+| `LLM generation failed: Expecting value... char 0` | model returns non-JSON text | switch `LLM_MODEL` (`gpt-oss:20b` is incompatible) |
+| Ollama not responding | daemon stopped | `ollama serve` (or systemd) |
+| OpenCode doesn't see the tools | old session / entry not loaded | restart opencode; check `enabled: true` |
+| Embeddings don't match after switching model | chunks with the old `model` | `knowledge_reindex()` |
