@@ -4,7 +4,9 @@
 
 set -euo pipefail
 
-ROOT="$PROJECT_ROOT"
+# Resolve the project root from this script's location, so the demo
+# runs from any checkout without editing a hardcoded path.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "=========================================="
 echo "MiniMax Video Factory — Demo via opencode"

@@ -3,7 +3,9 @@
 
 set -euo pipefail
 
-ROOT="$PROJECT_ROOT"
+# Resolve the project root from this script's location, so the demo
+# runs from any checkout without editing a hardcoded path.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUTFILE="$ROOT/output/demo_presentation_$(date +%Y%m%d_%H%M%S).mp4"
 LINK="https://www.instagram.com/p/DbHIZl5Pk_0/"
 

@@ -120,9 +120,13 @@ jobs:
       # Host-side path resolution in tests 05/07 must therefore point at the same
       # host dirs, or the MCP's host<->container path mapping produces paths the
       # host tests cannot find.
-      PROJECT_ROOT: $PROJECT_ROOT
-      OUTPUT_DIR: $PROJECT_ROOT/output
-      OUTPUT_HOST_DIR: $PROJECT_ROOT/output
+      # No hardcoded home directory here: this file is public. Set a repository
+      # variable PROJECT_ROOT (Settings > Secrets and variables > Actions) when
+      # the runner's checkout is not the same directory docker-compose binds;
+      # otherwise the workspace path is already correct.
+      PROJECT_ROOT: ${{ vars.PROJECT_ROOT || github.workspace }}
+      OUTPUT_DIR: ${{ vars.PROJECT_ROOT || github.workspace }}/output
+      OUTPUT_HOST_DIR: ${{ vars.PROJECT_ROOT || github.workspace }}/output
       MODELS_DIR: /var/tmp/minimax/models
       COMFYUI_URL: http://127.0.0.1:8188
     steps:
