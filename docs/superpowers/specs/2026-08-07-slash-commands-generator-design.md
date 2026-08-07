@@ -89,8 +89,11 @@ nome, a anotação de tipo, o default e a `description` do `Field(...)`.
 
 O AST captura o que é verdade mecânica. Não captura:
 
-- que `width=1344` é o default no código mas **causa OOM** na máquina real
+- que **subir de 1024x576 arrisca OOM** com 12 GB de VRAM, e que 512x320 é o
+  mais rápido (~5 min) quando você só quer ver se o pipeline anda
 - que "database locked" no `/minimax-download` significa fechar o navegador
+- que um prompt em PT deve ser traduzido para uma descrição visual em EN antes
+  de chamar `generate_video`
 - que `/kb-ingest-markdown` pula o LLM quando encontra `## Summary`
 - que `/kb-reindex` invalida embeddings antigos e deve rodar depois de trocar
   `EMBEDDING_MODEL`
@@ -100,6 +103,20 @@ O AST captura o que é verdade mecânica. Não captura:
 Esse conhecimento vive em `scripts/command_docs/overrides.py`, indexado pelo
 nome da tool. Cada entrada é opcional e parcial: uma tool sem override ainda
 gera um comando válido, só mais seco.
+
+Um override contribui em **três posições distintas**, e as três são necessárias
+para reproduzir os comandos existentes:
+
+| Campo | Onde entra | Exemplo |
+|---|---|---|
+| `resumo` | frontmatter `description:` | "Gera um vídeo no MiniMax H3 via MCP" |
+| `param_notas[<param>]` | anexado à linha daquele parâmetro na extração | "NUNCA acima de 1024x576 — OOM" |
+| `passos` | passos numerados extras, **ordenados**, depois da chamada da tool | "Se houver OOM, reduza para 512x320 e tente de novo" |
+
+`passos` ser uma lista ordenada, e não um bloco de notas solto, é o que permite
+absorver `/minimax-gerar-video` sem perder nada: aquele comando tem quatro
+instruções sequenciais depois da chamada (traduzir, aguardar, retry de OOM,
+contorno de timeout). Um campo de notas único achataria as quatro em uma.
 
 **Os 3 comandos existentes são absorvidos como overrides.** O texto que já foi
 validado em uso vira dado do gerador, e passa a existir um só formato e uma só
@@ -189,16 +206,20 @@ $ARGUMENTS
 
 Instruções obrigatórias:
 1. Extraia:
-   - `<param>` (obrigatória) — <descrição>
-   - `<param>`: <descrição> (default `<valor>`).
+   - `<param>` (obrigatória) — <descrição do Field><, + param_notas se houver>
+   - `<param>`: <descrição> (default `<valor>`)<, + param_notas se houver>.
 2. Chame `<tool>` com esses parâmetros. Se a variante default do servidor MCP
    estiver indisponível, use a variante conectada (`-remote` ou `-uv`).
-3. <notas do override, uma por linha>
-4. Reporte <o que a tool retorna>.
+3. <passos[0] do override>
+4. <passos[1] do override>
+...
+N. Reporte <o que a tool retorna>.
 ```
 
-A linha 2 sobre variantes do servidor vem dos comandos existentes e vale para
-todas as tools — é parte fixa do template, não override.
+Obrigatórios vêm antes de opcionais na lista de extração. O passo 2 (variantes
+do servidor) é parte fixa do template, não override — vem dos comandos
+existentes e vale para todas as tools. O passo final de reporte também é fixo,
+derivado da docstring, e sempre fecha a lista.
 
 ## `docs/COMMANDS.md`
 
