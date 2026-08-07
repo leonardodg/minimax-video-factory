@@ -169,6 +169,52 @@ if knowledge._extract_section("# sem seção de summary\napenas texto", "Summary
 else:
     bad("_extract_section should return None when no ## Summary heading")
 
+print("== unit_knowledge: llm system messages ==")
+from minimax_mcp import llm  # noqa: E402
+
+ingest_sys = llm._system_message(force_json=True)
+answer_sys = llm._system_message(force_json=False)
+
+if "JSON" in ingest_sys:
+    ok("ingest system message demands JSON")
+else:
+    bad(f"ingest system message does not mention JSON: {ingest_sys[:80]!r}")
+
+# The bug this guards: `ask` shares _ollama_generate with the ingest path, and
+# the single system message ordered "responda estritamente no formato JSON".
+# RAG answers came back as ```json {"resposta": "..."} instead of prose.
+if "JSON" not in answer_sys:
+    ok("answer system message does NOT demand JSON")
+else:
+    bad(f"answer system message still demands JSON: {answer_sys[:120]!r}")
+
+# Both paths carry the injection guard: ingested transcriptions and retrieved
+# context are both untrusted text from the internet.
+for label, msg in (("ingest", ingest_sys), ("answer", answer_sys)):
+    if "ignore qualquer" in msg.lower():
+        ok(f"{label} system message keeps the prompt-injection guard")
+    else:
+        bad(f"{label} system message lost the injection guard: {msg[:90]!r}")
+
+if "fonte" in answer_sys.lower():
+    ok("answer system message asks for sources")
+else:
+    bad(f"answer system message does not mention sources: {answer_sys[:90]!r}")
+
+# Both providers must send a system message. The OpenAI-compatible path used to
+# send none at all, so switching provider silently dropped the guard.
+for force_json in (True, False):
+    ollama_msgs = llm._build_messages("texto do usuário", force_json=force_json)
+    roles = [m["role"] for m in ollama_msgs]
+    if roles == ["system", "user"]:
+        ok(f"_build_messages(force_json={force_json}) yields system + user")
+    else:
+        bad(f"_build_messages(force_json={force_json}) roles = {roles}")
+    if ollama_msgs[-1]["content"] == "texto do usuário":
+        ok(f"_build_messages(force_json={force_json}) keeps the prompt verbatim")
+    else:
+        bad(f"prompt was altered: {ollama_msgs[-1]['content']!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
