@@ -16,7 +16,8 @@
 - The Obsidian markdown copy (`vault.py`) is best-effort only: a failure there must never fail an ingest call. `VAULT_PATH` unset ⇒ skipped entirely (the existing vault at `~/Documents/Obsidian Vault` is suspected unhealthy and is NOT the target by default).
 - MCP server runs in host mode (`uv run --project . python src/minimax_mcp/server.py`), not inside the `comfyui` container.
 - All new MCP tools return `{"ok": bool, ...}` on both success and failure, matching every existing tool in `server.py` — never raise an uncaught exception across the tool boundary.
-- Follow existing test conventions: bash smoke tests live in `tests/0N_*.sh`, source `scripts/config.sh`, echo `[ok]`/`[BAD]`/`[MISS]`, exit non-zero on failure. Pure-Python unit tests follow the `ok()`/`bad()` pattern from `tests/unit_pure.py` (no pytest framework needed, but `pytest` stays available as a dev dependency).
+- Follow existing test conventions: bash smoke tests live in `tests/0N_*.sh`, source `scripts/config.sh`, echo `[ok]`/`[BAD]`/`[MISS]`, exit non-zero on failure. Pure-Python unit tests follow the `ok()`/`bad()` pattern from `tests/unit_pure.py`. Task 0 additionally wires these scripts into real `pytest` markers (`unit`/`integration_db`/`integration_llm`) for selective/CI-friendly runs — write every new test script in this style AND make sure it's covered by (or added to) `tests/test_scripts.py`.
+- MCP tool documentation is generated, not hand-written: after adding/changing a tool in `server.py`, re-run `uv run python scripts/generate_mcp_docs.py` to refresh `docs/MCP_TOOLS.md` — never hand-edit that file.
 - Network/GPU-dependent flows (Instagram download) are manually verified only, matching how `download_video`/`transcribe_video`/`studio_pipeline` are already excluded from the automated `diagnose.sh` suite today.
 
 ---
@@ -38,6 +39,257 @@
 | `tests/integration_knowledge_db.py` (create) | Postgres-dependent tests (fake embedding function, no Ollama needed) |
 | `tests/integration_knowledge_llm.py` (create) | Ollama-dependent tests (`generate_structured`, `embed`, `chat`) |
 | `tests/08_knowledge.sh` (create) | End-to-end MCP smoke test: ingest_text → search → ask → reindex |
+| `tests/conftest.py` (create) | Auto-skips `integration_db`/`integration_llm` marked tests when Postgres/Ollama aren't reachable |
+| `tests/test_scripts.py` (create) | Pytest entrypoints (`-m unit`/`-m integration_db`/`-m integration_llm`) wrapping the ad-hoc scripts above |
+| `scripts/generate_mcp_docs.py` (create) | Generates `docs/MCP_TOOLS.md` from the live MCP tool registry (no hand-maintained tool tables to drift) |
+| `docs/MCP_TOOLS.md` (create, generated) | Auto-generated MCP tool reference — regenerate, don't hand-edit |
+
+---
+
+### Task 0: Developer tooling — pytest wiring + MCP docs generator
+
+Priority infrastructure requested explicitly: real TDD tooling (selective,
+markers-based test running instead of only whole-script pass/fail) and a
+documentation generator for the MCP tools so the reference can never drift
+from `@mcp.tool()` definitions the way a hand-written table can. Do this
+**before** Task 1 — every later task's test script is written assuming these
+markers exist, and the docs generator is exercised (and re-run) starting in
+Task 12.
+
+**Files:**
+- Modify: `pyproject.toml` (pytest config + `pytest-asyncio` is NOT needed —
+  the wrapper tests below shell out to the existing scripts as subprocesses,
+  so no async test runner is required)
+- Create: `tests/conftest.py`
+- Create: `tests/test_scripts.py`
+- Create: `scripts/generate_mcp_docs.py`
+
+**Interfaces:**
+- Consumes: nothing (this task only wraps scripts that already exist:
+  `tests/unit_pure.py` today; `tests/unit_knowledge.py`,
+  `tests/integration_knowledge_db.py`, `tests/integration_knowledge_llm.py`
+  are added by later tasks — `test_scripts.py` references them by filename
+  now and they simply don't exist to run yet, which is fine: pytest fails
+  those specific tests until the corresponding task lands, exactly like any
+  other not-yet-implemented test)
+- Produces: `pytest -m unit` (fast, no services needed), `pytest -m
+  integration_db` (needs Postgres), `pytest -m integration_llm` (needs
+  Ollama), plain `pytest` (runs everything reachable, auto-skips the rest).
+  `scripts/generate_mcp_docs.py` produces `docs/MCP_TOOLS.md`, re-run at the
+  end of every task that adds/changes a tool (formalized in Task 12).
+
+- [ ] **Step 1: Add pytest config to `pyproject.toml`**
+
+In the `dev` optional-dependencies group, `pytest>=7.0.0` is already present.
+Add a new section anywhere after `[project.scripts]`:
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "unit: pure-logic tests, no external services (fast, run always)",
+    "integration_db: requires Postgres up + migrated (docker compose up -d postgres && alembic upgrade head)",
+    "integration_llm: requires a local Ollama daemon with LLM_MODEL/EMBEDDING_MODEL pulled",
+]
+```
+
+- [ ] **Step 2: Write the failing test — try running pytest before the wrapper exists**
+
+```bash
+cd $PROJECT_ROOT
+uv run pytest -m unit -v
+```
+
+Expected: `ERROR: file or directory not found` / no tests collected (no
+`tests/test_scripts.py` yet).
+
+- [ ] **Step 3: Write `tests/conftest.py`**
+
+```python
+"""Shared pytest fixtures: auto-skip integration tests when their service is unreachable."""
+from __future__ import annotations
+
+import os
+import socket
+
+import pytest
+
+
+def _port_open(host: str, port: int, timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def pytest_collection_modifyitems(config, items):
+    postgres_up = _port_open("127.0.0.1", int(os.environ.get("KB_POSTGRES_PORT", "5432")))
+    ollama_up = _port_open("127.0.0.1", 11434)
+
+    skip_db = pytest.mark.skip(
+        reason="Postgres not reachable on KB_POSTGRES_PORT (docker compose up -d postgres)"
+    )
+    skip_llm = pytest.mark.skip(reason="Ollama not reachable on :11434")
+
+    for item in items:
+        if "integration_db" in item.keywords and not postgres_up:
+            item.add_marker(skip_db)
+        if "integration_llm" in item.keywords and not ollama_up:
+            item.add_marker(skip_llm)
+```
+
+- [ ] **Step 4: Write `tests/test_scripts.py`**
+
+```python
+"""Pytest entrypoints for the ok()/bad()-style smoke scripts under tests/, so
+`pytest -m unit` / `-m integration_db` / `-m integration_llm` work for
+selective/CI-friendly runs without rewriting each script's internals."""
+from __future__ import annotations
+
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def _run_script(name: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(ROOT / "tests" / name)],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+
+
+@pytest.mark.unit
+def test_unit_pure():
+    result = _run_script("unit_pure.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_knowledge():
+    result = _run_script("unit_knowledge.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_db
+def test_integration_knowledge_db():
+    result = _run_script("integration_knowledge_db.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_llm
+def test_integration_knowledge_llm():
+    result = _run_script("integration_knowledge_llm.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+```
+
+- [ ] **Step 5: Run pytest to confirm current state**
+
+```bash
+uv run pytest -m unit -v
+```
+
+Expected: `test_unit_pure` PASSES (script already exists);
+`test_unit_knowledge` FAILS (`tests/unit_knowledge.py` doesn't exist until
+Task 3/6/8) — that's correct or now, both tests are collected and reported
+individually instead of one opaque script failure.
+
+```bash
+uv run pytest -m integration_db -v
+uv run pytest -m integration_llm -v
+```
+
+Expected: both report `SKIPPED` if Postgres/Ollama aren't up yet (or `FAILED`
+with a clear "script not found" once the services ARE up but the task hasn't
+landed) — either way, no crash.
+
+- [ ] **Step 6: Write `scripts/generate_mcp_docs.py`**
+
+```python
+#!/usr/bin/env python3
+"""Generate docs/MCP_TOOLS.md from the live MCP server's tool registry, so the
+tool reference never drifts from the actual @mcp.tool() definitions.
+
+Run: uv run --project . python scripts/generate_mcp_docs.py
+"""
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from fastmcp import Client
+from fastmcp.client.transports import StdioTransport
+
+
+async def main() -> None:
+    env = dict(os.environ)
+    transport = StdioTransport(
+        command="uv", args=["run", "--project", str(ROOT), "python", "src/minimax_mcp/server.py"],
+        cwd=str(ROOT), env=env,
+    )
+    async with Client(transport) as client:
+        tools = await client.list_tools()
+
+    lines = [
+        "<!-- AUTO-GENERATED by scripts/generate_mcp_docs.py — do not edit by hand -->",
+        "# MCP Tools Reference",
+        "",
+        f"{len(tools)} tools exposed by `src/minimax_mcp/server.py`.",
+        "",
+    ]
+    for tool in sorted(tools, key=lambda t: t.name):
+        lines.append(f"## `{tool.name}`")
+        lines.append("")
+        lines.append(tool.description or "_(no description)_")
+        lines.append("")
+        props = (tool.inputSchema or {}).get("properties", {})
+        required = set((tool.inputSchema or {}).get("required", []))
+        if props:
+            lines.append("| Parameter | Type | Required | Description |")
+            lines.append("|---|---|---|---|")
+            for name, schema in props.items():
+                ptype = schema.get("type", "any")
+                desc = schema.get("description", "")
+                lines.append(f"| `{name}` | {ptype} | {'yes' if name in required else 'no'} | {desc} |")
+            lines.append("")
+
+    out_path = ROOT / "docs" / "MCP_TOOLS.md"
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Wrote {out_path} ({len(tools)} tools)")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+- [ ] **Step 7: Run it against the current server (before any knowledge tools exist) and verify**
+
+```bash
+cd $PROJECT_ROOT
+uv run python scripts/generate_mcp_docs.py
+grep -c '^## `' docs/MCP_TOOLS.md
+grep -q '## `health_check`' docs/MCP_TOOLS.md && echo "health_check documented: ok"
+```
+
+Expected: `grep -c` prints the current tool count (11, matching the tools
+listed in `server.py`'s module docstring); `health_check documented: ok`
+prints.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add pyproject.toml tests/conftest.py tests/test_scripts.py scripts/generate_mcp_docs.py docs/MCP_TOOLS.md
+git commit -m "feat(dev): add pytest markers for selective test runs + MCP tool docs generator"
+```
 
 ---
 
@@ -1856,9 +2108,24 @@ default) turning transcriptions into structured summaries/tutorials.
 Setup: `docker compose $COMPOSE_ARGS up -d postgres` then `uv run alembic upgrade head`
 (see `AGENTS.md` §10). Requires Ollama running locally with `LLM_MODEL` and
 `EMBEDDING_MODEL` pulled.
+
+Full parameter-level reference for every tool (this table and the original
+Audiovisual Studio one) is auto-generated — see
+[`docs/MCP_TOOLS.md`](docs/MCP_TOOLS.md), regenerated via
+`uv run python scripts/generate_mcp_docs.py`. Don't hand-edit that file.
 ```
 
-- [ ] **Step 2: Add a "§10. Knowledge Base" section to `AGENTS.md`**
+- [ ] **Step 2: Regenerate `docs/MCP_TOOLS.md` now that all 6 knowledge tools exist**
+
+```bash
+cd $PROJECT_ROOT
+uv run python scripts/generate_mcp_docs.py
+grep -c '^## `' docs/MCP_TOOLS.md
+```
+
+Expected: count is now 11 (original) + 6 (knowledge) = 17.
+
+- [ ] **Step 3: Add a "§10. Knowledge Base" section to `AGENTS.md`**
 
 Append after §9 (before the final validation cheat-sheet section, or at the end):
 
@@ -1894,7 +2161,7 @@ Failures writing the markdown copy never fail the ingest call.
 **Validation:** `./tests/08_knowledge.sh` (requires Postgres + Ollama running).
 ```
 
-- [ ] **Step 3: Confirm the OpenCode MCP config location and add the host-uv entry**
+- [ ] **Step 4: Confirm the OpenCode MCP config location and add the host-uv entry**
 
 ```bash
 cat ~/.config/opencode/opencode.json 2>/dev/null | head -50
@@ -1913,23 +2180,25 @@ If a `minimax-video-factory` entry already exists using the `docker exec` (conta
 
 Ask for confirmation before editing `~/.config/opencode/opencode.json` directly, since it's outside the project repo and may have other unrelated config in it.
 
-- [ ] **Step 4: Run the full local validation one more time**
+- [ ] **Step 5: Run the full local validation one more time — via pytest markers (Task 0), not by hand**
 
 ```bash
 cd $PROJECT_ROOT
-uv run python tests/unit_pure.py
-uv run python tests/unit_knowledge.py
-uv run python tests/integration_knowledge_db.py
-uv run python tests/integration_knowledge_llm.py
+uv run pytest -m unit -v
+uv run pytest -m integration_db -v
+uv run pytest -m integration_llm -v
 ./tests/08_knowledge.sh
+uv run python scripts/generate_mcp_docs.py
 ```
 
-Expected: all five report `PASS` / `[PASS]`.
+Expected: all `pytest` runs report passing (or cleanly `SKIPPED` if a service
+isn't up), `tests/08_knowledge.sh` reports `[PASS]`, and `docs/MCP_TOOLS.md`
+lists 17 tools.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add README.md AGENTS.md
+git add README.md AGENTS.md docs/MCP_TOOLS.md
 git commit -m "docs(kb): document knowledge base setup, tools, and host-mode MCP config"
 ```
 
@@ -1939,4 +2208,5 @@ git commit -m "docs(kb): document knowledge base setup, tools, and host-mode MCP
 
 - **Spec coverage:** every item in the "Novas tools MCP" / "Novos arquivos" / "Schema Postgres" / "Decisões técnicas-chave" sections of the design spec maps to a task above (infra → schema → chunking → CRUD → search → LLM client → vault export → the three ingest tools → search/ask/reindex → docs). `Erros e casos de borda` from the spec are implemented inline (LLM failure ⇒ no partial write via `session.rollback()` in Task 9; DB unreachable ⇒ caught by the same try/except; vault failure ⇒ soft-fail in Task 8; empty query/base ⇒ handled in Task 11's `search`/`ask`).
 - **Type/signature consistency:** `embed_fn: Callable[[str], list[float]]` is the same shape everywhere it's threaded through (`save_document`, `search_documents`, `reindex_all`, and the real `llm.embed`). `db.EMBEDDING_DIM` (Task 2) and `EMBEDDING_DIM = 1024` in the Alembic migration (Task 2) and `EMBEDDING_MODEL`/dimension in `.env.example` (Task 1) are all pinned to the verified 1024-dim output of `mxbai-embed-large`.
+- **Dev tooling (explicit user priority, added as Task 0):** pytest markers (`unit`/`integration_db`/`integration_llm`) give selective, CI-friendly test execution instead of only whole-script pass/fail, without rewriting the ok()/bad()-style scripts each task already produces — `tests/test_scripts.py` wraps them. `scripts/generate_mcp_docs.py` makes the MCP tool reference (`docs/MCP_TOOLS.md`) generated from the live tool registry, so it cannot drift the way the hand-written README/AGENTS.md tables can; Task 12 regenerates it as the last step. "Robust architecture" for this MVP means: ORM-only DB access (swappable engine), a provider-abstracted LLM client (swappable backend), transactional writes (Task 9's `session.rollback()` on failure), and every module (`llm.py`/`db.py`/`vault.py`/`knowledge.py`) independently testable — see `docs/ROADMAP.md` for what "robust" additionally means once this becomes a multi-user product (auth, hosted Postgres, cost model), which is explicitly out of scope here.
 - **Deferred to Post-MVP** (per spec, not part of this plan): Karakeep→Postgres ingestion, a web UI/site, reranking/dedup/MOCs, and the "product for other people" phase — see the separate roadmap document.
