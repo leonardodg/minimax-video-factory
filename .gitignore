@@ -29,3 +29,6 @@ comfyui/output/
 
 # Postgres data (docker volume for knowledge base)
 .pgdata/
+
+# Git worktrees
+.worktrees/
