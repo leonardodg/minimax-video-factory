@@ -56,7 +56,7 @@ class VideoDownloader:
             Dict with success status, file path, and metadata.
         """
         for use_cookies in (True, False):
-            mode = "browser cookies (%s)" % self.browser if use_cookies else "no cookies"
+            mode = f"browser cookies ({self.browser})" if use_cookies else "no cookies"
             logger.info("Downloading video from %s using %s", url, mode)
 
             try:

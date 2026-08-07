@@ -32,35 +32,25 @@ Configuration (env vars / .env):
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-import random
-import shutil
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from pydantic import Field
 
-from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError
-from minimax_mcp.downloader import VideoDownloader
-from minimax_mcp.transcriber import AudioTranscriber
-from minimax_mcp.orchestrator import AudiovisualStudio
+from minimax_mcp.comfyui_client import ComfyUIClient
 from minimax_mcp.core import (
-    load_workflow,
-    duration_to_frames,
-    inject_scene,
+    compose_final_core,
     submit_scene_core,
     wait_for_video_core,
-    compose_final_core,
-    output_dir_abs,
-    to_host_path,
-    to_container_path,
 )
+from minimax_mcp.downloader import VideoDownloader
+from minimax_mcp.orchestrator import AudiovisualStudio
+from minimax_mcp.transcriber import AudioTranscriber
 
 # ---------------- logging ----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -158,7 +148,6 @@ def downloads_to_container_path(p: str | os.PathLike[str]) -> str:
 @mcp.tool()
 def health_check() -> dict[str, Any]:
     """Check ComfyUI backend health and required MiniMax H3 models presence."""
-    from minimax_mcp.comfyui_client import ComfyUIClient
     client = ComfyUIClient(COMFYUI_URL)
     backend = client.health()
     if not backend.get("ok"):
@@ -185,14 +174,13 @@ def submit_scene(
     duration: float = Field(default=5.0, description="Clip duration in seconds (4-15; snaps to 17-frame grid)"),
     width: int = Field(default=1344, description="Output width (multiple of 32; H3 canvas is 768 short edge capped 768x1344)"),
     height: int = Field(default=768, description="Output height (multiple of 32; H3 canvas is 768 short edge capped 768x1344)"),
-    seed: Optional[int] = Field(default=None, description="Random seed (defaults to random)"),
+    seed: int | None = Field(default=None, description="Random seed (defaults to random)"),
     filename_prefix: str = Field(default=OUTPUT_PREFIX, description="Output filename prefix (default from OUTPUT_PREFIX env)"),
 ) -> dict[str, Any]:
     """Inject a scene prompt into the API workflow and submit it to ComfyUI.
 
     Returns {"prompt_id": ...}. Use wait_for_video() to await completion.
     """
-    from minimax_mcp.core import submit_scene_core
     return submit_scene_core(
         prompt=prompt, duration=duration, width=width, height=height,
         seed=seed, filename_prefix=filename_prefix,
@@ -202,7 +190,6 @@ def submit_scene(
 @mcp.tool()
 def get_status(prompt_id: str) -> dict[str, Any]:
     """Get the current status of a submitted ComfyUI prompt."""
-    from minimax_mcp.comfyui_client import ComfyUIClient
     client = ComfyUIClient(COMFYUI_URL)
     try:
         hist = client.get_history(prompt_id)
@@ -229,7 +216,6 @@ async def wait_for_video(
     timeout: float = Field(default=1200.0, description="Max seconds to wait"),
 ) -> dict[str, Any]:
     """Block until the prompt finishes rendering; returns path to the generated .mp4."""
-    from minimax_mcp.core import wait_for_video_core
     return await wait_for_video_core(prompt_id, timeout=timeout)
 
 
@@ -249,7 +235,6 @@ def compose_final(
     output_path: str = Field(default="output/final.mp4", description="Where to write the composed video"),
 ) -> dict[str, Any]:
     """Concatenate scene .mp4 files with ffmpeg into a final video (re-encode, crossfade-free)."""
-    from minimax_mcp.core import compose_final_core
     return compose_final_core(scene_paths, output_path)
 
 
@@ -263,8 +248,6 @@ def download_video(
     browser: str = Field(default="chrome", description="Browser for cookies: chrome, firefox, edge, brave"),
 ) -> dict[str, Any]:
     """Download a video from Instagram Reels, YouTube, or other platforms using yt-dlp with browser cookies."""
-    from minimax_mcp.orchestrator import AudiovisualStudio
-    from minimax_mcp.downloader import VideoDownloader
     downloader = VideoDownloader(output_dir=STUDIO_DOWNLOADS_DIR, browser=browser)
     result = downloader.download(url)
     if result.get("ok"):
@@ -280,7 +263,6 @@ def transcribe_video(
     language: str = Field(default="pt", description="Language code (pt for Portuguese)"),
 ) -> dict[str, Any]:
     """Transcribe audio from a video file using faster-whisper (local, GPU-accelerated)."""
-    from minimax_mcp.transcriber import AudioTranscriber
     video_path = downloads_to_container_path(video_path)
     if model_size != "small" or device != "cuda":
         transcriber = AudioTranscriber(model_size=model_size, device=device)
@@ -308,11 +290,10 @@ def generate_video(
     duration: float = Field(default=10.0, description="Clip duration in seconds (4-15; snaps to 17-frame grid)"),
     width: int = Field(default=1344, description="Output width (multiple of 32)"),
     height: int = Field(default=768, description="Output height (multiple of 32)"),
-    seed: Optional[int] = Field(default=None, description="Random seed"),
+    seed: int | None = Field(default=None, description="Random seed"),
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
 ) -> dict[str, Any]:
     """Generate a video using the MiniMax H3 model via ComfyUI."""
-    from minimax_mcp.core import submit_scene_core
     from minimax_mcp.orchestrator import AudiovisualStudio
     studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
     return studio.generate_video(
@@ -351,8 +332,8 @@ def studio_pipeline(
 @mcp.tool()
 def knowledge_ingest_text(
     text: str = Field(description="Texto/transcrição já pronta para processar"),
-    source_url: Optional[str] = Field(default=None, description="URL de origem, se houver"),
-    title: Optional[str] = Field(default=None, description="Título do documento"),
+    source_url: str | None = Field(default=None, description="URL de origem, se houver"),
+    title: str | None = Field(default=None, description="Título do documento"),
     platform: str = Field(default="manual", description="Origem: manual, instagram, youtube, podcast"),
 ) -> dict[str, Any]:
     """Gera resumo+tutorial via LLM local e salva um texto/transcrição já pronto na base de conhecimento."""
@@ -428,7 +409,7 @@ def knowledge_ask(
 
 @mcp.tool()
 def knowledge_reindex(
-    embedding_model: Optional[str] = Field(
+    embedding_model: str | None = Field(
         default=None, description="Modelo de embedding a usar (default: EMBEDDING_MODEL do .env)"
     ),
 ) -> dict[str, Any]:

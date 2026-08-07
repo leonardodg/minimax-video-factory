@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from dotenv import load_dotenv  # noqa: E402
+from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
@@ -27,7 +27,7 @@ def bad(label: str) -> None:
     print(f"  [BAD]  {label}")
 
 
-from minimax_mcp import llm  # noqa: E402
+from minimax_mcp import llm
 
 SAMPLE_TRANSCRIPTION = (
     "Hoje vou mostrar como instalar o Docker no Ubuntu. Primeiro, atualize os "
@@ -62,7 +62,7 @@ if isinstance(answer, str) and len(answer.strip()) > 0:
 else:
     bad(f"chat returned unexpected value: {answer!r}")
 
-print("")
+print()
 if FAIL:
     print(f"FAIL: {FAIL}")
     sys.exit(1)

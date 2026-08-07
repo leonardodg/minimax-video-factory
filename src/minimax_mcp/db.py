@@ -2,13 +2,32 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text, create_engine, delete, func, select
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    delete,
+    func,
+    select,
+)
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1024"))  # mxbai-embed-large
 
@@ -22,21 +41,21 @@ class Document(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column(String(20))
-    source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    platform: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    language: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
-    transcription_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tutorial: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    objectives: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tags: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
-    raw_file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    llm_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    llm_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    platform: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    language: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    transcription_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tutorial: Mapped[str | None] = mapped_column(Text, nullable=True)
+    objectives: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    raw_file_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    chunks: Mapped[list["Chunk"]] = relationship(
+    chunks: Mapped[list[Chunk]] = relationship(
         back_populates="document", cascade="all, delete-orphan"
     )
 
@@ -49,8 +68,8 @@ class Chunk(Base):
     chunk_text: Mapped[str] = mapped_column(Text)
     chunk_index: Mapped[int] = mapped_column(Integer)
 
-    document: Mapped["Document"] = relationship(back_populates="chunks")
-    embedding: Mapped[Optional["Embedding"]] = relationship(
+    document: Mapped[Document] = relationship(back_populates="chunks")
+    embedding: Mapped[Embedding | None] = relationship(
         back_populates="chunk", uselist=False, cascade="all, delete-orphan"
     )
 
@@ -65,7 +84,7 @@ class Embedding(Base):
     model: Mapped[str] = mapped_column(String(100))
     vector: Mapped[Any] = mapped_column(Vector(EMBEDDING_DIM))
 
-    chunk: Mapped["Chunk"] = relationship(back_populates="embedding")
+    chunk: Mapped[Chunk] = relationship(back_populates="embedding")
 
 
 _engine: Engine | None = None
@@ -98,6 +117,7 @@ def chunk_text(text: str, max_chars: int = 700, overlap: int = 100) -> list[str]
         return []
     if len(text) <= max_chars:
         return [text]
+    overlap = max(0, min(overlap, max_chars - 1))
     chunks: list[str] = []
     start = 0
     while start < len(text):
@@ -151,6 +171,41 @@ def save_document(
     return doc
 
 
+def _fuse_rankings(
+    keyword_rows: list[tuple[int, str]],
+    semantic_rows: list[tuple[int, str]],
+    top_k: int,
+    rrf_k: float = 60.0,
+) -> list[dict[str, Any]]:
+    """Fuse keyword (ts_rank) and semantic (cosine) results with Reciprocal Rank
+    Fusion (RRF).
+
+    ts_rank scores live in ~0.01-0.1 while cosine similarity is ~0.6-0.9; summing
+    them directly lets the semantic branch silently dominate. RRF is scale-free:
+    each list contributes 1/(k + rank) per document, so a keyword-only match and a
+    semantic-only match at the same rank weigh the same, and documents present in
+    both lists get boosted. k=60 is the conventional RRF constant.
+
+    Rows are (document_id, snippet) pairs, already ordered by relevance (keyword
+    by ts_rank desc, semantic by distance asc). Returns merged docs sorted by the
+    fused score, each with its accumulated snippets.
+    """
+    merged: dict[int, dict[str, Any]] = {}
+    for rank, (doc_id, snippet) in enumerate(keyword_rows, start=1):
+        entry = merged.setdefault(
+            doc_id, {"document_id": doc_id, "snippets": [], "score": 0.0}
+        )
+        entry["snippets"].append(snippet)
+        entry["score"] += 1.0 / (rrf_k + rank)
+    for rank, (doc_id, snippet) in enumerate(semantic_rows, start=1):
+        entry = merged.setdefault(
+            doc_id, {"document_id": doc_id, "snippets": [], "score": 0.0}
+        )
+        entry["snippets"].append(snippet)
+        entry["score"] += 1.0 / (rrf_k + rank)
+    return sorted(merged.values(), key=lambda r: r["score"], reverse=True)[:top_k]
+
+
 def search_documents(
     session: Session, query: str, embed_fn: Callable[[str], list[float]], top_k: int = 5
 ) -> list[dict[str, Any]]:
@@ -179,22 +234,11 @@ def search_documents(
         .limit(top_k)
     ).all()
 
-    merged: dict[int, dict[str, Any]] = {}
-    for row in keyword_rows:
-        entry = merged.setdefault(
-            row.document_id, {"document_id": row.document_id, "snippets": [], "score": 0.0}
-        )
-        entry["snippets"].append(row.chunk_text)
-        entry["score"] += float(row.score)
-    for row in semantic_rows:
-        similarity = 1.0 - float(row.distance)
-        entry = merged.setdefault(
-            row.document_id, {"document_id": row.document_id, "snippets": [], "score": 0.0}
-        )
-        entry["snippets"].append(row.chunk_text)
-        entry["score"] += similarity
-
-    ranked = sorted(merged.values(), key=lambda r: r["score"], reverse=True)[:top_k]
+    ranked = _fuse_rankings(
+        keyword_rows=[(r.document_id, r.chunk_text) for r in keyword_rows],
+        semantic_rows=[(r.document_id, r.chunk_text) for r in semantic_rows],
+        top_k=top_k,
+    )
     doc_ids = [r["document_id"] for r in ranked]
     if doc_ids:
         docs_by_id = {

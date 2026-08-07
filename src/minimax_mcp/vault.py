@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ def write_markdown_copy(document: dict[str, Any], vault_path: str | Path | None)
         folder = Path(vault_path) / "Knowledge"
         folder.mkdir(parents=True, exist_ok=True)
 
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         slug = _slugify(document.get("title") or f"documento-{document.get('id')}")
         filepath = folder / f"{date_str}-{slug}.md"
 

@@ -47,3 +47,11 @@ markers = [
     "integration_db: requires Postgres up + migrated (docker compose up -d postgres && alembic upgrade head)",
     "integration_llm: requires a local Ollama daemon with LLM_MODEL/EMBEDDING_MODEL pulled",
 ]
+
+[tool.ruff.lint]
+# BLE001: MCP tools are fail-soft by design — a backend error returns
+#   {"ok": False} instead of raising, so a single broken tool never kills
+#   the whole stdio/HTTP session. Broad `except Exception` is deliberate.
+# B008: pydantic `Field(...)` in argument defaults is the idiomatic FastMCP
+#   way to attach descriptions to tool parameters; not a mutable-default bug.
+ignore = ["BLE001", "B008"]

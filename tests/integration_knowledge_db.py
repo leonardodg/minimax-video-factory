@@ -11,8 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-import os  # noqa: E402
-from dotenv import load_dotenv  # noqa: E402
+from dotenv import load_dotenv
 
 load_dotenv(ROOT / ".env")
 
@@ -29,7 +28,7 @@ def bad(label: str) -> None:
     print(f"  [BAD]  {label}")
 
 
-from minimax_mcp import db  # noqa: E402
+from minimax_mcp import db
 
 
 def fake_embed(text: str) -> list[float]:
@@ -127,7 +126,7 @@ except Exception as e:
 finally:
     session.close()
 
-print("")
+print()
 if FAIL:
     print(f"FAIL: {FAIL}")
     sys.exit(1)

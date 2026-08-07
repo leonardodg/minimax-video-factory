@@ -30,7 +30,7 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     meta_raw, body = parts[1], parts[2]
     try:
         meta = yaml.safe_load(meta_raw) or {}
-    except Exception:  # noqa: BLE001
+    except Exception:
         meta = {}
     if not isinstance(meta, dict):
         meta = {}
@@ -161,7 +161,7 @@ def ingest_audio(
     from minimax_mcp.downloader import VideoDownloader
     from minimax_mcp.transcriber import AudioTranscriber
 
-    if path_or_url.startswith("http://") or path_or_url.startswith("https://"):
+    if path_or_url.startswith(("http://", "https://")):
         downloader = VideoDownloader(output_dir=downloads_dir, browser=browser)
         dl = downloader.download(path_or_url)
         if not dl.get("ok"):
@@ -249,7 +249,7 @@ def _ingest_markdown_file(
 ) -> dict[str, Any]:
     try:
         content = f.read_text(encoding="utf-8", errors="replace")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"ok": False, "error": f"read failed: {e}"}
     if not content.strip():
         return {"ok": False, "error": "empty file"}
@@ -330,7 +330,7 @@ def _save_document_with(
             "tags": doc.tags, "source_url": doc.source_url, "platform": doc.platform,
             "type": doc.type, "transcription_text": doc.transcription_text,
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         session.rollback()
         return {"ok": False, "stage": "db", "error": str(e)}
     finally:

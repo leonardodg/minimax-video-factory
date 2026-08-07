@@ -6,14 +6,14 @@ Covers: duration_to_frames, inject_scene (workflow patching), path mapping.
 Exit 0 = all pass. Any failure prints [BAD] and exits non-zero.
 """
 import json
-import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from minimax_mcp import server  # noqa: E402
+from minimax_mcp import server
+from minimax_mcp.core import duration_to_frames, inject_scene
 
 FAIL = 0
 
@@ -32,7 +32,7 @@ print("== unit_pure: duration_to_frames ==")
 # 5s -> 124 frames, 10s -> 243 (from AGENTS.md / ComfyMathExpression)
 CASES = {5.0: 124, 10.0: 243, 1.0: 39, 15.0: 362}
 for dur, expect in CASES.items():
-    got = server.duration_to_frames(dur)
+    got = duration_to_frames(dur)
     if got == expect:
         ok(f"duration_to_frames({dur}) = {got}")
     else:
@@ -44,7 +44,7 @@ if not wf_path.exists():
     bad(f"workflow not found: {wf_path}")
 else:
     wf = json.loads(wf_path.read_text())
-    patched = server.inject_scene(
+    patched = inject_scene(
         wf,
         prompt="test prompt",
         duration=5.0,
@@ -121,7 +121,7 @@ if cp == "/comfy/ComfyUI/output/scene_0.mp4":
 else:
     bad(f"to_container_path: {cp}")
 
-print("")
+print()
 if FAIL:
     print(f"FAIL: {FAIL}")
     sys.exit(1)

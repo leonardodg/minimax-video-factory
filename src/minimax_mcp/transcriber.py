@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +16,7 @@ except ImportError:
 class AudioTranscriber:
     """Transcribes audio from video files using faster-whisper (local, GPU)."""
 
-    _model_cache: dict[str, Any] = {}
+    _model_cache: ClassVar[dict[str, Any]] = {}
 
     def __init__(
         self,
@@ -119,7 +118,7 @@ class AudioTranscriber:
 
         except Exception as e:
             logger.exception("Transcription failed for %s", video_path)
-            return {"ok": False, "error": f"Transcription failed: {str(e)}"}
+            return {"ok": False, "error": f"Transcription failed: {e!s}"}
 
 
 def transcribe_video(

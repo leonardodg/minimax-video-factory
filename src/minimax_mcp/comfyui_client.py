@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import urllib.parse
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
@@ -36,10 +36,10 @@ class ComfyUIClient:
             r = self._client.get("/system_stats")
             r.raise_for_status()
             return {"ok": True, **r.json()}
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return {"ok": False, "error": str(e)}
 
-    def object_info(self, node_class: Optional[str] = None) -> dict[str, Any]:
+    def object_info(self, node_class: str | None = None) -> dict[str, Any]:
         url = "/object_info"
         if node_class:
             url += f"/{urllib.parse.quote(node_class)}"
@@ -84,7 +84,7 @@ class ComfyUIClient:
         ws_url = self.base_url.replace("http", "ws", 1) + "/ws?clientId=minimax-factory"
         deadline = asyncio.get_event_loop().time() + timeout
 
-        async def _poll() -> Optional[dict[str, Any]]:
+        async def _poll() -> dict[str, Any] | None:
             hist = self.get_history(prompt_id)
             rec = hist.get(prompt_id)
             if rec is None:
@@ -141,13 +141,13 @@ class ComfyUIClient:
         raise ComfyUIError(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
 
     # ---------- output resolution ----------
-    def resolve_output(self, history_rec: dict[str, Any], output_dir: str) -> Optional[str]:
+    def resolve_output(self, history_rec: dict[str, Any], output_dir: str) -> str | None:
         """Find the first saved .mp4 in outputs and return its absolute path."""
         outputs = history_rec.get("outputs", {})
-        for node_id, out in outputs.items():
+        for out in outputs.values():
             # SaveVideo reports under "images" (with "animated": [true]); older
             # nodes use "videos"/"gifs". Scan every kind for a .mp4 filename.
-            for kind, items in out.items():
+            for items in out.values():
                 if not isinstance(items, list):
                     continue
                 for item in items:
@@ -172,6 +172,5 @@ class ComfyUIClient:
         with self._client.stream("GET", url) as resp:
             resp.raise_for_status()
             with open(dest, "wb") as f:
-                for chunk in resp.iter_bytes():
-                    f.write(chunk)
+                f.writelines(resp.iter_bytes())
         return dest

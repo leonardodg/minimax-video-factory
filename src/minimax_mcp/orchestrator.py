@@ -2,17 +2,15 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
-from minimax_mcp.downloader import VideoDownloader
-from minimax_mcp.transcriber import AudioTranscriber
 from minimax_mcp.core import (
     submit_scene_core,
     wait_for_video_core,
-    compose_final_core,
 )
+from minimax_mcp.downloader import VideoDownloader
+from minimax_mcp.transcriber import AudioTranscriber
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +28,6 @@ class AudiovisualStudio:
         self.downloads_dir = Path(downloads_dir)
         self.downloads_dir.mkdir(parents=True, exist_ok=True)
 
-        from minimax_mcp.downloader import VideoDownloader
-        from minimax_mcp.transcriber import AudioTranscriber
 
         self.downloader = VideoDownloader(output_dir=self.downloads_dir, browser=browser)
         self.transcriber = AudioTranscriber(
@@ -92,7 +88,6 @@ class AudiovisualStudio:
         seed: int | None = None,
     ) -> dict[str, Any]:
         """Generate video using the existing MiniMax H3 pipeline."""
-        from minimax_mcp.core import submit_scene_core, wait_for_video_core
         import logging
         logger = logging.getLogger(__name__)
 
@@ -127,7 +122,7 @@ class AudiovisualStudio:
 
         except Exception as e:
             logging.getLogger(__name__).exception("Video generation failed")
-            return {"ok": False, "error": f"Generation failed: {str(e)}"}
+            return {"ok": False, "error": f"Generation failed: {e!s}"}
 
     def save_transcription_and_prompt(
         self,
@@ -140,8 +135,8 @@ class AudiovisualStudio:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        from datetime import datetime, timezone
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
         # Save transcription
         transcription_file = output_dir / f"transcription_{timestamp}.txt"
@@ -195,7 +190,7 @@ class AudiovisualStudio:
         output_dir = Path(output_dir) if output_dir else self.downloads_dir
 
         # 1. Download
-        logger.info("Step 1/4: Downloading video...")
+        logger.info("Step 1/5: Downloading video...")
         dl_result = self.download_video(url)
         if not dl_result.get("ok"):
             return {"ok": False, "stage": "download", "error": dl_result.get("error")}
@@ -203,7 +198,7 @@ class AudiovisualStudio:
         logger.info("Downloaded to: %s", video_path)
 
         # 2. Transcribe
-        logger.info("Step 2/4: Transcribing audio...")
+        logger.info("Step 2/5: Transcribing audio...")
         tr_result = self.transcriber.transcribe(video_path)
         if not tr_result.get("ok"):
             return {"ok": False, "stage": "transcribe", "error": tr_result.get("error")}
@@ -211,12 +206,12 @@ class AudiovisualStudio:
         logger.info("Transcription length: %d chars", len(transcription))
 
         # 3. Create cinematic prompt
-        logger.info("Step 3/4: Creating cinematic prompt...")
+        logger.info("Step 3/5: Creating cinematic prompt...")
         cinematic_prompt = self.create_cinematic_prompt(transcription, style=style)
         logger.info("Prompt created (%d chars)", len(cinematic_prompt))
 
         # 4. Save transcription and prompt
-        logger.info("Step 4/4: Saving transcription and prompt...")
+        logger.info("Step 4/5: Saving transcription and prompt...")
         save_result = self.save_transcription_and_prompt(
             transcription=transcription,
             cinematic_prompt=cinematic_prompt,
@@ -236,6 +231,16 @@ class AudiovisualStudio:
                 "transcription_file": save_result.get("transcription_file"),
                 "prompt_file": save_result.get("prompt_file"),
             }
+
+        # 5. Generate video
+        logger.info("Step 5/5: Generating video...")
+        gen_result = self.generate_video(
+            prompt=cinematic_prompt,
+            duration=duration,
+            width=width,
+            height=height,
+        )
+        logger.info("Generation result: %s", gen_result)
 
         if not gen_result.get("ok"):
             return {"ok": False, "stage": "generate", "error": gen_result.get("error")}

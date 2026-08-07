@@ -8,11 +8,11 @@ import random
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Optional
-
-from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError
+from typing import Any
 
 from dotenv import load_dotenv
+
+from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError
 
 load_dotenv()
 
@@ -120,7 +120,7 @@ def submit_scene_core(
     duration: float = 5.0,
     width: int = 1344,
     height: int = 768,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     filename_prefix: str = "video/factory",
 ) -> dict[str, Any]:
     if seed is None:
@@ -181,7 +181,7 @@ def compose_final_core(scene_paths: list[str], output_path: str = "output/final.
 
     cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
            "-i", str(concat_file), "-c", "copy", str(out_abs)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         return {"ok": False, "error": f"ffmpeg failed: {proc.stderr[-800:]}"}
     return {"ok": True, "output_path": to_host_path(str(out_abs)), "scenes": len(scene_paths)}

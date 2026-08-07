@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 def _run_script(name: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(ROOT / "tests" / name)],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT, capture_output=True, text=True, check=False,
     )
 
 
@@ -28,6 +28,30 @@ def test_unit_pure():
 @pytest.mark.unit
 def test_unit_knowledge():
     result = _run_script("unit_knowledge.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_orchestrator():
+    result = _run_script("unit_orchestrator.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_core():
+    result = _run_script("unit_core.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_registry():
+    result = _run_script("unit_registry.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_db():
+    result = _run_script("unit_db.py")
     assert result.returncode == 0, result.stdout + result.stderr
 
 

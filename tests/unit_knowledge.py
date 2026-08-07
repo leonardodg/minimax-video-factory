@@ -24,7 +24,7 @@ def bad(label: str) -> None:
 
 
 print("== unit_knowledge: db.chunk_text ==")
-from minimax_mcp import db  # noqa: E402
+from minimax_mcp import db
 
 if db.chunk_text("") != []:
     bad("chunk_text('') should return []")
@@ -51,7 +51,7 @@ else:
     bad("chunk overlap does not match the requested overlap size")
 
 print("== unit_knowledge: llm.build_summary_prompt / parse_llm_json ==")
-from minimax_mcp import llm  # noqa: E402
+from minimax_mcp import llm
 
 prompt = llm.build_summary_prompt("conteudo de teste")
 if "conteudo de teste" in prompt and "resumo" in prompt.lower() and "tutorial" in prompt.lower():
@@ -74,8 +74,9 @@ else:
     bad(f"parse_llm_json(fenced) = {parsed_fenced!r}")
 
 print("== unit_knowledge: vault.write_markdown_copy ==")
-import tempfile  # noqa: E402
-from minimax_mcp import vault  # noqa: E402
+import tempfile
+
+from minimax_mcp import vault
 
 skip_result = vault.write_markdown_copy({"title": "x"}, None)
 if skip_result == {"ok": True, "skipped": True, "reason": "VAULT_PATH not configured"}:
@@ -109,7 +110,7 @@ else:
     bad(f"write_markdown_copy raised or returned ok=False on bad path: {bad_path_result!r}")
 
 print("== unit_knowledge: knowledge._parse_frontmatter / _extract_section ==")
-from minimax_mcp import knowledge  # noqa: E402
+from minimax_mcp import knowledge
 
 md_with_fm = """---
 title: Git
@@ -168,7 +169,7 @@ if knowledge._extract_section("# sem seção de summary\napenas texto", "Summary
 else:
     bad("_extract_section should return None when no ## Summary heading")
 
-print("")
+print()
 if FAIL:
     print(f"FAIL: {FAIL}")
     sys.exit(1)
