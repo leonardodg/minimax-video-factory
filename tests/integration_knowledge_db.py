@@ -94,11 +94,13 @@ finally:
 print("== integration_knowledge_db: search_documents ==")
 session = db.get_session()
 try:
-    results = db.search_documents(session, "Docker", embed_fn=fake_embed, top_k=5)
+    # Unique query only the test document matches, so real KB content (e.g. the
+    # imported Docker tutorials) can't outrank it.
+    results = db.search_documents(session, "texto de teste sobre Python", embed_fn=fake_embed, top_k=5)
     if isinstance(results, list) and len(results) >= 1:
-        ok(f"search_documents('Docker') returned {len(results)} result(s)")
+        ok(f"search_documents('texto de teste sobre Python') returned {len(results)} result(s)")
     else:
-        bad(f"search_documents('Docker') returned {results!r}")
+        bad(f"search_documents returned {results!r}")
 
     if results and results[0].get("document_id") == doc.id:
         ok("top result matches the document created in save_document test")
