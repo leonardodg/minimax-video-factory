@@ -46,6 +46,10 @@ COPY workflows /workspace/workflows
 COPY scripts /workspace/scripts
 ENV UV_PROJECT_ENVIRONMENT=/opt/mcp-venv
 RUN cd /workspace && uv sync --no-dev
+# nvidia cu12 libs (cublas/cudnn) for ctranslate2/faster-whisper GPU transcription —
+# the venv's torch is cu13 (latest), but ctranslate2 needs libcublas.so.12.
+RUN /opt/conda/bin/uv pip install --python /opt/mcp-venv/bin/python --no-cache-dir nvidia-cublas-cu12 nvidia-cudnn-cu12
+ENV LD_LIBRARY_PATH="/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
 
 WORKDIR /comfy/ComfyUI
 

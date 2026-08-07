@@ -389,6 +389,12 @@ Usa `generate_video` direto (pula download/transcrição).
 
 5. **Output paths** — O MCP retorna paths relativos ao host via `OUTPUT_HOST_DIR`. Arquivos salvos em `output/transcriptions/` e vídeos em `output/`.
 
+6. **Resolução máxima na prática = 1024x576 em 12 GB VRAM.** A documentação diz que o canvas H3 vai até 768x1344, mas `generate_video`/`submit_scene` com **1344x768 OOM no sampler** (`torch.OutOfMemoryError`) mesmo com `--lowvram`. O maior tamanho testado sem OOM é **1024x576** (~15-20 min/clip de 5s); 512x320 é o mais rápido (~5 min). Sempre informe a resolução no prompt da demo.
+
+7. **Timeout MCP do opencode:** o client opencode tem timeout curto por padrão (~60s) para chamadas MCP — `wait_for_video`/`generate_video` (5-30 min) estouram com `MCP error -32001: Request timed out` mesmo passando `timeout=` ao tool. Fix: `"experimental": { "mcp_timeout": 3600000 }` no config global do opencode (`~/.config/opencode/opencode.json`). Aplica-se a processos novos (`opencode run`); sessões abertas precisam restart.
+
+8. **`opencode run` NÃO tem flag `--mcp`.** Servers MCP configurados no config global (`mcp.*` com `enabled: true`) são carregados automaticamente em toda sessão. `opencode run --auto "<prompt>"` é suficiente (evita o `Unknown argument: mcp`).
+
 ### Exemplo completo no chat
 
 > **Você:** "Quero transformar este Reel em um vídeo educativo: https://www.instagram.com/p/DbHIZl5Pk_0/
@@ -406,6 +412,16 @@ Usa `generate_video` direto (pula download/transcrição).
 
 > **OpenCode:** [executa generate_video com o prompt...]
 > ✅ Vídeo gerado em: output/studio/...
+
+### Comandos opencode (slash)
+
+Definidos em `.opencode/command/` (carregados no start do opencode — precisa restart para novos comandos):
+
+| Comando | Uso |
+|---|---|
+| `/minimax-gerar-video` | Gera vídeo no MiniMax H3 via MCP. `$ARGUMENTS` aceita descrição em linguagem natural + `duration=`, `width=`, `height=`, `seed=`, `filename_prefix=`. Template impõe **1024x576** (OOM acima). Se `generate_video` travar, fallback: `submit_scene` + `wait_for_video`. |
+| `/minimax-download` | Baixa vídeo (Reel/YT) via yt-dlp + cookies. `$ARGUMENTS`: `<URL> [browser=chrome] [transcrever] [model_size=small] [language=pt]`. Se `transcrever`, chama `transcribe_video` em GPU. |
+| `/minimax-transcrever` | Transcreve um vídeo **local** com Whisper (GPU). `$ARGUMENTS`: `<caminho-do-video> [model_size=small] [device=cuda] [language=pt]`. Usa a tool `transcribe_video`. |
 
 ### Resumo dos comandos MCP disponíveis
 

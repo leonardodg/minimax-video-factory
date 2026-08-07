@@ -28,6 +28,10 @@ services:
       - ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}:/comfy/ComfyUI/output
       # host input dir (optional; for I2V/R2V reference media)
       - ${INPUT_DIR:-${PROJECT_ROOT:-..}/input}:/comfy/ComfyUI/input
+      # host downloads dir (studio downloads; writable) -> /downloads
+      - ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}:/downloads
+      # persistent HuggingFace cache (faster-whisper models) so recreate doesn't re-download
+      - ${HF_CACHE_DIR:-${PROJECT_ROOT:-..}/.hf-cache}:/root/.cache/huggingface
       # project source -> /workspace so `docker compose exec` can run the MCP server
       # using the in-image uv/venv without needing a host uv.
       # NOTE: use an ABSOLUTE host path (PROJECT_ROOT from .env) — relative paths
@@ -45,6 +49,9 @@ services:
       WORKFLOW_PATH: /workspace/workflows/minimax_h3_t2v_api.json
       # Host-side view of the output dir (MCP reports host paths to OpenCode)
       OUTPUT_HOST_DIR: ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}
+      # Studio downloads: container view (/downloads) + host-side view for reporting
+      STUDIO_DOWNLOADS_DIR: /downloads
+      STUDIO_DOWNLOADS_HOST_DIR: ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}
       # Model set (bigger variants via .env)
       MODEL_DIFFUSION: ${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int4_convrot.safetensors}
       MODEL_TEXT_ENCODER: ${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}

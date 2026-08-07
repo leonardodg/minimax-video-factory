@@ -80,6 +80,7 @@ OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "video/factory")
 
 # Studio config
 STUDIO_DOWNLOADS_DIR = Path(os.environ.get("STUDIO_DOWNLOADS_DIR", PROJECT_ROOT / "downloads"))
+STUDIO_DOWNLOADS_HOST_DIR = os.environ.get("STUDIO_DOWNLOADS_HOST_DIR") or str(STUDIO_DOWNLOADS_DIR)
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 WHISPER_COMPUTE_TYPE = os.environ.get("WHISPER_COMPUTE_TYPE", "float16")
@@ -126,6 +127,28 @@ def to_container_path(p: str | os.PathLike[str]) -> str:
         try:
             rel = Path(s).relative_to(Path(OUTPUT_HOST_DIR))
             return str(OUTPUT_DIR / rel)
+        except ValueError:
+            pass
+    return s
+
+
+def downloads_to_host_path(p: str | os.PathLike[str]) -> str:
+    s = str(p)
+    if STUDIO_DOWNLOADS_HOST_DIR != str(STUDIO_DOWNLOADS_DIR):
+        try:
+            rel = Path(s).relative_to(STUDIO_DOWNLOADS_DIR)
+            return str(Path(STUDIO_DOWNLOADS_HOST_DIR) / rel)
+        except ValueError:
+            pass
+    return s
+
+
+def downloads_to_container_path(p: str | os.PathLike[str]) -> str:
+    s = str(p)
+    if STUDIO_DOWNLOADS_HOST_DIR != str(STUDIO_DOWNLOADS_DIR):
+        try:
+            rel = Path(s).relative_to(Path(STUDIO_DOWNLOADS_HOST_DIR))
+            return str(STUDIO_DOWNLOADS_DIR / rel)
         except ValueError:
             pass
     return s
@@ -243,7 +266,10 @@ def download_video(
     from minimax_mcp.orchestrator import AudiovisualStudio
     from minimax_mcp.downloader import VideoDownloader
     downloader = VideoDownloader(output_dir=STUDIO_DOWNLOADS_DIR, browser=browser)
-    return downloader.download(url)
+    result = downloader.download(url)
+    if result.get("ok"):
+        result["filepath"] = downloads_to_host_path(result["filepath"])
+    return result
 
 
 @mcp.tool()
@@ -255,6 +281,7 @@ def transcribe_video(
 ) -> dict[str, Any]:
     """Transcribe audio from a video file using faster-whisper (local, GPU-accelerated)."""
     from minimax_mcp.transcriber import AudioTranscriber
+    video_path = downloads_to_container_path(video_path)
     if model_size != "small" or device != "cuda":
         transcriber = AudioTranscriber(model_size=model_size, device=device)
         return transcriber.transcribe(video_path)
@@ -307,9 +334,14 @@ def studio_pipeline(
     """
     from minimax_mcp.orchestrator import AudiovisualStudio
     studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
-    return studio.run_full_pipeline(
+    result = studio.run_full_pipeline(
         url=url, style=style, duration=duration, width=width, height=height,
     )
+    if result.get("ok"):
+        for key in ("downloaded_file", "transcription_file", "prompt_file"):
+            if result.get(key):
+                result[key] = downloads_to_host_path(result[key])
+    return result
 
 
 # ---------------- entrypoint ----------------

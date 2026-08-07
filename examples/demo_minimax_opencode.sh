@@ -24,44 +24,44 @@ fi
 
 echo ""
 echo "--- CENA 1: Apresentação da ferramenta ---"
-echo "Prompt: 'Crie um vídeo de 5s apresentando o MiniMax Video Factory: texto animado \"MiniMax Video Factory\" com efeito de digitação, fundo escuro técnico, partículas sutis, cor azul-neon, 16:9 24fps.'"
+echo "Prompt: 'Crie um vídeo de 5s apresentando o MiniMax Video Factory: texto animado \"MiniMax Video Factory\" com efeito de digitação, fundo escuro técnico, partículas sutis, cor azul-neon, 16:9 24fps. Use resolução 1024x576 (12GB VRAM não aguenta 1344x768 — OOM no sampler).'"
 echo ""
-opencode run "Crie um vídeo de 5 segundos apresentando o MiniMax Video Factory: texto animado 'MiniMax Video Factory' com efeito de digitação, fundo escuro técnico, partículas sutis, cor azul-neon, 16:9 24fps." --mcp minimax-video-factory 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
+opencode run --auto "Crie um vídeo de 5 segundos apresentando o MiniMax Video Factory: texto animado 'MiniMax Video Factory' com efeito de digitação, fundo escuro técnico, partículas sutis, cor azul-neon, 16:9 24fps. Use resolução 1024x576 (12GB VRAM não aguenta 1344x768, OOM no sampler)." 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
 sleep 3
 
 echo ""
 echo "--- CENA 2: Fluxo de trabalho (arquitetura) ---"
-echo "Prompt: 'Gere 5s: diagrama animado mostrando fluxo OpenCode → MCP (stdio) → ComfyUI Docker/GPU → MiniMax H3 INT4 → vídeo + áudio nativo. Setas animadas, labels, fundo técnico escuro.'"
+echo "Prompt: 'Gere 5s: diagrama animado mostrando fluxo OpenCode → MCP (stdio) → ComfyUI Docker/GPU → MiniMax H3 INT4 → vídeo + áudio nativo. Setas animadas, labels, fundo técnico escuro. Use resolução 1024x576.'"
 echo ""
-opencode run "Gere 5 segundos: diagrama animado mostrando fluxo OpenCode -> MCP (stdio) -> ComfyUI Docker/GPU -> MiniMax H3 INT4 -> vídeo + áudio nativo. Setas animadas, labels, fundo técnico escuro." --mcp minimax-video-factory 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
+opencode run --auto "Gere 5 segundos: diagrama animado mostrando fluxo OpenCode -> MCP (stdio) -> ComfyUI Docker/GPU -> MiniMax H3 INT4 -> vídeo + áudio nativo. Setas animadas, labels, fundo técnico escuro. Use resolução 1024x576." 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
 sleep 3
 
 echo ""
 echo "--- CENA 3: Prompt estruturado MiniMax H3 ---"
 echo "Prompt: 'Vídeo 5s: close-up de terminal mostrando prompt MiniMax H3 estruturado — shots, camera, audio, duration, width, height, seed. Syntax highlighting, cursor piscando, fundo escuro.'"
 echo ""
-opencode run "Vídeo 5s: close-up de terminal mostrando prompt MiniMax H3 estruturado — shots, camera, audio, duration, width, height, seed. Syntax highlighting, cursor piscando, fundo escuro." --mcp minimax-video-factory 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
+opencode run "Vídeo 5s: close-up de terminal mostrando prompt MiniMax H3 estruturado — shots, camera, audio, duration, width, height, seed. Syntax highlighting, cursor piscando, fundo escuro." 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
 sleep 3
 
 echo ""
 echo "--- CENA 4: Exemplo renderizado — maçã girando ---"
 echo "Prompt: 'Render 5s: uma maçã vermelha brilhante girando lentamente em mesa de madeira, luz suave de janela lateral, close-up, profundidade de campo rasa, 512x320, seed 42.'"
 echo ""
-opencode run "Render 5s: uma maçã vermelha brilhante girando lentamente em mesa de madeira, luz suave de janela lateral, close-up, profundidade de campo rasa, 512x320, seed 42." --mcp minimax-video-factory 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
+opencode run "Render 5s: uma maçã vermelha brilhante girando lentamente em mesa de madeira, luz suave de janela lateral, close-up, profundidade de campo rasa, 512x320, seed 42." 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
 sleep 10
 
 echo ""
 echo "--- CENA 5: Exemplo renderizado — cristal flutuando ---"
 echo "Prompt: 'Render 5s: cristal azul translúcido flutuando no escuro, rotação orbital lenta, reflexos de luz, partículas de poeira no feixe, atmosfera misteriosa, 512x320, seed 123.'"
 echo ""
-opencode run "Render 5s: cristal azul translúcido flutuando no escuro, rotação orbital lenta, reflexos de luz, partículas de poeira no feixe, atmosfera misteriosa, 512x320, seed 123." --mcp minimax-video-factory 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
+opencode run "Render 5s: cristal azul translúcido flutuando no escuro, rotação orbital lenta, reflexos de luz, partículas de poeira no feixe, atmosfera misteriosa, 512x320, seed 123." 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
 sleep 10
 
 echo ""
 echo "--- CENA 6: Composição final ---"
 echo "Prompt: 'Concatene as duas cenas geradas (maçã + cristal) em vídeo final com crossfade suave 0.5s, mantendo áudio nativo estéreo.'"
 echo ""
-opencode run "Concatene as duas cenas geradas (maçã + cristal) em vídeo final com crossfade suave 0.5s, mantendo áudio nativo estéreo." --mcp minimax-video-factory 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
+opencode run "Concatene as duas cenas geradas (maçã + cristal) em vídeo final com crossfade suave 0.5s, mantendo áudio nativo estéreo." 2>&1 | grep -E "(build|⚙|✓|Error)" | head -5
 sleep 5
 
 echo ""

@@ -25,3 +25,4 @@ comfyui/output/
 .DS_Store
 .idea/
 .vscode/
+.hf-cache/
