@@ -43,6 +43,7 @@
 | `tests/test_scripts.py` (create) | Pytest entrypoints (`-m unit`/`-m integration_db`/`-m integration_llm`) wrapping the ad-hoc scripts above |
 | `scripts/generate_mcp_docs.py` (create) | Generates `docs/MCP_TOOLS.md` from the live MCP tool registry (no hand-maintained tool tables to drift) |
 | `docs/MCP_TOOLS.md` (create, generated) | Auto-generated MCP tool reference — regenerate, don't hand-edit |
+| `src/minimax_mcp/rerank.py` (create) | Local CrossEncoder reranking of search candidates (technique from `~/localhost/rag-private`) |
 
 ---
 
@@ -54,7 +55,7 @@ documentation generator for the MCP tools so the reference can never drift
 from `@mcp.tool()` definitions the way a hand-written table can. Do this
 **before** Task 1 — every later task's test script is written assuming these
 markers exist, and the docs generator is exercised (and re-run) starting in
-Task 12.
+Task 13.
 
 **Files:**
 - Modify: `pyproject.toml` (pytest config + `pytest-asyncio` is NOT needed —
@@ -76,7 +77,7 @@ Task 12.
   integration_db` (needs Postgres), `pytest -m integration_llm` (needs
   Ollama), plain `pytest` (runs everything reachable, auto-skips the rest).
   `scripts/generate_mcp_docs.py` produces `docs/MCP_TOOLS.md`, re-run at the
-  end of every task that adds/changes a tool (formalized in Task 12).
+  end of every task that adds/changes a tool (formalized in Task 13).
 
 - [ ] **Step 1: Add pytest config to `pyproject.toml`**
 
@@ -997,7 +998,7 @@ git commit -m "feat(kb): add save_document with Postgres integration test"
 
 **Interfaces:**
 - Consumes: `db.Document/Chunk/Embedding`, `db.chunk_text`, `db.save_document`, `db.get_session`
-- Produces: `db.search_documents(session, query: str, embed_fn, top_k: int = 5) -> list[dict]` and `db.reindex_all(session, embed_fn, embedding_model: str) -> int`. Used by `knowledge.search`/`knowledge.ask` (Task 11) and `knowledge.reindex` (Task 11).
+- Produces: `db.search_documents(session, query: str, embed_fn, top_k: int = 5) -> list[dict]` and `db.reindex_all(session, embed_fn, embedding_model: str) -> int`. Used by `knowledge.search`/`knowledge.ask` (Task 12, via `rerank.rerank` from Task 11) and `knowledge.reindex` (Task 12).
 
 - [ ] **Step 1: Append the failing test to `tests/integration_knowledge_db.py`**
 
@@ -1262,7 +1263,7 @@ git commit -m "feat(kb): add llm.py prompt building and JSON parsing with unit t
 
 **Interfaces:**
 - Consumes: `llm.build_summary_prompt`, `llm.parse_llm_json` (Task 6)
-- Produces: `llm.generate_structured(transcription: str, *, provider=None, model=None) -> dict` (keys: `ok`, `resumo`, `tutorial`, `objetivos`, `tags`, `provider`, `model` on success; `ok=False`, `error` on failure), `llm.embed(text: str, *, model=None) -> list[float]`, `llm.chat(prompt: str, *, provider=None, model=None) -> str`. Used by `knowledge.ingest_text` (Task 9) and `knowledge.ask` (Task 11).
+- Produces: `llm.generate_structured(transcription: str, *, provider=None, model=None) -> dict` (keys: `ok`, `resumo`, `tutorial`, `objetivos`, `tags`, `provider`, `model` on success; `ok=False`, `error` on failure), `llm.embed(text: str, *, model=None) -> list[float]`, `llm.chat(prompt: str, *, provider=None, model=None) -> str`. Used by `knowledge.ingest_text` (Task 9) and `knowledge.ask` (Task 12).
 
 - [ ] **Step 1: Write the failing test in `tests/integration_knowledge_llm.py`**
 
@@ -1923,7 +1924,155 @@ git commit -m "feat(kb): add knowledge.ingest_video/ingest_audio and their MCP t
 
 ---
 
-### Task 11: `knowledge.search` / `ask` / `reindex` + MCP tools
+### Task 11: `rerank.py` — CrossEncoder reranking
+
+Technique borrowed from the `~/localhost/rag-private` learning project: the
+Postgres hybrid search (full-text + cosine) is cheap but only approximately
+relevant; a local CrossEncoder re-scores a larger candidate pool against the
+actual query text and reorders it, which is what `rag-private` demonstrated
+noticeably improves which chunks end up in the LLM's context.
+
+**Files:**
+- Create: `src/minimax_mcp/rerank.py`
+- Modify: `pyproject.toml` (add `sentence-transformers`)
+- Modify: `.env.example` (add `RERANK_MODEL`)
+- Modify: `tests/unit_knowledge.py` (append)
+
+**Interfaces:**
+- Consumes: nothing (takes plain `dict` candidates, e.g. the output of `db.search_documents` from Task 5 — no direct import dependency)
+- Produces: `rerank.rerank(query: str, candidates: list[dict], top_k: int = 5, score_fn=None) -> list[dict]` — reorders `candidates` (each must have a `"snippets": list[str]` key) by relevance to `query` and returns the top `top_k`, each with an added `"rerank_score"` key. Used by `knowledge.search`/`knowledge.ask` (Task 12).
+
+- [ ] **Step 1: Add the `sentence-transformers` dependency and `RERANK_MODEL` env var**
+
+In `pyproject.toml`, after the `alembic` line added in Task 1:
+
+```toml
+    "sentence-transformers>=3.0.0",
+```
+
+In `.env.example`, after `EMBEDDING_DIM=1024`:
+
+```bash
+# Local CrossEncoder reranker (sentence-transformers, ~100MB, CPU-friendly).
+RERANK_MODEL=BAAI/bge-reranker-base
+```
+
+```bash
+cd $PROJECT_ROOT
+uv sync
+```
+
+- [ ] **Step 2: Write the failing test in `tests/unit_knowledge.py`**
+
+Insert before the final `print("")` / `if FAIL:` block. Uses a fake,
+deterministic `score_fn` so this test never has to download the ~100MB model.
+
+```python
+print("== unit_knowledge: rerank.rerank ==")
+from minimax_mcp import rerank  # noqa: E402
+
+
+def fake_score_fn(query: str, texts: list[str]) -> list[float]:
+    """Deterministic fake relevance score: count of shared words with the query."""
+    q_words = set(query.lower().split())
+    return [float(len(q_words & set(t.lower().split()))) for t in texts]
+
+
+candidates = [
+    {"document_id": 1, "snippets": ["docker install ubuntu apt"]},
+    {"document_id": 2, "snippets": ["python programming basics"]},
+    {"document_id": 3, "snippets": ["docker compose ubuntu server"]},
+]
+result = rerank.rerank("docker ubuntu", candidates, top_k=2, score_fn=fake_score_fn)
+if len(result) == 2 and result[0]["document_id"] in (1, 3):
+    ok(f"rerank returns top_k=2, best match first (doc {result[0]['document_id']})")
+else:
+    bad(f"rerank result unexpected: {result}")
+
+if result and result[0]["rerank_score"] >= result[1]["rerank_score"]:
+    ok("rerank results sorted by rerank_score descending")
+else:
+    bad("rerank results not sorted correctly")
+
+if rerank.rerank("query", [], top_k=5, score_fn=fake_score_fn) == []:
+    ok("rerank([]) returns []")
+else:
+    bad("rerank([]) did not return []")
+```
+
+- [ ] **Step 3: Run it to confirm it fails (module doesn't exist yet)**
+
+```bash
+cd $PROJECT_ROOT
+uv run python tests/unit_knowledge.py
+```
+
+Expected: `ModuleNotFoundError: No module named 'minimax_mcp.rerank'`
+
+- [ ] **Step 4: Write `src/minimax_mcp/rerank.py`**
+
+```python
+"""Local reranking via a CrossEncoder — reorders retrieval candidates by real
+relevance to the query, on top of the cheap full-text/cosine first pass.
+Technique validated in ~/localhost/rag-private (Ollama + ChromaDB + rerank)."""
+from __future__ import annotations
+
+import os
+from typing import Any, Callable, Optional
+
+RERANK_MODEL = os.environ.get("RERANK_MODEL", "BAAI/bge-reranker-base")
+
+_ranker = None
+
+
+def _default_score_fn(query: str, texts: list[str]) -> list[float]:
+    global _ranker
+    if _ranker is None:
+        from sentence_transformers import CrossEncoder
+        _ranker = CrossEncoder(RERANK_MODEL, max_length=512)
+    pairs = [[query, text] for text in texts]
+    return [float(s) for s in _ranker.predict(pairs)]
+
+
+def rerank(
+    query: str,
+    candidates: list[dict[str, Any]],
+    top_k: int = 5,
+    score_fn: Optional[Callable[[str, list[str]], list[float]]] = None,
+) -> list[dict[str, Any]]:
+    """Reorder `candidates` (each needs a 'snippets': list[str] key) by relevance
+    to `query`, using a cross-encoder, and return the top_k."""
+    if not candidates:
+        return []
+    score_fn = score_fn or _default_score_fn
+    texts = [" ".join(c.get("snippets", [])) for c in candidates]
+    scores = score_fn(query, texts)
+    for c, s in zip(candidates, scores):
+        c["rerank_score"] = float(s)
+    ranked = sorted(candidates, key=lambda c: c["rerank_score"], reverse=True)
+    return ranked[:top_k]
+```
+
+- [ ] **Step 5: Run the test again to confirm it passes**
+
+```bash
+uv run python tests/unit_knowledge.py
+```
+
+Expected: `PASS` (the fake `score_fn` means this still doesn't download the
+real model — that only happens the first time `knowledge.search`/`knowledge.ask`
+run for real, exercised end-to-end in Task 12's update to `tests/08_knowledge.sh`).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add pyproject.toml uv.lock .env.example src/minimax_mcp/rerank.py tests/unit_knowledge.py
+git commit -m "feat(kb): add CrossEncoder reranking (borrowed from rag-private) with unit tests"
+```
+
+---
+
+### Task 12: `knowledge.search` / `ask` / `reindex` + MCP tools
 
 **Files:**
 - Modify: `src/minimax_mcp/knowledge.py` (append)
@@ -1931,20 +2080,30 @@ git commit -m "feat(kb): add knowledge.ingest_video/ingest_audio and their MCP t
 - Modify: `tests/08_knowledge.sh` (append)
 
 **Interfaces:**
-- Consumes: `db.search_documents`, `db.reindex_all` (Task 5), `llm.embed`, `llm.chat` (Task 7), `knowledge.ingest_text` (Task 9, for the test fixture)
-- Produces: `knowledge.search(query, top_k=5) -> dict`, `knowledge.ask(query, top_k=3) -> dict`, `knowledge.reindex(embedding_model=None) -> dict`. MCP tools `knowledge_search`, `knowledge_ask`, `knowledge_reindex`.
+- Consumes: `db.search_documents`, `db.reindex_all` (Task 5), `llm.embed`, `llm.chat` (Task 7), `rerank.rerank` (Task 11), `knowledge.ingest_text` (Task 9, for the test fixture)
+- Produces: `knowledge.search(query, top_k=5, pool_size=20) -> dict`, `knowledge.ask(query, top_k=3) -> dict`, `knowledge.reindex(embedding_model=None) -> dict`. MCP tools `knowledge_search`, `knowledge_ask`, `knowledge_reindex`.
 
 - [ ] **Step 1: Append `search`, `ask`, `reindex` to `src/minimax_mcp/knowledge.py`**
 
+`search` now retrieves a larger `pool_size` from Postgres (cheap first pass)
+and reranks it down to `top_k` with a local CrossEncoder (Task 11) — same
+"retrieve a wide pool, rerank for real relevance" pattern validated in
+`~/localhost/rag-private`. `ask`'s prompt requires citing the source of every
+claim, also taken from that project's `prompt_sistema`.
+
+Add `from minimax_mcp import rerank` to the existing `from minimax_mcp import
+db, llm, vault` import line.
+
 ```python
-def search(query: str, top_k: int = 5) -> dict[str, Any]:
+def search(query: str, top_k: int = 5, pool_size: int = 20) -> dict[str, Any]:
     if not query or not query.strip():
         return {"ok": False, "error": "empty query"}
     session = db.get_session()
     try:
-        results = db.search_documents(session, query, embed_fn=llm.embed, top_k=top_k)
+        candidates = db.search_documents(session, query, embed_fn=llm.embed, top_k=pool_size)
     finally:
         session.close()
+    results = rerank.rerank(query, candidates, top_k=top_k)
     return {"ok": True, "query": query, "results": results}
 
 
@@ -1962,13 +2121,15 @@ def ask(query: str, top_k: int = 3) -> dict[str, Any]:
         }
 
     context = "\n\n---\n\n".join(
-        f"[{r.get('title') or 'sem título'}] {' '.join(r['snippets'])}" for r in results
+        f"[Fonte: {r.get('title') or 'sem título'}] {' '.join(r['snippets'])}" for r in results
     )
     prompt = (
-        "Responda à pergunta do usuário usando APENAS o contexto abaixo, extraído da base "
-        "de conhecimento pessoal dele. Se o contexto não tiver a resposta, diga isso "
-        "claramente em vez de inventar.\n\n"
-        f"Contexto:\n{context}\n\nPergunta: {query}\n\nResposta:"
+        "Você é um analista estrito. Responda à pergunta do usuário utilizando APENAS o "
+        "contexto abaixo, extraído da base de conhecimento pessoal dele. Para cada "
+        "afirmação que fizer, cite explicitamente a 'Fonte' correspondente do contexto. "
+        "Se o contexto não contiver a resposta, diga honestamente que não sabe, em vez de "
+        "inventar.\n\n"
+        f"Contexto:\n{context}\n\nPergunta: {query}\n\nResposta (com citação de fonte):"
     )
     try:
         answer = llm.chat(prompt)
@@ -2075,7 +2236,7 @@ git commit -m "feat(kb): add knowledge.search/ask/reindex and their MCP tools"
 
 ---
 
-### Task 12: Docs + host-mode wiring
+### Task 13: Docs + host-mode wiring
 
 **Files:**
 - Modify: `README.md`
@@ -2206,7 +2367,8 @@ git commit -m "docs(kb): document knowledge base setup, tools, and host-mode MCP
 
 ## Self-Review Notes
 
-- **Spec coverage:** every item in the "Novas tools MCP" / "Novos arquivos" / "Schema Postgres" / "Decisões técnicas-chave" sections of the design spec maps to a task above (infra → schema → chunking → CRUD → search → LLM client → vault export → the three ingest tools → search/ask/reindex → docs). `Erros e casos de borda` from the spec are implemented inline (LLM failure ⇒ no partial write via `session.rollback()` in Task 9; DB unreachable ⇒ caught by the same try/except; vault failure ⇒ soft-fail in Task 8; empty query/base ⇒ handled in Task 11's `search`/`ask`).
-- **Type/signature consistency:** `embed_fn: Callable[[str], list[float]]` is the same shape everywhere it's threaded through (`save_document`, `search_documents`, `reindex_all`, and the real `llm.embed`). `db.EMBEDDING_DIM` (Task 2) and `EMBEDDING_DIM = 1024` in the Alembic migration (Task 2) and `EMBEDDING_MODEL`/dimension in `.env.example` (Task 1) are all pinned to the verified 1024-dim output of `mxbai-embed-large`.
-- **Dev tooling (explicit user priority, added as Task 0):** pytest markers (`unit`/`integration_db`/`integration_llm`) give selective, CI-friendly test execution instead of only whole-script pass/fail, without rewriting the ok()/bad()-style scripts each task already produces — `tests/test_scripts.py` wraps them. `scripts/generate_mcp_docs.py` makes the MCP tool reference (`docs/MCP_TOOLS.md`) generated from the live tool registry, so it cannot drift the way the hand-written README/AGENTS.md tables can; Task 12 regenerates it as the last step. "Robust architecture" for this MVP means: ORM-only DB access (swappable engine), a provider-abstracted LLM client (swappable backend), transactional writes (Task 9's `session.rollback()` on failure), and every module (`llm.py`/`db.py`/`vault.py`/`knowledge.py`) independently testable — see `docs/ROADMAP.md` for what "robust" additionally means once this becomes a multi-user product (auth, hosted Postgres, cost model), which is explicitly out of scope here.
-- **Deferred to Post-MVP** (per spec, not part of this plan): Karakeep→Postgres ingestion, a web UI/site, reranking/dedup/MOCs, and the "product for other people" phase — see the separate roadmap document.
+- **Spec coverage:** every item in the "Novas tools MCP" / "Novos arquivos" / "Schema Postgres" / "Decisões técnicas-chave" sections of the design spec maps to a task above (infra → schema → chunking → CRUD → search → LLM client → vault export → rerank → the three ingest tools → search/ask/reindex → docs). `Erros e casos de borda` from the spec are implemented inline (LLM failure ⇒ no partial write via `session.rollback()` in Task 9; DB unreachable ⇒ caught by the same try/except; vault failure ⇒ soft-fail in Task 8; empty query/base ⇒ handled in Task 12's `search`/`ask`).
+- **Type/signature consistency:** `embed_fn: Callable[[str], list[float]]` is the same shape everywhere it's threaded through (`save_document`, `search_documents`, `reindex_all`, and the real `llm.embed`). `db.EMBEDDING_DIM` (Task 2) and `EMBEDDING_DIM = 1024` in the Alembic migration (Task 2) and `EMBEDDING_MODEL`/dimension in `.env.example` (Task 1) are all pinned to the verified 1024-dim output of `mxbai-embed-large`. `rerank.rerank`'s `candidates` parameter (Task 11) matches the exact shape `db.search_documents` (Task 5) returns (`document_id`/`snippets`/`score`/`title`/`source_url`/`summary`) and what `knowledge.search`/`ask` (Task 12) pass through to callers, including the `rerank_score` key rerank.py adds.
+- **rag-private techniques (explicit user request):** Task 11 adds a local CrossEncoder rerank pass and Task 12's `ask()` prompt requires per-claim source citation — both validated first in the user's `~/localhost/rag-private` learning project (Ollama + ChromaDB + `BAAI/bge-reranker-base` + strict citation). Only the techniques were reused; the vector store stays Postgres/pgvector, not ChromaDB, per the earlier explicit decision.
+- **Dev tooling (explicit user priority, added as Task 0):** pytest markers (`unit`/`integration_db`/`integration_llm`) give selective, CI-friendly test execution instead of only whole-script pass/fail, without rewriting the ok()/bad()-style scripts each task already produces — `tests/test_scripts.py` wraps them. `scripts/generate_mcp_docs.py` makes the MCP tool reference (`docs/MCP_TOOLS.md`) generated from the live tool registry, so it cannot drift the way the hand-written README/AGENTS.md tables can; Task 13 regenerates it as the last step. "Robust architecture" for this MVP means: ORM-only DB access (swappable engine), a provider-abstracted LLM client (swappable backend), transactional writes (Task 9's `session.rollback()` on failure), retrieval decoupled from reranking (`rerank.rerank`'s injectable `score_fn`), and every module (`llm.py`/`db.py`/`vault.py`/`rerank.py`/`knowledge.py`) independently testable — see `docs/ROADMAP.md` for what "robust" additionally means once this becomes a multi-user product (auth, hosted Postgres, cost model), which is explicitly out of scope here.
+- **Deferred to Post-MVP** (per spec, not part of this plan): Karakeep→Postgres ingestion, a web UI/site, dedup/MOCs beyond the rerank already included, and the "product for other people" phase — see the separate roadmap document.
