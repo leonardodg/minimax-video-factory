@@ -1,5 +1,10 @@
 site_name: MiniMax Video Factory
 site_description: Local video factory + Audiovisual Studio + personal knowledge base, orchestrated over MCP.
+# Required for correct canonical URLs and sitemap.xml on GitHub Pages, which
+# serves the project site from a /<repo>/ sub-path rather than the domain root.
+site_url: https://leonardodg.github.io/minimax-video-factory/
+repo_url: https://github.com/leonardodg/minimax-video-factory
+repo_name: leonardodg/minimax-video-factory
 docs_dir: docs
 theme:
   name: material

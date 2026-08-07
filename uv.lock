@@ -1427,6 +1427,13 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+docs = [
+    { name = "mkdocs" },
+    { name = "mkdocs-material" },
+    { name = "mkdocstrings", extra = ["python"] },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.13.1" },
@@ -1451,6 +1458,13 @@ requires-dist = [
     { name = "yt-dlp", specifier = ">=2024.1.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6.0" },
+    { name = "mkdocs-material", specifier = ">=9.5.0" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.25.0" },
+]
 
 [[package]]
 name = "mkdocs"

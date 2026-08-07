@@ -30,6 +30,18 @@ dev = [
     "mkdocstrings[python]>=0.25.0",
 ]
 
+# Docs-only group, installable WITHOUT the project and its runtime deps:
+#   uv sync --only-group docs
+# mkdocstrings reads the source statically (griffe), so building the API
+# reference needs no torch, no faster-whisper and no database -- which keeps
+# the Pages workflow at a handful of small wheels instead of ~2 GB.
+[dependency-groups]
+docs = [
+    "mkdocs>=1.6.0",
+    "mkdocs-material>=9.5.0",
+    "mkdocstrings[python]>=0.25.0",
+]
+
 [project.scripts]
 minimax-factory = "minimax_mcp.server:main"
 
