@@ -163,6 +163,22 @@ Audiovisual Studio one) is auto-generated — see
 For a step-by-step tutorial, chat-prompt examples, and the database schema see
 [`docs/KNOWLEDGE_BASE.md`](docs/KNOWLEDGE_BASE.md).
 
+## Slash commands
+
+Every MCP tool has a matching OpenCode slash command — `/minimax-*` for the
+video pipeline, `/kb-*` for the knowledge base. Type `/` in OpenCode to browse
+them, or see [`docs/COMMANDS.md`](docs/COMMANDS.md) for the full reference with
+parameters and operational notes.
+
+The commands are generated from the tool signatures plus curated notes:
+
+```bash
+uv run python scripts/generate_commands.py
+```
+
+Don't hand-edit the files in `.opencode/command/` — edit
+`scripts/command_docs/overrides.py` and regenerate.
+
 ## Requirements (hardware floor)
 
 | Resource | Minimum | Notes |

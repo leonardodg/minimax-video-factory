@@ -28,6 +28,7 @@ nav:
       - Self-hosted Runner: SELF_HOSTED_RUNNER.md
       - Knowledge Base Tutorial: KNOWLEDGE_BASE.md
       - MCP Tools Reference: MCP_TOOLS.md
+      - Slash Commands: COMMANDS.md
   - Developer Docs:
       - Overview: dev/index.md
       - Development Environment: dev/dev-environment.md
@@ -36,8 +37,10 @@ nav:
       - Contributing & Testing: dev/contributing.md
   - Roadmap: ROADMAP.md
   - Project Records:
-      - Design Spec (PT): superpowers/specs/2026-08-07-knowledge-base-mvp-design.md
-      - Implementation Plan (PT): superpowers/plans/2026-08-07-knowledge-base-mvp.md
+      - KB Design Spec (PT): superpowers/specs/2026-08-07-knowledge-base-mvp-design.md
+      - KB Implementation Plan (PT): superpowers/plans/2026-08-07-knowledge-base-mvp.md
+      - Slash Commands Spec (PT): superpowers/specs/2026-08-07-slash-commands-generator-design.md
+      - Slash Commands Plan (PT): superpowers/plans/2026-08-07-slash-commands-generator.md
   - API Reference: api.md
 
 plugins:

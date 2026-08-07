@@ -307,6 +307,23 @@ does NOT inherit the parent env otherwise, and `health_check` will report all mo
 missing. `StdioTransport(command, args, env, cwd)` — the old `["cmd", ...]` list
 signature no longer exists in fastmcp 3.x.
 
+### Adding or changing a tool
+
+Every tool has a matching OpenCode slash command, generated from this file's
+signatures. When you add or change an `@mcp.tool()`:
+
+1. Give it a command name in `scripts/command_docs/catalog.py`. The generator
+   will not invent one — naming is a human call.
+2. If there is operational knowledge the signature cannot express (hardware
+   limits, known error messages, chaining into another tool), record it in
+   `scripts/command_docs/overrides.py`.
+3. Run `uv run python scripts/generate_commands.py`.
+4. Commit the generated `.md` files together with the tool.
+
+`tests/unit_commands.py` fails if you skip any of these — that is deliberate.
+The seven knowledge-base tools went undocumented for days precisely because
+nothing forced the step.
+
 ---
 
 ## 8. Validation & troubleshooting cheat-sheet

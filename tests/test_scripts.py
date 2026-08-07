@@ -61,6 +61,12 @@ def test_unit_defaults():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.unit
+def test_unit_commands():
+    result = _run_script("unit_commands.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.integration_db
 def test_integration_knowledge_db():
     result = _run_script("integration_knowledge_db.py")
