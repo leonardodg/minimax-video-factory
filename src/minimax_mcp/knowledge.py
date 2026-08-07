@@ -4,14 +4,54 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
+
+import yaml
 
 from minimax_mcp import db, llm, vault
 
 logger = logging.getLogger(__name__)
 
 VAULT_PATH = os.environ.get("VAULT_PATH") or None
+
+
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Split YAML frontmatter (`---` delimited, if present) from the markdown body.
+
+    Returns (meta, body). Tolerates missing/broken frontmatter.
+    """
+    if not text.startswith("---"):
+        return {}, text
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}, text
+    meta_raw, body = parts[1], parts[2]
+    try:
+        meta = yaml.safe_load(meta_raw) or {}
+    except Exception:  # noqa: BLE001
+        meta = {}
+    if not isinstance(meta, dict):
+        meta = {}
+    return meta, body.lstrip("\n")
+
+
+def _extract_section(body: str, heading: str = "Summary") -> str | None:
+    """Extract the text under a `## <heading>` markdown section (case-insensitive),
+    e.g. the `## Summary` block found in Claude Chat transcripts."""
+    pat = re.compile(
+        rf"^##+\s*{re.escape(heading)}\s*$", re.MULTILINE | re.IGNORECASE
+    )
+    m = pat.search(body)
+    if not m:
+        return None
+    start = m.end()
+    # section ends at the next top-level (## or lower) heading
+    nxt = re.search(r"^##+\s+\S", body[start:], re.MULTILINE)
+    end = start + nxt.start() if nxt else len(body)
+    text = body[start:end].strip()
+    return text or None
 
 
 def ingest_text(
@@ -146,6 +186,161 @@ def ingest_audio(
     if result.get("ok"):
         result["source_file"] = filepath
     return result
+
+
+def ingest_markdown(
+    path: str | Path,
+    *,
+    recursive: bool = False,
+    doc_type: str = "document",
+    platform: str = "obsidian",
+    language: str = "pt",
+    reindex_if_exists: bool = False,
+) -> dict[str, Any]:
+    """Import one or more markdown files (e.g. Obsidian tutorials) into the KB.
+
+    Accepts a file path or a directory (recursive optional). YAML frontmatter is
+    used for title/tags/source_url; a `## Summary` section is reused when present,
+    otherwise the LLM generates summary+tutorial+objectives+tags. Skips `.trash`,
+    `.obsidian` and other dot-directories. Returns per-file results.
+    """
+    p = Path(path).expanduser()
+    if p.is_file():
+        files = [p]
+    elif p.is_dir():
+        files = sorted(
+            f
+            for f in (p.rglob("*.md") if recursive else p.glob("*.md"))
+            if not any(part.startswith(".") for part in f.relative_to(p).parts)
+        )
+    else:
+        return {"ok": False, "error": f"path not found: {path}"}
+    if not files:
+        return {"ok": False, "error": f"no .md files found in {path}"}
+
+    results: list[dict[str, Any]] = []
+    imported = 0
+    for f in files:
+        res = _ingest_markdown_file(
+            f,
+            doc_type=doc_type,
+            platform=platform,
+            language=language,
+            reindex_if_exists=reindex_if_exists,
+        )
+        results.append({"file": str(f), **res})
+        if res.get("ok"):
+            imported += 1
+    return {
+        "ok": True,
+        "imported": imported,
+        "total": len(files),
+        "results": results,
+    }
+
+
+def _ingest_markdown_file(
+    f: Path,
+    *,
+    doc_type: str,
+    platform: str,
+    language: str,
+    reindex_if_exists: bool,
+) -> dict[str, Any]:
+    try:
+        content = f.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"read failed: {e}"}
+    if not content.strip():
+        return {"ok": False, "error": "empty file"}
+
+    meta, body = _parse_frontmatter(content)
+    title = str(meta.get("title") or f.stem).strip()
+    source_url = meta.get("url") or None
+    fm_tags = meta.get("tags") or []
+    if isinstance(fm_tags, str):
+        fm_tags = [t.strip() for t in fm_tags.split(",") if t.strip()]
+    aliases = meta.get("aliases") or []
+    if isinstance(aliases, str):
+        aliases = [aliases]
+
+    summary = _extract_section(body, "Summary")
+    if summary:
+        return _save_document_with(
+            f, doc_type=doc_type, platform=platform, language=language,
+            title=title, source_url=source_url, text=body,
+            summary=summary, tutorial=None, objectives=None, tags=fm_tags,
+            llm_provider="frontmatter", llm_model="none",
+        )
+
+    gen = llm.generate_structured(body)
+    if not gen.get("ok"):
+        gen = llm.generate_structured(body[:4000])
+    if not gen.get("ok"):
+        return {"ok": False, "stage": "llm", "error": gen.get("error")}
+
+    tags = list(dict.fromkeys([t for t in (fm_tags + (gen.get("tags") or [])) if t]))
+    return _save_document_with(
+        f, doc_type=doc_type, platform=platform, language=language,
+        title=title, source_url=source_url, text=body,
+        summary=gen.get("resumo"), tutorial=gen.get("tutorial"),
+        objectives="\n".join(gen.get("objetivos") or []), tags=tags,
+        llm_provider=gen.get("provider"), llm_model=gen.get("model"),
+    )
+
+
+def _save_document_with(
+    f: Path,
+    *,
+    doc_type: str,
+    platform: str,
+    language: str,
+    title: str,
+    source_url: str | None,
+    text: str,
+    summary: str | None,
+    tutorial: str | None,
+    objectives: str | None,
+    tags: list[str],
+    llm_provider: str | None,
+    llm_model: str | None,
+) -> dict[str, Any]:
+    session = db.get_session()
+    try:
+        doc = db.save_document(
+            session,
+            type=doc_type,
+            source_url=source_url,
+            platform=platform,
+            title=title,
+            language=language,
+            transcription_text=text,
+            summary=summary,
+            tutorial=tutorial,
+            objectives=objectives,
+            tags=tags,
+            raw_file_path=str(f),
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            embed_fn=llm.embed,
+            embedding_model=llm.EMBEDDING_MODEL,
+        )
+        doc_dict = {
+            "id": doc.id, "title": doc.title, "summary": doc.summary, "tutorial": doc.tutorial,
+            "tags": doc.tags, "source_url": doc.source_url, "platform": doc.platform,
+            "type": doc.type, "transcription_text": doc.transcription_text,
+        }
+    except Exception as e:  # noqa: BLE001
+        session.rollback()
+        return {"ok": False, "stage": "db", "error": str(e)}
+    finally:
+        session.close()
+
+    vault_result = vault.write_markdown_copy(doc_dict, VAULT_PATH)
+    return {
+        "ok": True, "document_id": doc_dict["id"], "title": doc_dict["title"],
+        "summary": doc_dict["summary"], "tags": doc_dict["tags"], "vault": vault_result,
+    }
 
 
 def search(query: str, top_k: int = 5) -> dict[str, Any]:

@@ -146,6 +146,7 @@ default) turning transcriptions into structured summaries/tutorials.
 | `knowledge_ingest_text(text, source_url?, title?, platform?)` | Summarize+document a ready-made text/transcription |
 | `knowledge_ingest_video(url, browser?, whisper_model?)` | Download + transcribe + document a video |
 | `knowledge_ingest_audio(path_or_url, browser?, whisper_model?)` | Transcribe + document a local/downloaded audio (podcasts) |
+| `knowledge_ingest_markdown(path, recursive?, doc_type?, platform?, language?)` | Import `.md` files (Obsidian/tutorials): reuse frontmatter + `## Summary` or LLM-generate |
 | `knowledge_search(query, top_k?)` | Full-text + semantic (pgvector) search |
 | `knowledge_ask(query, top_k?)` | RAG: answer a question using the knowledge base as context |
 | `knowledge_reindex(embedding_model?)` | Recompute chunks/embeddings for every document |

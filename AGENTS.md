@@ -472,7 +472,7 @@ repeated runs don't accumulate stale docs that break top-result assertions.
 **Full tutorial & reference:** `docs/KNOWLEDGE_BASE.md` — the 6 `knowledge_*`
 tools with all parameters and best options, recommended flows, chat-prompt
 examples for OpenCode, the Postgres schema (`documents`/`chunks`/`embeddings`),
-`.env` knobs and troubleshooting. The complete 17-tool auto-generated reference
+`.env` knobs and troubleshooting. The complete 18-tool auto-generated reference
 lives in `docs/MCP_TOOLS.md`.
 
 ### 10.1 Tutorial: pedir via chat (OpenCode)
@@ -485,6 +485,7 @@ opencode session** after config changes. Requer Postgres + Ollama de pé.
 | "Documente este texto na minha base: [texto]" | `knowledge_ingest_text` |
 | "Baixe, transcreva e salve este Reel na base: <URL>" | `knowledge_ingest_video` |
 | "Transcreva e documente este podcast: /path/x.mp3" | `knowledge_ingest_audio` |
+| "Importe os tutoriais de /path/pasta (markdown/Obsidian) para a base" | `knowledge_ingest_markdown` |
 | "Pesquise na minha base por 'Docker Ubuntu'" | `knowledge_search` |
 | "O que eu já salvei sobre Docker? Responda com base na base." | `knowledge_ask` |
 | "Troquei o modelo de embedding; reindexe tudo." | `knowledge_reindex` |

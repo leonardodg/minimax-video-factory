@@ -7,7 +7,7 @@ resumo, tutorial passo-a-passo, objetivos e tags. Tudo roda localmente (sem nuve
 Neste documento:
 - [1. O que é / quando usar](#1-o-que-é--quando-usar)
 - [2. Prerequisitos & setup](#2-prerequisitos--setup)
-- [3. As 6 tools (referência completa + melhores opções)](#3-as-6-tools)
+- [3. As 7 tools (referência completa + melhores opções)](#3-as-7-tools)
 - [4. Fluxos recomendados passo-a-passo](#4-fluxos-recomendados)
 - [5. Usar pelo chat do OpenCode (exemplos de prompts)](#5-usar-pelo-chat-do-opencode)
 - [6. Estrutura da base de dados](#6-estrutura-da-base-de-dados)
@@ -18,14 +18,15 @@ Neste documento:
 
 ## 1. O que é / quando usar
 
-O MCP de vídeo expõe **17 tools no total** (11 originais do MiniMax H3/Studio + 6 da
-knowledge base). As 6 novas:
+O MCP de vídeo expõe **18 tools no total** (11 originais do MiniMax H3/Studio + 7 da
+knowledge base). As 7 novas:
 
 | Tool | O que faz | Precisa GPU? |
 |---|---|---|
 | `knowledge_ingest_text` | Salva um texto/transcrição pronto na base (resumo+tutorial via LLM) | Não |
 | `knowledge_ingest_video` | Baixa + transcreve + documenta um vídeo (Reel/YouTube) | Sim (Whisper GPU) |
 | `knowledge_ingest_audio` | Transcreve + documenta um áudio/podcast | Sim (Whisper GPU) |
+| `knowledge_ingest_markdown` | Importa arquivos `.md` (Obsidian/tutoriais): frontmatter + `## Summary` ou LLM | Não |
 | `knowledge_search` | Busca por palavra-chave + semântica na base | Não |
 | `knowledge_ask` | Responde perguntas com RAG (busca + LLM) sobre o que já foi salvo | Não |
 | `knowledge_reindex` | Recalcula chunks + embeddings de todos os documentos | Não |
@@ -60,7 +61,26 @@ ollama list          # deve mostrar lfm2:24b e mxbai-embed-large
 
 ---
 
-## 3. As 6 tools
+## 3. As 7 tools
+
+### `knowledge_ingest_markdown`
+
+Importa arquivos **markdown** (obsidian, docs, tutoriais). Reusa o frontmatter YAML
+(`title`, `url`, `tags`, `aliases`) e uma seção `## Summary` quando existir; caso
+contrário, o LLM gera `resumo` + `tutorial` + `objetivos` + `tags`. Aceita um arquivo
+ou um diretório (pula subpastas com ponto, ex. `.trash`/`.obsidian`).
+
+| Parâmetro | Obrigatório | Default | Melhor opção |
+|---|---|---|---|
+| `path` | ✅ | — | caminho do `.md` ou da pasta |
+| `recursive` | ❌ | `false` | `true` para incluir subpastas |
+| `doc_type` | ❌ | `document` | `document`, `tutorial`, `manual` |
+| `platform` | ❌ | `obsidian` | origem dos arquivos |
+| `language` | ❌ | `pt` | idioma do conteúdo |
+| `reindex_if_exists` | ❌ | `false` | regenera embeddings se o arquivo já existe na base |
+
+> **Dica:** para migrar uma coleção Obsidian inteira, aponte `path` para a pasta e use
+> `recursive=true`. O upload de 26 tutoriais leva ~1–2 min com `lfm2:24b`.
 
 ### `knowledge_ingest_text`
 

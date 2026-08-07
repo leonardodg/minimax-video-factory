@@ -87,8 +87,12 @@ def get_session() -> Session:
     return _SessionLocal()
 
 
-def chunk_text(text: str, max_chars: int = 1000, overlap: int = 100) -> list[str]:
-    """Split text into overlapping chunks for embedding/search."""
+def chunk_text(text: str, max_chars: int = 700, overlap: int = 100) -> list[str]:
+    """Split text into overlapping chunks for embedding/search.
+
+    max_chars defaults to 700 so dense content (code/JSON heavy) stays below the
+    Ollama embedding batch limit (~512 tokens) even at ~0.75 tokens/char.
+    """
     text = text.strip()
     if not text:
         return []

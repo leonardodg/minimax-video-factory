@@ -108,6 +108,66 @@ if bad_path_result.get("ok") and bad_path_result.get("skipped"):
 else:
     bad(f"write_markdown_copy raised or returned ok=False on bad path: {bad_path_result!r}")
 
+print("== unit_knowledge: knowledge._parse_frontmatter / _extract_section ==")
+from minimax_mcp import knowledge  # noqa: E402
+
+md_with_fm = """---
+title: Git
+tags:
+  - git
+  - versionamento
+url: https://example.com/git
+---
+
+# Git
+
+Conteúdo do tutorial.
+"""
+meta, body = knowledge._parse_frontmatter(md_with_fm)
+if meta.get("title") == "Git" and meta.get("url") == "https://example.com/git":
+    ok("_parse_frontmatter extracts title/url/tags from YAML frontmatter")
+else:
+    bad(f"_parse_frontmatter(meta) = {meta!r}")
+
+if body.startswith("# Git") and "Conteúdo" in body:
+    ok("_parse_frontmatter returns the body after the closing ---")
+else:
+    bad(f"_parse_frontmatter(body) = {body[:60]!r}")
+
+no_fm = "# Só título\n\nsem frontmatter"
+meta2, body2 = knowledge._parse_frontmatter(no_fm)
+if meta2 == {} and body2 == no_fm:
+    ok("_parse_frontmatter leaves files without frontmatter untouched")
+else:
+    bad(f"_parse_frontmatter(no frontmatter) = {meta2!r}, {body2[:40]!r}")
+
+broken_fm = "---\nnot: valid: yaml: [[[\n---\n# corpo\n"
+meta3, body3 = knowledge._parse_frontmatter(broken_fm)
+if meta3 == {} and "# corpo" in body3:
+    ok("_parse_frontmatter tolerates broken YAML (returns empty meta)")
+else:
+    bad(f"_parse_frontmatter(broken yaml) = {meta3!r}")
+
+with_summary = """# Docker
+
+## Summary
+Instala o Docker no Ubuntu em três passos.
+
+## Passos
+1. apt update
+2. apt install docker.io
+"""
+summary = knowledge._extract_section(with_summary, "Summary")
+if summary and summary.startswith("Instala o Docker") and "apt install" not in summary:
+    ok("_extract_section grabs text under ## Summary until the next heading")
+else:
+    bad(f"_extract_section(summary) = {summary!r}")
+
+if knowledge._extract_section("# sem seção de summary\napenas texto", "Summary") is None:
+    ok("_extract_section returns None when the heading is absent")
+else:
+    bad("_extract_section should return None when no ## Summary heading")
+
 print("")
 if FAIL:
     print(f"FAIL: {FAIL}")

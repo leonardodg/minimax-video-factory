@@ -361,6 +361,24 @@ def knowledge_ingest_text(
 
 
 @mcp.tool()
+def knowledge_ingest_markdown(
+    path: str = Field(
+        description="Arquivo .md ou diretório (ex.: caminho do Obsidian) a importar"
+    ),
+    recursive: bool = Field(
+        default=False, description="Se path for diretório, incluir subdiretórios"
+    ),
+    doc_type: str = Field(
+        default="document", description="Tipo do documento na base (ex.: document, tutorial)"
+    ),
+) -> dict[str, Any]:
+    """Importa um ou mais arquivos markdown (ex.: tutoriais do Obsidian) para a base de conhecimento.
+    Aproveita YAML frontmatter (title/tags/url) e reutiliza `## Summary` se houver; senão gera via LLM."""
+    from minimax_mcp import knowledge
+    return knowledge.ingest_markdown(path, recursive=recursive, doc_type=doc_type)
+
+
+@mcp.tool()
 def knowledge_ingest_video(
     url: str = Field(description="URL do vídeo (Instagram Reel, YouTube, etc.)"),
     browser: str = Field(default=STUDIO_BROWSER, description="Navegador para cookies"),
