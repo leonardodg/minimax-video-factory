@@ -324,6 +324,40 @@ if _WF[SCHEDULER_NODE_ID]["inputs"]["steps"] == 20:
 else:
     bad("inject_scene mutated the workflow's step count")
 
+print("== unit_core: execution errors explain themselves ==")
+from minimax_mcp.comfyui_client import describe_execution_error
+
+_OOM = {"status_str": "error", "messages": [
+    ["execution_start", {"prompt_id": "x"}],
+    ["execution_error", {"node_id": "10", "node_type": "SamplerCustomAdvanced",
+                         "exception_type": "torch.OutOfMemoryError",
+                         "exception_message": "Allocation on device \n\nThis error means..."}],
+]}
+_msg = describe_execution_error(_OOM)
+# The three resolution tests all died of this and were reported two different
+# ways, which cost an investigation into a bug that did not exist.
+if "out of GPU memory" in _msg and "SamplerCustomAdvanced" in _msg:
+    ok("an OOM says it is an OOM, and where")
+else:
+    bad(f"OOM described as: {_msg!r}")
+if "resolution" in _msg or "shorten" in _msg:
+    ok("the OOM message says what to do about it")
+else:
+    bad("OOM message offers no remedy")
+
+# The same failure arrives in two shapes depending on which branch catches it.
+_direct = {"node_id": "10", "node_type": "VAEDecode",
+           "exception_type": "RuntimeError", "exception_message": "boom\nsecond line"}
+if describe_execution_error(_direct) == "RuntimeError in VAEDecode: boom":
+    ok("a bare execution_error payload is described the same way")
+else:
+    bad(f"direct payload: {describe_execution_error(_direct)!r}")
+
+if describe_execution_error({"status_str": "error"}):
+    ok("an unrecognised payload still returns something rather than crashing")
+else:
+    bad("empty description for an unknown payload")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

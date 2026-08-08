@@ -54,6 +54,27 @@ def _extract_section(body: str, heading: str = "Summary") -> str | None:
     return text or None
 
 
+def _kb_unavailable() -> dict[str, Any] | None:
+    """Explain why the knowledge base cannot be reached, or None if it can.
+
+    The kb_* tools are registered on every MCP variant, including the
+    in-container one -- which by design cannot reach Postgres or Ollama, both
+    of which run on the host. Without this they returned nothing useful and no
+    reason, and a whole session went by before anyone worked out why.
+    """
+    if not os.environ.get("KB_DATABASE_URL"):
+        return {
+            "ok": False,
+            "stage": "config",
+            "error": (
+                "KB_DATABASE_URL is not set. The knowledge-base tools need the "
+                "host MCP variant (uv run), not the in-container one: Postgres "
+                "and Ollama run on the host. See AGENTS.md."
+            ),
+        }
+    return None
+
+
 def ingest_text(
     text: str,
     *,
@@ -64,6 +85,8 @@ def ingest_text(
     language: str = "pt",
 ) -> dict[str, Any]:
     """Summarize+document `text` via the LLM and store it in the knowledge base."""
+    if (unavailable := _kb_unavailable()):
+        return unavailable
     if not text or not text.strip():
         return {"ok": False, "error": "empty text"}
 
@@ -204,6 +227,8 @@ def ingest_markdown(
     otherwise the LLM generates summary+tutorial+objectives+tags. Skips `.trash`,
     `.obsidian` and other dot-directories. Returns per-file results.
     """
+    if (unavailable := _kb_unavailable()):
+        return unavailable
     p = Path(path).expanduser()
     if p.is_file():
         files = [p]
@@ -360,6 +385,8 @@ def _save_document_with(
 
 
 def search(query: str, top_k: int = 5) -> dict[str, Any]:
+    if (unavailable := _kb_unavailable()):
+        return unavailable
     if not query or not query.strip():
         return {"ok": False, "error": "empty query"}
     session = db.get_session()
@@ -405,6 +432,8 @@ def ask(query: str, top_k: int = 3) -> dict[str, Any]:
 
 
 def reindex(embedding_model: str | None = None) -> dict[str, Any]:
+    if (unavailable := _kb_unavailable()):
+        return unavailable
     session = db.get_session()
     try:
         count = db.reindex_all(

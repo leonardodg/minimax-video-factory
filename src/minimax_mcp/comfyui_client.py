@@ -79,6 +79,38 @@ def queue_snapshot_from(queue_payload: dict[str, Any]) -> dict[str, Any]:
     return {"running": running, "pending": pending, "total": len(running) + len(pending)}
 
 
+def describe_execution_error(payload: dict[str, Any]) -> str:
+    """A one-line reason from a ComfyUI error status or execution_error event.
+
+    Both shapes carry the same thing in different places, and dumping raw JSON
+    made three identical out-of-memory failures look like two different bugs --
+    the truncated dump hid the exception type behind a wall of status fields.
+    """
+    data = payload
+    for message in payload.get("messages") or []:
+        try:
+            if message[0] == "execution_error":
+                data = message[1]
+                break
+        except (IndexError, TypeError):
+            continue
+
+    exc = data.get("exception_type") or ""
+    node = data.get("node_type") or data.get("node_id")
+    msg = (data.get("exception_message") or "").strip().splitlines()
+    first = msg[0] if msg else ""
+
+    if "OutOfMemory" in exc:
+        return (
+            f"out of GPU memory in {node}. Lower the resolution or shorten the "
+            f"clip -- cost is width x height x frames, so 1024x576 at 5s fits "
+            f"where 1024x576 at 10s does not."
+        )
+    if exc:
+        return f"{exc} in {node}: {first}" if first else f"{exc} in {node}"
+    return json.dumps(payload)[:300]
+
+
 class ComfyUIClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
@@ -228,7 +260,7 @@ class ComfyUIClient:
             if status.get("completed") or rec.get("outputs"):
                 return rec
             if status.get("status_str") == "error" or status.get("error"):
-                raise ComfyUIError(f"Execution failed: {json.dumps(status)[:800]}")
+                raise ComfyUIError(describe_execution_error(status))
             return None
 
         # Fast path: check immediately (might already be done or queued behind others)
@@ -268,7 +300,7 @@ class ComfyUIClient:
                             return done
                 elif evt_type == "execution_error":
                     err = evt.get("data", {})
-                    raise ComfyUIError(f"Execution error: {json.dumps(err)[:800]}")
+                    raise ComfyUIError(describe_execution_error(err))
 
                 if done is None:
                     done = await _poll()

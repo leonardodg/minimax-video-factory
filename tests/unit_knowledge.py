@@ -4,6 +4,7 @@
 Run: uv run --directory . python tests/unit_knowledge.py
 Exit 0 = all pass. Any failure prints [BAD] and exits non-zero.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -216,6 +217,9 @@ for force_json in (True, False):
         bad(f"prompt was altered: {ollama_msgs[-1]['content']!r}")
 
 print("== unit_knowledge: ingest_markdown reports failure ==")
+# These exercise the aggregation logic, not connectivity, so the availability
+# guard has to see a configured database or it short-circuits first.
+os.environ.setdefault("KB_DATABASE_URL", "postgresql+psycopg://t:t@127.0.0.1:1/t")
 import tempfile
 from unittest import mock
 
@@ -254,6 +258,27 @@ if r.get("ok") and r.get("imported") == 1 and r.get("failed") == 1:
     ok("a partial import is ok=True with the failures counted")
 else:
     bad(f"partial: ok={r.get('ok')} imported={r.get('imported')} failed={r.get('failed')}")
+
+print("== unit_knowledge: kb tools say why they cannot run ==")
+_saved = os.environ.pop("KB_DATABASE_URL", None)
+try:
+    for _name, _call in (
+        ("ingest_text", lambda: knowledge.ingest_text("algum texto")),
+        ("ingest_markdown", lambda: knowledge.ingest_markdown("/tmp")),
+        ("search", lambda: knowledge.search("consulta")),
+        ("ask", lambda: knowledge.ask("pergunta")),
+        ("reindex", lambda: knowledge.reindex()),
+    ):
+        _r = _call()
+        # Silence here is what hid a broken container for a whole session: the
+        # tools were listed, accepted calls, and returned nothing that said why.
+        if _r.get("ok") is False and "KB_DATABASE_URL" in str(_r.get("error", "")):
+            ok(f"{_name} explains the missing database instead of failing quietly")
+        else:
+            bad(f"{_name} returned {str(_r)[:110]}")
+finally:
+    if _saved is not None:
+        os.environ["KB_DATABASE_URL"] = _saved
 
 print()
 if FAIL:
