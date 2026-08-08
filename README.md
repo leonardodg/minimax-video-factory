@@ -441,6 +441,8 @@ socket.
 
 Issues and pull requests are welcome. Fork PRs run the lint and test jobs on GitHub's runners; the GPU suite runs only on the maintainer's machine.
 
+**Adding an MCP tool?** It touches nine places — catalog, overrides, two generators, three tests and the table above. Six are enforced by the suite. The checklist is in [docs/dev/extending.md](https://leonardodg.github.io/minimax-video-factory/dev/extending/#add-a-new-mcp-tool).
+
 ## 📄 License
 
 MIT — see [LICENSE](LICENSE).

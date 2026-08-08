@@ -309,20 +309,17 @@ signature no longer exists in fastmcp 3.x.
 
 ### Adding or changing a tool
 
-Every tool has a matching OpenCode slash command, generated from this file's
-signatures. When you add or change an `@mcp.tool()`:
+Adding an `@mcp.tool()` touches nine places — the catalog, the overrides, two
+generators, three tests and the README table. Six are enforced by the suite, so
+skipping one turns it red rather than shipping a half-registered tool.
 
-1. Give it a command name in `scripts/command_docs/catalog.py`. The generator
-   will not invent one — naming is a human call.
-2. If there is operational knowledge the signature cannot express (hardware
-   limits, known error messages, chaining into another tool), record it in
-   `scripts/command_docs/overrides.py`.
-3. Run `uv run python scripts/generate_commands.py`.
-4. Commit the generated `.md` files together with the tool.
+**The checklist lives in [docs/dev/extending.md](docs/dev/extending.md#add-a-new-mcp-tool).**
+It is kept there rather than duplicated here, because a copy in two files is a
+copy that goes stale in one of them.
 
-`tests/unit_commands.py` fails if you skip any of these — that is deliberate.
-The seven knowledge-base tools went undocumented for days precisely because
-nothing forced the step.
+If the tool needs a new dependency, rebuild the container image: it ships its
+own venv, and a stale one makes the server fail to import and expose *zero*
+tools while the MCP handshake still succeeds.
 
 ---
 

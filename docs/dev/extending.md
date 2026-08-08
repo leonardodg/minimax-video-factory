@@ -5,46 +5,56 @@ should follow the existing thin-wrapper pattern in `server.py`.
 
 ## Add a new MCP tool
 
-1. **Implement the domain function** in the right module. E.g. for a
-   knowledge-base feature, add the function to `knowledge.py` (or `db.py`,
-   `llm.py`, etc.). Keep it free of MCP concerns so it stays unit-testable.
+Adding a tool touches nine places. Six of them are enforced by a test, so
+skipping one turns the suite red rather than shipping a half-registered tool —
+which is what happened when the seven knowledge-base tools went undocumented
+for days and, later, when a stale container image left the server exposing
+none of them.
 
-2. **Register it in `server.py`** with `@mcp.tool()`, following the existing
-   pattern:
+| # | Step | Enforced by |
+|---|---|---|
+| 1 | Implement the domain function in its module (`knowledge.py`, `core.py`, …), free of MCP concerns so it stays unit-testable | — |
+| 2 | Register it in `server.py` with `@mcp.tool()` and a `Field(description=…)` per parameter | — |
+| 3 | Name its slash command in `scripts/command_docs/catalog.py` | `unit_commands` |
+| 4 | Record operational knowledge the signature cannot express in `scripts/command_docs/overrides.py` | — (optional) |
+| 5 | `uv run python scripts/generate_commands.py` and commit the generated `.md` | `unit_commands` (staleness) |
+| 6 | `uv run python scripts/generate_mcp_docs.py` for `docs/MCP_TOOLS.md` | — |
+| 7 | Add the tool name to `tests/unit_registry.py` | `unit_registry` |
+| 8 | Bump the expected tool count in `tests/unit_commands.py` | `unit_commands` |
+| 9 | Add a row to the **README** tool table | `unit_commands` |
 
-   ```python
-   @mcp.tool()
-   def my_new_tool(
-       param: str = Field(description="What this param does"),
-   ) -> dict[str, Any]:
-       """One-line description of what the tool does."""
-       from minimax_mcp import knowledge
-       return knowledge.my_function(param)
-   ```
+Two more, when they apply:
 
-   Notes:
-   - Use `Field(description=...)` for every parameter — clients (OpenCode)
-     read these descriptions.
-   - Import the domain module lazily inside the function so the server still
-     boots if the KB stack is down.
-   - Return a plain `dict` with `ok: bool` for failures.
+- **New dependency?** Rebuild the container image (`./scripts/start_comfyui.sh`).
+  The image ships its own venv, and a stale one makes `server.py` fail to import
+  — leaving the MCP handshake succeeding while the server exposes *zero* tools.
+  `tests/09_container_deps.sh` catches this.
+- **Write a test** for the domain function (`tests/unit_*.py`, marker `unit`),
+  plus a script-level entry in `tests/test_scripts.py`. See
+  [Contributing & Testing](contributing.md).
 
-3. **Regenerate the tool reference** so `docs/MCP_TOOLS.md` matches the live
-   registry (it's generated from the registry, not hand-edited):
+The generated files — `.opencode/command/*.md`, `docs/MCP_TOOLS.md`,
+`docs/COMMANDS.md` — are never hand-edited. Change `overrides.py` and
+regenerate.
 
-   ```bash
-   source scripts/config.sh
-   MCP_TRANSPORT=stdio uv run python scripts/generate_mcp_docs.py
-   ```
+### The shape of a tool
 
-4. **Add a test.** Prefer a unit test for the domain function
-   (`tests/unit_knowledge.py`-style, marker `unit`) plus a script-level test
-   in `tests/test_scripts.py` if the tool is also exercised by the diagnostic
-   suite. See [Contributing & Testing](contributing.md).
+```python
+@mcp.tool()
+def my_new_tool(
+    param: str = Field(description="What this param does"),
+) -> dict[str, Any]:
+    """One-line description of what the tool does."""
+    from minimax_mcp import knowledge
+    return knowledge.my_function(param)
+```
 
-5. **Update docs** if the tool changes user-facing behavior: the
-   `docs/KNOWLEDGE_BASE.md` tutorial tables, `README.md`, and `AGENTS.md` all
-   reference the tool list.
+- `Field(description=...)` on every parameter — clients read these, and the
+  slash command generator turns them into the command's own documentation.
+- Import the domain module lazily inside the function, so the server still
+  boots when the knowledge-base stack is down.
+- Return a plain `dict` carrying `ok: bool`. Never let an exception cross the
+  MCP boundary.
 
 ## Add a new ingest type (video/audio/text/markdown)
 
