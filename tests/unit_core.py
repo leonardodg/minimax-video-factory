@@ -137,3 +137,64 @@ if FAIL:
     print(f"FAIL: {FAIL}")
     sys.exit(1)
 print("PASS")
+
+print("== unit_core: queue state (get_status must not call a running render 'queued') ==")
+from minimax_mcp.comfyui_client import queue_state_from  # noqa: E402
+
+# Shape of ComfyUI's /queue: [queue_index, prompt_id, workflow, extra, outputs]
+QUEUE = {
+    "queue_running": [[0, "aaa-running", {}, {}, []]],
+    "queue_pending": [[1, "bbb-pending", {}, {}, []], [2, "ccc-pending", {}, {}, []]],
+}
+
+if queue_state_from(QUEUE, "aaa-running") == "running":
+    ok("a prompt in queue_running reports 'running'")
+else:
+    bad(f"running prompt reported {queue_state_from(QUEUE, 'aaa-running')!r}")
+
+if queue_state_from(QUEUE, "bbb-pending") == "pending":
+    ok("a prompt in queue_pending reports 'pending'")
+else:
+    bad(f"pending prompt reported {queue_state_from(QUEUE, 'bbb-pending')!r}")
+
+if queue_state_from(QUEUE, "zzz-unknown") is None:
+    ok("a prompt in neither list reports None")
+else:
+    bad(f"unknown prompt reported {queue_state_from(QUEUE, 'zzz-unknown')!r}")
+
+if queue_state_from({}, "anything") is None:
+    ok("an empty queue payload does not raise")
+else:
+    bad("empty queue payload should yield None")
+
+# Malformed entries must not take the tool down: this runs while the user is
+# staring at something that looks stuck, which is the worst time to crash.
+if queue_state_from({"queue_running": [[0], "garbage", None]}, "x") is None:
+    ok("malformed queue entries are tolerated")
+else:
+    bad("malformed queue entries should yield None")
+
+print("== unit_core: list_outputs relpath ==")
+from minimax_mcp.core import output_relpath  # noqa: E402
+
+if output_relpath(Path("/out/e2e_123/scene_0.mp4"), Path("/out")) == "e2e_123/scene_0.mp4":
+    ok("relpath keeps the subfolder that tells two scene_0 files apart")
+else:
+    bad(f"relpath = {output_relpath(Path('/out/e2e_123/scene_0.mp4'), Path('/out'))!r}")
+
+if output_relpath(Path("/out/top.mp4"), Path("/out")) == "top.mp4":
+    ok("a file at the root of the output dir keeps its bare name")
+else:
+    bad("relpath wrong for a top-level file")
+
+# A path outside the output dir must degrade, not raise.
+if output_relpath(Path("/elsewhere/x.mp4"), Path("/out")) == "x.mp4":
+    ok("a path outside the output dir falls back to the bare name")
+else:
+    bad(f"relpath outside root = {output_relpath(Path('/elsewhere/x.mp4'), Path('/out'))!r}")
+
+print()
+if FAIL:
+    print(f"FAIL: {FAIL}")
+    sys.exit(1)
+print("ALL PASS")

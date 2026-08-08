@@ -115,6 +115,19 @@ def to_container_path(p: str | os.PathLike[str]) -> str:
     return s
 
 
+def output_relpath(path: Path, output_dir: Path) -> str:
+    """Path of `path` relative to `output_dir`, or its bare name if outside it.
+
+    list_outputs used to report only the basename, so three different runs all
+    showed up as "scene_0_00001_.mp4" and there was no way to tell them apart.
+    The subfolder is the only thing that distinguishes them.
+    """
+    try:
+        return str(path.relative_to(output_dir))
+    except ValueError:
+        return path.name
+
+
 def submit_scene_core(
     prompt: str,
     duration: float = 5.0,

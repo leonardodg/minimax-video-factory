@@ -45,6 +45,7 @@ from pydantic import Field
 from minimax_mcp.comfyui_client import ComfyUIClient
 from minimax_mcp.core import (
     compose_final_core,
+    output_relpath,
     submit_scene_core,
     wait_for_video_core,
 )
@@ -197,7 +198,12 @@ def get_status(prompt_id: str) -> dict[str, Any]:
         return {"ok": False, "error": str(e)}
     rec = hist.get(prompt_id)
     if rec is None:
-        return {"ok": True, "prompt_id": prompt_id, "state": "queued", "outputs": None}
+        # ComfyUI only writes to /history once a prompt FINISHES, so absence
+        # means "queued" OR "rendering right now". Reporting both as queued hid
+        # a jammed backlog for a full day: the stuck job and the ten waiting
+        # behind it looked identical. Ask the queue which one this is.
+        state = client.queue_state(prompt_id) or "queued"
+        return {"ok": True, "prompt_id": prompt_id, "state": state, "outputs": None}
     status = rec.get("status", {})
     completed = bool(status.get("completed")) or bool(rec.get("outputs"))
     if completed:
@@ -224,7 +230,10 @@ def list_outputs() -> list[dict[str, Any]]:
     """List generated .mp4 files in the output directory."""
     d = output_dir_abs()
     files = sorted(d.rglob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-    return [{"filename": p.name, "path": to_host_path(p),
+    # relpath, not just filename: every run writes scene_0_00001_.mp4, and only
+    # the subfolder says which run it belongs to.
+    return [{"filename": p.name, "relpath": output_relpath(p, d),
+             "path": to_host_path(p),
              "size_mb": round(p.stat().st_size / 1e6, 2),
              "modified": p.stat().st_mtime} for p in files]
 

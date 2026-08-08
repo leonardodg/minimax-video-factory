@@ -24,6 +24,31 @@ class ComfyUIError(RuntimeError):
     pass
 
 
+def queue_state_from(queue_payload: dict[str, Any], prompt_id: str) -> str | None:
+    """Locate `prompt_id` in a ComfyUI /queue payload.
+
+    Returns "running", "pending", or None. Split out as a free function so the
+    mapping can be unit-tested without a live ComfyUI.
+
+    Why this exists: /history only gets a prompt once it FINISHES, so asking
+    history alone cannot tell "waiting behind other jobs" from "rendering right
+    now" -- and those call for opposite reactions from whoever is watching. A
+    stuck queue reported as "queued" is exactly how a jammed backlog hides.
+
+    Entries look like [queue_index, prompt_id, workflow, extra, outputs]; this
+    tolerates anything shaped differently rather than raising, because it runs
+    while someone is already staring at something that looks broken.
+    """
+    for key, state in (("queue_running", "running"), ("queue_pending", "pending")):
+        for entry in queue_payload.get(key) or []:
+            try:
+                if entry[1] == prompt_id:
+                    return state
+            except (IndexError, TypeError):
+                continue
+    return None
+
+
 class ComfyUIClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
@@ -51,6 +76,19 @@ class ComfyUIClient:
         r = self._client.get(f"/history/{prompt_id}")
         r.raise_for_status()
         return r.json()
+
+    def get_queue(self) -> dict[str, Any]:
+        """The raw /queue payload: {"queue_running": [...], "queue_pending": [...]}."""
+        r = self._client.get("/queue")
+        r.raise_for_status()
+        return r.json()
+
+    def queue_state(self, prompt_id: str) -> str | None:
+        """'running', 'pending', or None if the prompt is not in the queue."""
+        try:
+            return queue_state_from(self.get_queue(), prompt_id)
+        except Exception:  # noqa: BLE001 - a status check must not raise
+            return None
 
     # ---------- prompt submission ----------
     def submit(self, workflow_api: dict[str, Any], client_id: str = "minimax-factory") -> str:
