@@ -28,6 +28,10 @@ OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "video/factory")
 H3_NODE_ID = "5"
 NOISE_NODE_ID = "6"
 SAVE_NODE_CLASS = "SaveVideo"
+# The base workflow ships 14 nodes numbered 1..14. A LoadImage node is added
+# only when a first_frame is supplied, under an id well clear of that range so
+# it can never collide as the workflow grows.
+LOAD_IMAGE_NODE_ID = "90"
 
 DIFFUSION_MODEL = os.environ.get("MODEL_DIFFUSION", "minimax_h3_fl2va_pruned_int4_convrot.safetensors")
 TEXT_ENCODER = os.environ.get("MODEL_TEXT_ENCODER", "qwen3vl_32b_minimax_h3_int4_convrot.safetensors")
@@ -49,7 +53,20 @@ def duration_to_frames(duration: float, fps: int = 24) -> int:
 
 
 def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
-                 width: int, height: int, seed: int, filename_prefix: str) -> dict[str, Any]:
+                 width: int, height: int, seed: int, filename_prefix: str,
+                 first_frame: str | None = None) -> dict[str, Any]:
+    """Patch the API workflow for one scene.
+
+    `first_frame` is the name of an image already present in ComfyUI's input
+    directory (upload one with ComfyUIClient.upload_image). When given, a
+    LoadImage node is added and wired into the H3 node's optional first_frame
+    input, and the model animates from that picture instead of inventing the
+    whole composition from the prompt.
+
+    The model is `minimax_h3_fl2va` -- First-Last frame to Video+Audio -- and
+    the node is MiniMaxH3ImageToVideo, so this is what it was trained for. Text
+    only was leaving half of it unused.
+    """
     import copy
     wf = copy.deepcopy(workflow)
 
@@ -72,6 +89,13 @@ def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
     inputs["width"] = width
     inputs["height"] = height
     inputs["length"] = duration_to_frames(duration)
+
+    if first_frame:
+        wf[LOAD_IMAGE_NODE_ID] = {
+            "class_type": "LoadImage",
+            "inputs": {"image": first_frame, "upload": "image"},
+        }
+        inputs["first_frame"] = [LOAD_IMAGE_NODE_ID, 0]
 
     noise = wf.get(NOISE_NODE_ID)
     if noise is not None and "noise_seed" in noise.get("inputs", {}):
@@ -137,20 +161,32 @@ def submit_scene_core(
     height: int = 576,
     seed: int | None = None,
     filename_prefix: str = "video/factory",
+    first_frame: str | None = None,
 ) -> dict[str, Any]:
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
+    client = ComfyUIClient(os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"))
+
+    # Upload before patching: ComfyUI de-duplicates names, so only it knows
+    # what the image ended up being called.
+    uploaded = None
+    if first_frame:
+        try:
+            uploaded = client.upload_image(first_frame)
+        except Exception as e:
+            return {"ok": False, "stage": "upload", "error": str(e)}
+
     workflow = load_workflow()
     wf = inject_scene(workflow, prompt=prompt, duration=duration,
                       width=width, height=height, seed=seed,
-                      filename_prefix=filename_prefix)
-    client = ComfyUIClient(os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188"))
+                      filename_prefix=filename_prefix, first_frame=uploaded)
     try:
         prompt_id = client.submit(wf)
     except ComfyUIError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True, "prompt_id": prompt_id, "seed": seed,
-            "duration": duration, "width": width, "height": height}
+            "duration": duration, "width": width, "height": height,
+            "first_frame": uploaded}
 
 
 async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[str, Any]:

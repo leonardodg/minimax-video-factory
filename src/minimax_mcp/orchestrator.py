@@ -86,6 +86,7 @@ class AudiovisualStudio:
         width: int = 1024,
         height: int = 576,
         seed: int | None = None,
+        first_frame: str | None = None,
     ) -> dict[str, Any]:
         """Generate video using the existing MiniMax H3 pipeline."""
         import logging
@@ -101,6 +102,7 @@ class AudiovisualStudio:
                 height=height,
                 seed=seed,
                 filename_prefix="studio/",
+                first_frame=first_frame,
             )
             if not result.get("ok"):
                 return {"ok": False, "error": result.get("error", "Submit failed")}

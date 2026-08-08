@@ -42,6 +42,7 @@ Generate a video using the MiniMax H3 model via ComfyUI.
 | `height` | integer | no | Output height (multiple of 32). Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM |
 | `seed` | any | no | Random seed |
 | `filename_prefix` | string | no | Output filename prefix |
+| `first_frame` | any | no | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
 
 ## `get_status`
 
@@ -154,6 +155,7 @@ Returns {"prompt_id": ...}. Use wait_for_video() to await completion.
 | `height` | integer | no | Output height (multiple of 32). Default 576: raising it past 1024x576 risks OOM on 12 GB VRAM |
 | `seed` | any | no | Random seed (defaults to random) |
 | `filename_prefix` | string | no | Output filename prefix (default from OUTPUT_PREFIX env) |
+| `first_frame` | any | no | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
 
 ## `transcribe_video`
 

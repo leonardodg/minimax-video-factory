@@ -139,7 +139,7 @@ if FAIL:
 print("PASS")
 
 print("== unit_core: queue state (get_status must not call a running render 'queued') ==")
-from minimax_mcp.comfyui_client import queue_state_from  # noqa: E402
+from minimax_mcp.comfyui_client import queue_state_from
 
 # Shape of ComfyUI's /queue: [queue_index, prompt_id, workflow, extra, outputs]
 QUEUE = {
@@ -175,7 +175,7 @@ else:
     bad("malformed queue entries should yield None")
 
 print("== unit_core: list_outputs relpath ==")
-from minimax_mcp.core import output_relpath  # noqa: E402
+from minimax_mcp.core import output_relpath
 
 if output_relpath(Path("/out/e2e_123/scene_0.mp4"), Path("/out")) == "e2e_123/scene_0.mp4":
     ok("relpath keeps the subfolder that tells two scene_0 files apart")
@@ -192,6 +192,58 @@ if output_relpath(Path("/elsewhere/x.mp4"), Path("/out")) == "x.mp4":
     ok("a path outside the output dir falls back to the bare name")
 else:
     bad(f"relpath outside root = {output_relpath(Path('/elsewhere/x.mp4'), Path('/out'))!r}")
+
+print("== unit_core: first_frame (image-conditioned generation) ==")
+import json as _json
+
+from minimax_mcp.core import LOAD_IMAGE_NODE_ID
+from minimax_mcp.core import inject_scene as _inject
+
+_WF = _json.loads(Path(ROOT / "workflows" / "minimax_h3_t2v_api.json").read_text())
+
+# Without an image the workflow must be exactly what it always was: the H3 node
+# is an ImageToVideo node whose first_frame is optional, and text-only
+# generation is still the common case.
+_no_img = _inject(_WF, prompt="p", duration=5.0, width=512, height=320,
+                  seed=1, filename_prefix="x")
+if "first_frame" not in _no_img["5"]["inputs"]:
+    ok("no first_frame: the H3 node keeps no image input")
+else:
+    bad("first_frame leaked into a text-only workflow")
+if LOAD_IMAGE_NODE_ID not in _no_img:
+    ok("no first_frame: no LoadImage node is added")
+else:
+    bad("a LoadImage node was added without an image")
+
+_img = _inject(_WF, prompt="p", duration=5.0, width=512, height=320,
+               seed=1, filename_prefix="x", first_frame="ref_shot.png")
+loader = _img.get(LOAD_IMAGE_NODE_ID)
+if loader and loader["class_type"] == "LoadImage":
+    ok("with first_frame: a LoadImage node is added")
+else:
+    bad(f"LoadImage node missing: {loader!r}")
+
+if loader and loader["inputs"]["image"] == "ref_shot.png":
+    ok("LoadImage points at the uploaded filename")
+else:
+    bad(f"LoadImage.image = {loader['inputs']['image'] if loader else None!r}")
+
+if _img["5"]["inputs"].get("first_frame") == [LOAD_IMAGE_NODE_ID, 0]:
+    ok("H3 first_frame is wired to the LoadImage output")
+else:
+    bad(f"first_frame wiring = {_img['5']['inputs'].get('first_frame')!r}")
+
+# inject_scene deep-copies, so the original on disk must be untouched.
+if "first_frame" not in _WF["5"]["inputs"] and LOAD_IMAGE_NODE_ID not in _WF:
+    ok("the source workflow dict is not mutated")
+else:
+    bad("inject_scene mutated the workflow it was given")
+
+# The chosen node id must not collide with the 14 nodes already there.
+if LOAD_IMAGE_NODE_ID not in _WF:
+    ok(f"node id {LOAD_IMAGE_NODE_ID!r} does not collide with the base workflow")
+else:
+    bad(f"node id {LOAD_IMAGE_NODE_ID!r} already exists in the workflow")
 
 print()
 if FAIL:

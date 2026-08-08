@@ -87,7 +87,7 @@ class ComfyUIClient:
         """'running', 'pending', or None if the prompt is not in the queue."""
         try:
             return queue_state_from(self.get_queue(), prompt_id)
-        except Exception:  # noqa: BLE001 - a status check must not raise
+        except Exception:
             return None
 
     # ---------- prompt submission ----------
@@ -100,6 +100,35 @@ class ComfyUIClient:
         if "error" in data and data.get("error"):
             raise ComfyUIError(f"ComfyUI rejected prompt: {json.dumps(data['error'])[:800]}")
         return data["prompt_id"]
+
+    def upload_image(self, path: str, subfolder: str = "", overwrite: bool = True) -> str:
+        """Upload an image into ComfyUI's input dir; returns the name to use in LoadImage.
+
+        Going through /upload/image rather than writing into a bind-mounted
+        directory keeps this working when the MCP server is not on the same
+        host as ComfyUI -- which is a supported deployment here.
+
+        ComfyUI may rename the file (it de-duplicates), so the returned name is
+        the authoritative one and the caller must use it.
+        """
+        import os as _os
+
+        if not _os.path.exists(path):
+            raise ComfyUIError(f"image not found: {path}")
+        with open(path, "rb") as fh:
+            files = {"image": (_os.path.basename(path), fh, "application/octet-stream")}
+            data = {"overwrite": "true" if overwrite else "false"}
+            if subfolder:
+                data["subfolder"] = subfolder
+            r = self._client.post("/upload/image", files=files, data=data)
+        if r.status_code != 200:
+            raise ComfyUIError(f"POST /upload/image -> {r.status_code}: {r.text[:300]}")
+        body = r.json()
+        name = body.get("name")
+        if not name:
+            raise ComfyUIError(f"upload returned no name: {body}")
+        sub = body.get("subfolder") or ""
+        return f"{sub}/{name}" if sub else name
 
     def interrupt(self) -> None:
         self._client.post("/interrupt")

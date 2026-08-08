@@ -72,7 +72,7 @@ Baixa um vídeo (Instagram Reel, YouTube) via MCP yt-dlp, opcionalmente transcre
 Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP.
 
 ```
-/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/]
+/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -83,6 +83,7 @@ Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
 | `height` | não | `576` | não suba de 576 pelo mesmo motivo de VRAM |
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `studio/` | prefixo do arquivo de saída |
+| `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
 
 **Notas operacionais:**
 
@@ -171,7 +172,7 @@ Pipeline completo: URL → download → transcrição → prompt → vídeo.
 Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 
 ```
-/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX]
+/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -182,6 +183,7 @@ Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 | `height` | não | `576` | altura (múltiplo de 32); não suba de 576 pelo mesmo motivo de VRAM |
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `OUTPUT_PREFIX` | prefixo do arquivo de saída |
+| `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
 
 **Notas operacionais:**
 
