@@ -67,7 +67,7 @@ async def main() -> int:
 
         # 2. submit 2 short low-res scenes
         scene_ids, seeds = [], []
-        for i, scene in enumerate(["red apple rotating on a table, close-up, soft light",
+        for i, scene in enumerate(["a hungry black cat staring at an empty food bowl, close-up, soft light, faint meow",
                                    "blue crystal floating, dark background, slow orbit"]):
             r = await client.call_tool("submit_scene", {
                 "prompt": scene, "duration": 5.0, "width": 512, "height": 320,

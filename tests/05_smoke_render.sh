@@ -48,7 +48,7 @@ from minimax_mcp.comfyui_client import ComfyUIClient  # noqa: E402
 prefix = os.path.join("smoke", f"smoke_{int(time.time())}")
 wf = inject_scene(
     load_workflow(),
-    prompt="a red apple slowly rotating on a wooden table, soft daylight",
+    prompt="a hungry black cat staring at an empty food bowl, close-up, soft kitchen daylight, faint meow",
     duration=5.0, width=512, height=320, seed=42, filename_prefix=prefix,
 )
 
