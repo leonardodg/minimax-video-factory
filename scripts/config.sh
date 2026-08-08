@@ -63,6 +63,16 @@ export MODEL_REPO_INT4="${MODEL_REPO_INT4:-Merserk/MiniMax-H3-INT4-ConvRot}"
 export MODEL_REPO_COMFY="${MODEL_REPO_COMFY:-Comfy-Org/MiniMax-H3}"
 export MODEL_DIFFUSION="${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int4_convrot.safetensors}"
 export MODEL_TEXT_ENCODER="${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}"
+
+# Which repo each weight comes from, and where inside it. The two repos are laid
+# out differently: Merserk keeps the files at the root, Comfy-Org nests them
+# under diffusion_models/ and text_encoders/. Defaults reproduce the INT4 set
+# that has always been downloaded; overriding these in .env is how you switch
+# to a heavier variant (int8, fp8_scaled) without touching the script.
+export MODEL_DIFFUSION_REPO="${MODEL_DIFFUSION_REPO:-$MODEL_REPO_INT4}"
+export MODEL_DIFFUSION_PATH="${MODEL_DIFFUSION_PATH:-$MODEL_DIFFUSION}"
+export MODEL_TEXT_ENCODER_REPO="${MODEL_TEXT_ENCODER_REPO:-$MODEL_REPO_INT4}"
+export MODEL_TEXT_ENCODER_PATH="${MODEL_TEXT_ENCODER_PATH:-$MODEL_TEXT_ENCODER}"
 export MODEL_VIDEO_VAE="${MODEL_VIDEO_VAE:-minimax_h3_video_vae_fp16.safetensors}"
 export MODEL_AUDIO_VAE="${MODEL_AUDIO_VAE:-minimax_h3_audio_vae_fp32.safetensors}"
 # expected byte sizes (empty = skip size check)
