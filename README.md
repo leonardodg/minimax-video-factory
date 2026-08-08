@@ -1,258 +1,435 @@
-# MiniMax H3 · INT4 ConvRot — Local Video Factory + Audiovisual Studio
+<div align="center">
 
-> Orchestrate **MiniMax H3** (text → video **+ native stereo audio**, single diffusion pass) on a local GPU, driven by **OpenCode** through an **MCP server** that talks to a **ComfyUI** backend via its HTTP/WebSocket API.
->
-> **New:** Full audiovisual studio pipeline — download videos (Instagram Reels, YouTube), transcribe locally with Whisper, generate cinematic prompts, and render with MiniMax H3 — all via MCP tools.
+# MiniMax Video Factory
 
-## Architecture
+### Text → video **with native stereo audio**, on your own GPU. No API keys, no cloud, no per-clip cost.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-1de9d6.svg)](LICENSE)
+[![CI](https://github.com/leonardodg/minimax-video-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/leonardodg/minimax-video-factory/actions/workflows/ci.yml)
+[![Docs](https://github.com/leonardodg/minimax-video-factory/actions/workflows/docs.yml/badge.svg)](https://leonardodg.github.io/minimax-video-factory/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776ab.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-FastMCP%203.x-8a2be2.svg)](https://gofastmcp.com)
+[![VRAM](https://img.shields.io/badge/VRAM-12%20GB-76b900.svg)](#-render-cost-measured)
+
+**[Documentation](https://leonardodg.github.io/minimax-video-factory/)** ·
+**[Slash commands](https://leonardodg.github.io/minimax-video-factory/COMMANDS/)** ·
+**[MCP tools](https://leonardodg.github.io/minimax-video-factory/MCP_TOOLS/)** ·
+**[Installation](https://leonardodg.github.io/minimax-video-factory/INSTALLATION/)**
+
+<img width="720" alt="Title card animated by MiniMax H3" src="docs/assets/hero-factory-intro.gif">
+
+<sub>Title card drawn with ffmpeg, animated by H3 from a <code>first_frame</code> — 1024×576, 16 min on an RTX 4080 Laptop. The glow, the scan-lines and the audio are generated.</sub>
+
+</div>
+
+Describe a scene in plain language. Get back an `.mp4` with picture **and sound**, generated in a single diffusion pass by **MiniMax H3** — running on a 12 GB consumer card, driven from your AI coding agent through an **MCP server**. Nothing leaves the machine.
+
+---
+
+## 💸 What a clip costs
+
+Most agentic video tools orchestrate paid APIs and bill you per second of output. This one loads the weights onto your own card.
+
+| | This project | Typical cloud pipeline |
+|---|---|---|
+| **Cost per clip** | **$0.00** | $0.10 – $2.00 |
+| **Cost of 100 clips** | **$0.00** | $10 – $200 |
+| **Time per 5 s clip** | ~4 min (512×320) · ~15 min (1024×576) | seconds to minutes |
+| **Data leaving your machine** | **none** | prompt, and often the output |
+| **Works offline** | **yes**, after the one-time model download | no |
+| **Up-front cost** | ~35 GB disk, a 12 GB GPU | none |
+
+You trade wall-clock time for money and privacy. Whether that is a good trade depends on whether you already own the GPU.
+
+---
+
+## 📋 Features
+
+- 🎬 **Text → video + audio in one pass** — H3 generates native stereo sound with the picture, not a soundtrack pasted on afterwards
+- 🔌 **18 MCP tools** — drive the whole pipeline from an AI agent, no CLI to memorise
+- ⌨️ **18 slash commands** — generated from the code, so they can never drift from what the tools actually accept
+- 📥 **Ingest what you already watch** — download Instagram Reels and YouTube with browser cookies, transcribe locally with Whisper
+- 🧠 **Personal knowledge base** — Postgres + pgvector, hybrid search and RAG, all with a local LLM
+- 🔒 **Fully local** — models, inference, database and transcription run on your machine
+- 🖥️ **12 GB VRAM is enough** — INT4 ConvRot weights tuned for consumer cards
+- ✅ **Validated end to end** — 9 unit suites plus an 8-step GPU pipeline check in CI
+
+---
+
+## Technologies and Tools
+
+### Core
+| Technology | Role |
+|---|---|
+| **MiniMax H3** (`Merserk/MiniMax-H3-INT4-ConvRot`) | Text → video + native stereo audio, pruned INT4 for 12 GB VRAM |
+| **ComfyUI** ≥ 0.30.0 | Render engine; loads H3 into VRAM and runs the diffusion pass |
+| **FastMCP 3.x** | MCP server exposing the pipeline as tools over stdio / streamable-http |
+| **Python** ≥ 3.10 + **uv** | Application and dependency management |
+
+### Studio
+| Technology | Role |
+|---|---|
+| **yt-dlp** | Downloads Reels, YouTube and friends using your browser's cookies |
+| **faster-whisper** | Local, GPU-accelerated transcription with timestamps |
+| **ffmpeg** | Scene concatenation and output inspection |
+
+### Knowledge base
+| Technology | Role |
+|---|---|
+| **Postgres 16 + pgvector** | Source of truth; documents, chunks and embeddings |
+| **SQLAlchemy 2 + Alembic** | ORM access and schema migrations |
+| **Ollama** (`lfm2:24b`, `mxbai-embed-large`) | Local summarisation and embeddings |
+
+### Infrastructure
+| Technology | Role |
+|---|---|
+| **Docker + Compose** | ComfyUI with GPU passthrough; the MCP venv ships inside the image |
+| **GitHub Actions** | Cloud jobs for lint and tests, a self-hosted job for the real GPU suite |
+| **MkDocs + Material** | Documentation site, published to GitHub Pages |
+
+---
+
+## 🏗 Architecture
 
 ```
-[Your Video Script]  (story / scene descriptions)
+[Your scene description]  (plain language, any language)
         │
         ▼
-[ OpenCode (Orchestrator) ]  ──MCP (stdio)──►  [ Local Agent (MCP Server) ]
-        │                                            │   POST /prompt
-        │       ┌────────────────────────────────────┘
+[ AI agent (OpenCode / Claude Code) ]  ──MCP (stdio)──►  [ MCP Server ]
+        │                                                      │  POST /prompt
+        │       ┌──────────────────────────────────────────────┘
         ▼       ▼
-[ ComfyUI Backend (Docker + GPU) ]  ◄── shares models + output with MCP
-        │   WebSocket + GET /view
+[ ComfyUI + MiniMax H3 (Docker + GPU) ]  ◄── shares models + output with the MCP
+        │   WebSocket progress + GET /view
         ▼
-[ Final .mp4  (video + stereo audio) ]
+[ final .mp4 — video + stereo audio ]
 ```
 
-**New: Audiovisual Studio Pipeline**
-```
-[Instagram Reel / YouTube URL]
-        │
-        ▼
-[Download] ──► [Transcribe (Whisper)] ──► [Prompt Engineering] ──► [MiniMax H3 Render]
-        │              │                      │                        │
-        ▼              ▼                      ▼                        ▼
-    .mp4 file    .txt transcription      .txt prompt             .mp4 output
-```
+The MCP server runs **inside the ComfyUI container**, so it shares the loaded models, the GPU and the output directory. No second copy of 32 GB of weights, no host-to-container path guessing.
 
-## Components
+---
 
-| Layer | Role | Technology |
-|---|---|---|
-| **OpenCode** | Interprets the script, splits into scenes (5–15 s), writes H3-structured prompts, calls the MCP tools | opencode |
-| **Local Agent** | MCP server; injects prompt into the API workflow JSON, submits jobs, monitors, retrieves files | Python + FastMCP (`src/minimax_mcp/server.py`, in-image venv `/opt/mcp-venv`) |
-| **Render Engine** | Loads MiniMax H3 into VRAM, runs the diffusion pass, saves `.mp4` | ComfyUI ≥ 0.30.0 (Docker) |
-| **Model** | MiniMax H3 Base FL2VA, pruned **INT4** ConvRot (tuned for 12 GB VRAM) | `Merserk/MiniMax-H3-INT4-ConvRot` |
-| **Downloader** | Instagram Reels, YouTube, etc. with browser cookies | yt-dlp |
-| **Transcriber** | Local GPU-accelerated Whisper (PT-BR + timestamps) | faster-whisper |
-| **Prompt Engineer** | Template-based cinematic/educational/social prompt generation | Python (pluggable LLM later) |
+## 🚀 Quick Start
 
-## Configuration (`.env`)
-
-Everything is centralized in a `.env` file at the repo root (see `.env.example`):
-
-```bash
-PROJECT_ROOT=/path/to/minimax-video-factory   # absolute (used for /workspace mount)
-MODELS_DIR=/var/tmp/minimax/models            # where the ~32 GB of weights live
-OUTPUT_DIR=.../output                         # generated .mp4 (mounted into container)
-OUTPUT_PREFIX=video/factory                   # default filename prefix
-# Model set (bigger variants supported): MODEL_DIFFUSION, MODEL_TEXT_ENCODER, *_BYTES
-COMFYUI_TAG=v0.30.2  COMFYUI_PORT=8188  COMFYUI_EXTRA_ARGS=--lowvram --fast-disk ...
-MCP_TRANSPORT=streamable-http  MCP_HOST=0.0.0.0  MCP_PORT=8848   # remote/VPS MCP
-DOCKER_HUB_USER=leonardodg  DOCKER_HUB_REPO=minimax-video-factory
-
-# Studio config
-STUDIO_DOWNLOADS_DIR=.../downloads            # downloaded videos
-WHISPER_MODEL=small                           # tiny/base/small/medium/large-v3
-WHISPER_DEVICE=cuda                           # cuda/cpu
-WHISPER_COMPUTE_TYPE=float16                  # float16/int8/float32
-STUDIO_BROWSER=chrome                         # chrome/firefox/edge/brave
-```
-
-## Quick Start
-
-```bash
-cd minimax-video-factory
-
-# 0. Configure
-cp .env.example .env     # edit PROJECT_ROOT, MODELS_DIR, OUTPUT_DIR
-
-# 1. Environment checks
-./scripts/diagnose.sh 00
-
-# 2. Download models (~32 GB, public HF repos; resumes on re-run)
-./scripts/download_models.sh          # reads MODEL_* + MODELS_DIR from .env
-
-# 3. Start ComfyUI (Docker + GPU). Build includes the in-image MCP venv.
-./scripts/start_comfyui.sh            # uses $COMPOSE_ARGS (loads project-root .env)
-
-# 4. Full validation suite (models, workflow, real smoke render, MCP, E2E)
-./scripts/diagnose.sh                 # runs 00..07; needs a few minutes for the renders
-
-# 5. Optional: Install Whisper model for studio pipeline
-./scripts/setup_whisper.sh small      # or base/medium/large-v3
-```
-
-## Validation Suite (`./scripts/diagnose.sh [NN ...]`)
-
-| # | Checks | Status |
-|---|---|---|
-| 00 | Host prereqs (GPU/VRAM ≥ 12 GB, Docker, curl, ffmpeg) | PASS |
-| 01 | Docker image + container + GPU passthrough | PASS |
-| 02 | ComfyUI API up (≥ 0.30.0) + H3 node classes present | PASS |
-| 03 | 4 model files present with exact sizes (env-configured set) | PASS |
-| 04 | Workflow: all 14 node class_types resolve | PASS |
-| 05 | Smoke render: real 5 s clip → .mp4 with video + stereo audio | PASS |
-| 06 | MCP server stdio initialize handshake (in-container) | PASS |
-| 07 | E2E agent flow: health → 2×submit_scene → wait → list → compose_final | PASS |
-
-## New: Audiovisual Studio MCP Tools
-
-| Tool | Description |
-|---|---|
-| `download_video(url, browser?)` | Download Instagram Reels, YouTube, etc. using yt-dlp + browser cookies |
-| `transcribe_video(path, model_size?, device?, language?)` | Local Whisper transcription with timestamps (GPU) |
-| `create_cinematic_prompt(transcription, style?)` | Convert transcription → cinematic/educational/social prompt |
-| `generate_video(prompt, duration, width, height, seed?)` | Submit to MiniMax H3 via ComfyUI |
-| `studio_pipeline(url, style?, duration?, width?, height?, save_only?)` | **Full pipeline**: URL → download → transcribe → prompt → video (or save_only) |
-
-### Example: Full Pipeline from Instagram Reel
-
-```python
-# In OpenCode chat:
-"Baixe o Reel https://www.instagram.com/p/DbHIZl5Pk_0/, 
- transcreva, crie um prompt cinematográfico e salve 
- transcrição + prompt em output/transcriptions/ (save_only=True)"
-```
-
-Or via MCP directly:
-```json
-{
-  "tool": "studio_pipeline",
-  "arguments": {
-    "url": "https://www.instagram.com/p/DbHIZl5Pk_0/",
-    "style": "cinematic",
-    "duration": 10,
-    "width": 1024,
-    "height": 576,
-    "save_only": true
-  }
-}
-```
-
-## New: Knowledge Base MCP Tools
-
-Personal knowledge base backed by Postgres + pgvector, with a local LLM (Ollama by
-default) turning transcriptions into structured summaries/tutorials.
-
-| Tool | Description |
-|---|---|
-| `knowledge_ingest_text(text, source_url?, title?, platform?)` | Summarize+document a ready-made text/transcription |
-| `knowledge_ingest_video(url, browser?, whisper_model?)` | Download + transcribe + document a video |
-| `knowledge_ingest_audio(path_or_url, browser?, whisper_model?)` | Transcribe + document a local/downloaded audio (podcasts) |
-| `knowledge_ingest_markdown(path, recursive?, doc_type?, platform?, language?)` | Import `.md` files (Obsidian/tutorials): reuse frontmatter + `## Summary` or LLM-generate |
-| `knowledge_search(query, top_k?)` | Full-text + semantic (pgvector) search |
-| `knowledge_ask(query, top_k?)` | RAG: answer a question using the knowledge base as context |
-| `knowledge_reindex(embedding_model?)` | Recompute chunks/embeddings for every document |
-
-Setup: `docker compose $COMPOSE_ARGS up -d postgres` then `uv run alembic upgrade head`
-(see `AGENTS.md` §10). Requires Ollama running locally with `LLM_MODEL` and
-`EMBEDDING_MODEL` pulled.
-
-Full parameter-level reference for every tool (this table and the original
-Audiovisual Studio one) is auto-generated — see
-[`docs/MCP_TOOLS.md`](docs/MCP_TOOLS.md), regenerated via
-`uv run python scripts/generate_mcp_docs.py`. Don't hand-edit that file.
-
-For a step-by-step tutorial, chat-prompt examples, and the database schema see
-[`docs/KNOWLEDGE_BASE.md`](docs/KNOWLEDGE_BASE.md).
-
-## Slash commands
-
-Every MCP tool has a matching OpenCode slash command — `/minimax-*` for the
-video pipeline, `/kb-*` for the knowledge base. Type `/` in OpenCode to browse
-them, or see [`docs/COMMANDS.md`](docs/COMMANDS.md) for the full reference with
-parameters and operational notes.
-
-The commands are generated from the tool signatures plus curated notes:
-
-```bash
-uv run python scripts/generate_commands.py
-```
-
-Don't hand-edit the files in `.opencode/command/` — edit
-`scripts/command_docs/overrides.py` and regenerate.
-
-## Requirements (hardware floor)
+### Prerequisites
 
 | Resource | Minimum | Notes |
 |---|---|---|
-| GPU | 12 GB VRAM (RTX 3060/4070/4080 class) | INT4 pruned + ComfyUI dynamic VRAM offload |
-| System RAM | 16 GB free (32 GB recommended) | **`--fast-disk` is required** on 16–32 GB machines |
-| Disk | ~45 GB free on the models partition | Models ≈ 32 GB + Docker image ≈ 12 GB |
-| Software | Docker + NVIDIA Container Toolkit, `curl`, `ffmpeg` | `uv` only needed for host-side dev/MCP-client tests |
+| GPU | NVIDIA, **12 GB VRAM** | Verified on an RTX 4080 Laptop |
+| RAM | ~12 GB free | ComfyUI needs headroom during model load |
+| Disk | ~35 GB | ~32 GB of weights plus outputs |
+| Software | Docker + Compose, [uv](https://docs.astral.sh/uv/), ffmpeg | `nvidia-container-toolkit` for GPU passthrough |
 
-## Verified Stack & Key Gotchas
+### Installation
 
-- ComfyUI pinned at **`v0.30.2`**; base `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`
-  with **torch upgraded to `2.8.0+cu128`** in-image. torch ≥ 2.8 enables ComfyUI's
-  DynamicVRAM — without it `--lowvram` attaches 0 patches and 12 GB VRAM OOMs.
-  `torchvision==0.23.0` / `torchaudio==2.8.0` are pinned to the same release train.
-- ComfyUI runs with `--lowvram --fast-disk --disable-pinned-memory`, listening on
-  `0.0.0.0` *inside* the container (127.0.0.1 breaks docker-proxy port publishing);
-  the compose file maps it to `127.0.0.1:8188` on the host.
-- The two official VAEs live in the **`vae/` subfolder** of `Comfy-Org/MiniMax-H3`
-  (download URL must include `vae/`). The INT4 files are at the repo root.
-- The official UI template's single "hash" node is a **subgraph** expanded by the
-  frontend into 14 real nodes; `workflows/minimax_h3_t2v_api.json` ships the expanded
-  API format. See `AGENTS.md` §6 for the node map and duration math.
+```bash
+git clone https://github.com/leonardodg/minimax-video-factory.git
+cd minimax-video-factory
 
-See [docs/INSTALLATION.md](docs/INSTALLATION.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
-[docs/MCP_REMOTE.md](docs/MCP_REMOTE.md) (VPS/HTTPS MCP) and
-**[AGENTS.md](AGENTS.md)** (operating manual for AI agents).
+# 0. Configure
+cp .env.example .env          # edit PROJECT_ROOT, MODELS_DIR, OUTPUT_DIR
 
-## OpenCode MCP Config (3 ways)
+# 1. Check the host
+./scripts/diagnose.sh 00
 
-```jsonc
-// A) stdio via docker exec (no host uv) — RECOMMENDED local
-"minimax-video-factory": {
-  "type": "local",
-  "command": ["docker", "exec", "-i", "minimax-comfyui", "bash", "/workspace/scripts/mcp_runner.sh"]
-},
+# 2. Download the models (~32 GB, public HF repos; resumes on re-run)
+./scripts/download_models.sh
 
-// B) stdio via host uv
-"minimax-video-factory": {
-  "type": "local",
-  "command": ["uv", "run", "--directory", "/path/to/minimax-video-factory", "python", "src/minimax_mcp/server.py"],
-  "environment": { "MODELS_DIR": "/opt/minimax/models", "COMFYUI_URL": "http://127.0.0.1:8188" }
-},
+# 3. Start ComfyUI (Docker + GPU); the image already contains the MCP venv
+./scripts/start_comfyui.sh
 
-// C) remote HTTPS (VPS) — "MCP por link https"
-"minimax-video-factory": {
-  "type": "remote",
-  "url": "https://mcp.example.com/mcp"
-}
+# 4. Validate everything (models, workflow, a real render, MCP, end to end)
+./scripts/diagnose.sh
+
+# 5. Optional: Whisper model for the studio pipeline
+./scripts/setup_whisper.sh small
 ```
 
-All three are present (disabled where applicable) in `~/.config/opencode/opencode.json`.
+---
 
-### Knowledge base MCP entry
+## 🎬 Examples
 
-The `knowledge_*` tools need host access to Postgres and Ollama, so they get a
-dedicated entry (same server binary, different env):
+### Generate a scene
 
-```jsonc
-"minimax-knowledge-base": {
-  "type": "local",
-  "command": ["uv", "run", "--directory", "/path/to/minimax-video-factory", "python", "src/minimax_mcp/server.py"],
-  "environment": {
-    "MCP_TRANSPORT": "stdio",
-    "KB_DATABASE_URL": "postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge",
-    "LLM_PROVIDER": "ollama",
-    "OLLAMA_URL": "http://localhost:11434",
-    "LLM_MODEL": "lfm2:24b",
-    "EMBEDDING_MODEL": "mxbai-embed-large"
+```
+/minimax-gerar-video "a hungry black cat staring at an empty food bowl,
+                      close-up, soft kitchen daylight, faint meow"
+```
+
+<img width="360" alt="Generated cat clip" src="docs/assets/demo-cat.gif">
+
+*512×320, 5 s, ~4 min. Rendered with native audio — the meow is generated, not added.*
+
+### Reel → transcription → new video
+
+```
+/minimax-studio https://www.instagram.com/p/XXXXXXXX/
+```
+
+Downloads the Reel, transcribes it locally with Whisper, turns the transcript into a
+cinematic H3 prompt, and renders a new clip from it.
+
+### Animate a picture you already have
+
+The model is `minimax_h3_**fl2va**` — First-Last frame to Video+Audio. Give it a
+starting image and it animates *that* instead of inventing a composition:
+
+```
+/minimax-gerar-video "soft cyan light pulses behind the text, dust drifts upward"
+                      first_frame=assets/title-card.png
+```
+
+This is the single biggest quality lever in the project. Text-only generation asks
+the model to invent framing, lighting, subject and motion at once; a first frame
+hands it everything but the motion.
+
+### Save what you learn, then ask about it later
+
+```
+/kb-ingest-video https://www.instagram.com/p/XXXXXXXX/
+/kb-perguntar "what did I save about docker volumes?"
+```
+
+The answer comes only from your own knowledge base, with the sources cited.
+
+---
+
+## ✍️ Writing prompts that work
+
+Learned by getting it wrong. H3 takes a **subject + camera + lighting + audio**
+structure, in English, and it averages everything you throw at it.
+
+| ✅ Works | ❌ Comes out as mush |
+|---|---|
+| One concrete physical subject | Three subjects competing |
+| One action | A sequence of events |
+| One lighting condition | "volumetric beams + anamorphic flare + film grain + bloom" |
+| An audio cue (`faint meow`, `low drone`) | No audio mentioned — you lose half the model |
+| A `first_frame` for anything with a specific look | Hoping a long prompt pins the composition |
+
+**A real failure from this repo.** This prompt —
+
+> *dark studio void, faint blue wireframe grid receding into depth, slow dolly-in
+> toward a floating holographic terminal panel, lines of code lighting up,
+> drifting dust particles, volumetric beams, shallow depth of field, anamorphic
+> lens flare, film grain*
+
+— produced an unrecognisable cyan smear. Eight concepts averaged into one blur,
+and "lines of code" asked a video model to render text, which it cannot do.
+
+The fix was not a better prompt. It was `first_frame`.
+
+**Video models do not write legible text.** If you need a readable title, draw it
+into the base image (ffmpeg, Figma, anything) and let H3 light it and move it. The
+hero clip at the top of this README is exactly that: a title card drawn with
+ffmpeg's `drawtext`, handed to H3 as a `first_frame`.
+
+Even then, **small text degrades**. In that same render the 17 px caption came back
+reading `local CPU · 22 GB VRAM` instead of `local GPU · 12 GB VRAM` — the model
+rewrote two characters. Large type survived untouched. Keep anything that must be
+correct out of the frame and put it in the README instead.
+
+---
+
+## ⌨️ Slash commands
+
+Every MCP tool has a matching command. `/minimax-*` drives the video pipeline, `/kb-*` the knowledge base.
+
+| Command | What it does |
+|---|---|
+| `/minimax-health` | ComfyUI reachable and all model files present |
+| `/minimax-gerar-video` | Prompt → rendered clip |
+| `/minimax-submit-scene` | Queue a render and return immediately |
+| `/minimax-status` | Is it queued, rendering, done or failed? |
+| `/minimax-wait` | Block until a render finishes |
+| `/minimax-outputs` | List everything rendered so far |
+| `/minimax-compose` | Concatenate scenes into a final cut |
+| `/minimax-download` | Fetch a video with browser cookies |
+| `/minimax-transcrever` | Whisper transcription with timestamps |
+| `/minimax-prompt-cinematico` | Transcript → structured H3 prompt |
+| `/minimax-studio` | The whole chain: URL → download → transcribe → prompt → render |
+| `/kb-ingest-texto` · `/kb-ingest-video` · `/kb-ingest-audio` · `/kb-ingest-markdown` | Feed the knowledge base |
+| `/kb-buscar` · `/kb-perguntar` · `/kb-reindex` | Search, ask, reindex |
+
+The command files are **generated from the tool signatures** — `uv run python scripts/generate_commands.py`. A test fails if a tool ever lacks one. Full reference: **[docs/COMMANDS.md](https://leonardodg.github.io/minimax-video-factory/COMMANDS/)**.
+
+---
+
+## ⏱ Render cost (measured, RTX 4080 Laptop, INT4, 20 steps)
+
+| Resolution | 5 s clip | Notes |
+|---|---|---|
+| 512×320 | **~4 min** | Smoke resolution; what CI renders |
+| **1024×576** | **~15 min** | **Default.** Largest that renders reliably here |
+| 1344×768 | — | H3's canvas maximum, but **OOMs the sampler on 12 GB** |
+
+The first render of a session is slower: it includes loading ~32 GB of weights.
+
+---
+
+## ✅ Validation suite (`./scripts/diagnose.sh [NN ...]`)
+
+| # | Checks |
+|---|---|
+| 00 | Host prereqs — GPU/VRAM ≥ 12 GB, Docker, curl, ffmpeg |
+| 01 | Docker image built, container running, GPU visible inside |
+| 02 | ComfyUI API up (≥ 0.30.0) and the H3 node classes present |
+| 03 | All 4 model files present, with exact sizes |
+| 04 | Workflow: all 14 node `class_type`s resolve |
+| 05 | Smoke render — a real 5 s clip with video **and** stereo audio |
+| 06 | MCP stdio initialize handshake, in-container |
+| 07 | End to end — health → submit → wait → list → compose |
+| 08 | Knowledge base over MCP (skips cleanly when Postgres is absent) |
+
+Plus `uv run pytest -m unit` for the pure-logic suites, which need no GPU, no container and no network.
+
+---
+
+## ⚙️ Configuration (`.env`)
+
+```bash
+PROJECT_ROOT=/path/to/minimax-video-factory   # absolute; used for the /workspace mount
+MODELS_DIR=/var/tmp/minimax/models            # where the ~32 GB of weights live
+OUTPUT_DIR=.../output                         # generated .mp4 (mounted into the container)
+
+COMFYUI_TAG=v0.30.2  COMFYUI_PORT=8188
+MCP_TRANSPORT=streamable-http  MCP_HOST=0.0.0.0  MCP_PORT=8848
+
+# Studio
+STUDIO_DOWNLOADS_DIR=.../downloads
+WHISPER_MODEL=small           # tiny/base/small/medium/large-v3
+WHISPER_DEVICE=cuda           # cuda/cpu
+
+# Knowledge base
+KB_DATABASE_URL=postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge
+LLM_MODEL=lfm2:24b            # measured: qwen2.5:32b took 15+ min per ingest here
+EMBEDDING_MODEL=mxbai-embed-large
+```
+
+See **[Installation](https://leonardodg.github.io/minimax-video-factory/INSTALLATION/)** for every variable.
+
+---
+
+## 🛠 Project structure
+
+```
+minimax-video-factory/
+├── .github/workflows/
+│   ├── ci.yml                    # cloud lint/tests + self-hosted GPU suite
+│   └── docs.yml                  # builds and publishes the docs site
+├── .opencode/command/            # 18 generated slash commands
+├── docker/
+│   ├── Dockerfile                # ComfyUI + in-image MCP venv
+│   └── docker-compose.yml        # GPU passthrough, Postgres for the KB
+├── scripts/
+│   ├── diagnose.sh               # the validation suite runner
+│   ├── start_comfyui.sh
+│   ├── download_models.sh
+│   ├── generate_commands.py      # slash commands, generated from the code
+│   ├── generate_mcp_docs.py      # tool reference, generated from the registry
+│   └── command_docs/             # parser · catalog · overrides · renderer
+├── src/minimax_mcp/
+│   ├── server.py                 # the 18 @mcp.tool() definitions
+│   ├── core.py                   # workflow injection, submission, output resolution
+│   ├── comfyui_client.py         # HTTP + WebSocket client
+│   ├── orchestrator.py           # the studio pipeline
+│   ├── downloader.py             # yt-dlp
+│   ├── transcriber.py            # faster-whisper
+│   ├── knowledge.py              # knowledge base use cases
+│   ├── db.py                     # Postgres + pgvector via SQLAlchemy
+│   ├── llm.py                    # Ollama / OpenAI-compatible client
+│   └── vault.py                  # optional Obsidian markdown export
+├── tests/                        # 00–08 shell suites + unit_*.py
+├── docs/                         # MkDocs site sources
+└── workflows/                    # the H3 API workflow JSON
+```
+
+---
+
+## 📦 Useful commands
+
+```bash
+# Validation
+./scripts/diagnose.sh                 # everything
+./scripts/diagnose.sh 05 07           # only these
+uv run pytest -m unit                 # pure logic, fast, no services
+
+# Docs
+uv sync --only-group docs && uv run mkdocs serve    # http://127.0.0.1:8000
+
+# Regenerate what is generated
+uv run python scripts/generate_commands.py          # slash commands + COMMANDS.md
+uv run python scripts/generate_mcp_docs.py          # MCP_TOOLS.md
+
+# Stack
+./scripts/start_comfyui.sh
+./scripts/stop_comfyui.sh
+docker compose -f docker/docker-compose.yml logs -f comfyui
+```
+
+---
+
+## 🔌 OpenCode MCP config
+
+```json
+{
+  "mcp": {
+    "minimax-video-factory": {
+      "type": "local",
+      "command": ["docker", "exec", "-i", "minimax-comfyui",
+                  "bash", "/workspace/scripts/mcp_runner.sh"],
+      "enabled": true
+    }
   }
 }
 ```
 
-## License
+Three variants (in-container, host `uv`, remote over HTTP) are documented in
+**[Remote MCP](https://leonardodg.github.io/minimax-video-factory/MCP_REMOTE/)**.
 
-Project code: MIT (see `LICENSE`).  
-Model weights: **MiniMax H3 Community License** (see [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3)).
+---
+
+## ⚠️ Honest limitations
+
+Things this cannot do, stated plainly so you can decide before downloading 32 GB.
+
+- **5 seconds at a time.** H3 renders 4–15 s clips. Longer pieces are several
+  renders concatenated with `compose_final`, not one continuous take.
+- **1024×576 is the ceiling on 12 GB.** 1344×768 is the model's canvas maximum
+  but it OOMs the sampler. A larger card lifts this; this repo does not.
+- **No legible text.** See the prompt section above — bake text into a
+  `first_frame` instead.
+- **Minutes, not seconds.** ~15 min for a 5 s clip at 1024×576. If you need
+  volume and have a budget, a paid API will be faster.
+- **INT4 weights.** Quantised for consumer VRAM; full-precision H3 will look
+  better and does not fit.
+- **One GPU, one render.** No queue parallelism, no distributed rendering.
+- **Not a video editor.** Concatenation is ffmpeg `concat`, nothing more —
+  no transitions, no titles, no colour grading.
+
+## 🔐 A note on the self-hosted runner
+
+This repo is public and its GPU test job runs on a personal machine. That job
+**refuses to run code from forks** — see the guard in `.github/workflows/ci.yml`.
+If you fork this and wire up your own runner, keep that guard. A self-hosted
+runner executing a stranger's pull request has your SSH keys and your docker
+socket.
+
+---
+
+## 🤝 Contributing
+
+<img src="https://avatars.githubusercontent.com/u/1678290?s=400&u=2f875356b82f055057b6e9679c0b66001b9b29f9&v=4" width="120" title="LeoDG">
+
+Issues and pull requests are welcome. Fork PRs run the lint and test jobs on GitHub's runners; the GPU suite runs only on the maintainer's machine.
+
+## 📄 License
+
+MIT — see [LICENSE](LICENSE).
+
+## 📮 Contact
+
+LeoDG — [@leodg](https://leodg.dev)
+
+- **Repository:** https://github.com/leonardodg/minimax-video-factory
+- **Documentation:** https://leonardodg.github.io/minimax-video-factory/
