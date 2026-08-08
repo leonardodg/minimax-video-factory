@@ -134,6 +134,36 @@ Slash commands (`scripts/generate_commands.py`, padrão existente):
   Comando: `python -m minimax_mcp.ig_worker`.
 - Dependências novas no `pyproject.toml`: `instagrapi`, `pika`.
 
+## Documentação & testes (padrão do projeto)
+
+As 4 tools novas seguem o checklist de `docs/dev/extending.md` (9 lugares —
+6 deles enforced por teste), então cada tool MCP nova toca:
+
+| # | Step | Enforced by |
+|---|---|---|
+| 1 | Implementar função de domínio em `ig_sync.py`/`ig_worker.py`/`ig_queue.py`, sem preocupações MCP (unit-testável) | — |
+| 2 | Registrar em `server.py` com `@mcp.tool()` + `Field(description=…)` por parâmetro | — |
+| 3 | Nomear slash command em `scripts/command_docs/catalog.py` | `unit_commands` |
+| 4 | Conhecimento operacional em `scripts/command_docs/overrides.py` | — (opcional) |
+| 5 | `uv run python scripts/generate_commands.py` + commit dos `.md` gerados | `unit_commands` |
+| 6 | `uv run python scripts/generate_mcp_docs.py` → `docs/MCP_TOOLS.md` | — |
+| 7 | Adicionar nome da tool em `tests/unit_registry.py` | `unit_registry` |
+| 8 | Atualizar contagem esperada em `tests/unit_commands.py` | `unit_commands` |
+| 9 | Linha na tabela de tools do **README** | `unit_commands` |
+
+Extras:
+- **Testes** para as funções de domínio (`tests/unit_*.py`, marker `unit`) +
+  entry em `tests/test_scripts.py`. Novos testes de integração:
+  `tests/integration_ig_*.py` com markers `integration_db` / `integration_llm`
+  (padrão já existente no repo).
+- **Docs**: atualizar `docs/KNOWLEDGE_BASE.md` (seção IG sync), `.env.example`
+  (novas vars), e rebuild `uv run mkdocs build --strict`.
+- **Nova dependência** (`instagrapi`, `pika`): rebuild do container
+  (`./scripts/start_comfyui.sh`) — `tests/09_container_deps.sh` cobre.
+- **Slash commands gerados** (`/ig-sync`, `/ig-status`, `/ig-worker`):
+  arquivos gerados nunca são editados à mão — muda `catalog.py`/`overrides.py`
+  e regenera.
+
 ## Segurança
 
 - `IG_SESSIONID` e credenciais RabbitMQ só no `.env` (gitignored). Nunca logar
