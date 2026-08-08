@@ -80,6 +80,10 @@ Peças novas: `minimax_mcp/ig_sync.py` (enumeração+publicação),
   tags e embedding já estão no Postgres — o arquivo de mídia não é necessário depois.
   Libera espaço (a pasta `downloads/ig` não acumula GB). Configurável via
   `IG_DELETE_AFTER_INGEST` (default `true`).
+- **Não atrapalhar renders**: rebuild do container/imagem ou restart do compose
+  **apenas com a fila de render do ComfyUI vazia** — checar antes via
+  `queue_status` (tool MCP). O `ig-worker` compartilha a mesma GPU/VRAM do H3;
+  nunca disparar rebuild nem ingest pesado enquanto houver render na fila.
 
 ## Contrato da mensagem
 
