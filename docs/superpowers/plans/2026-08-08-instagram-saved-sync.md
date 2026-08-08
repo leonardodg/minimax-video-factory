@@ -573,7 +573,7 @@ finally:
 
 Run:
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 uv run --project . alembic upgrade head
 uv run --project . python tests/integration_knowledge_db.py
 ```
@@ -1587,7 +1587,7 @@ def group_of(command: str) -> str:
 - [ ] **Step 5: Run generators (commit generated files)**
 
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 uv run python scripts/generate_commands.py
 uv run python scripts/generate_mcp_docs.py
 ```
@@ -1630,7 +1630,7 @@ Add a short section (e.g. before `## 7. Configuration`) documenting the IG sync:
 - [ ] **Step 9: Run the enforced tests**
 
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 uv run --project . python tests/unit_registry.py
 uv run --project . python tests/unit_commands.py
 uv run --project . pytest -m unit
@@ -1730,7 +1730,7 @@ Append to `docker/docker-compose.yml` (after the `postgres` service):
 
 - [ ] **Step 3: Validate the compose file parses**
 
-Run: `docker compose --project-directory /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync --env-file /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync/.env -f docker/docker-compose.yml config >/dev/null`
+Run: `docker compose --project-directory . --env-file .env -f docker/docker-compose.yml config >/dev/null`
 Expected: exit 0 (config valid). Note: `.env` must exist in the worktree (copy from main if missing); `IG_SESSIONID` may be empty in the worktree `.env` — compose will still validate.
 
 - [ ] **Step 4: Commit**
@@ -1974,7 +1974,7 @@ minimax_mcp.ig_queue minimax_mcp.ig_sync minimax_mcp.ig_worker
 
 Run:
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 uv run --project . alembic upgrade head
 uv run --project . pytest -m "integration_db or integration_llm"
 ```
@@ -2004,7 +2004,7 @@ Expected: `running: 0 pending: 0` (or use the `queue_status` MCP tool). **If the
 - [ ] **Step 2: Rebuild and restart the stack (only after Step 1 is confirmed)**
 
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 ./scripts/stop_comfyui.sh && ./scripts/start_comfyui.sh
 ```
 Expected: comfyui, postgres, rabbitmq, ig-worker all `Up`. Watch `docker compose --project-directory . --env-file .env -f docker/docker-compose.yml ps`.
@@ -2012,7 +2012,7 @@ Expected: comfyui, postgres, rabbitmq, ig-worker all `Up`. Watch `docker compose
 - [ ] **Step 3: Validate in-container deps and tool registry**
 
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 bash tests/09_container_deps.sh
 ```
 Expected: `ALL PASS` (pika/instagrapi present, all modules import, container exposes 24 tools).
@@ -2020,7 +2020,7 @@ Expected: `ALL PASS` (pika/instagrapi present, all modules import, container exp
 - [ ] **Step 4: Full test sweep**
 
 ```bash
-cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
+cd "$(git rev-parse --show-toplevel)"
 uv run --project . pytest
 uv run mkdocs build --strict
 ./scripts/diagnose.sh
