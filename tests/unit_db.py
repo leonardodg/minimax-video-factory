@@ -104,6 +104,15 @@ if len(chunks) == 3 and chunks[0][-100:] == chunks[1][:100]:
 else:
     bad(f"normal overlap broken: {[len(c) for c in chunks]}")
 
+print("== unit_db: ig_pk column on Document ==")
+from minimax_mcp.db import Document
+
+cols = {c.name for c in Document.__table__.columns}
+if "ig_pk" in cols:
+    ok("Document model has an ig_pk column")
+else:
+    bad("Document model is missing ig_pk")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

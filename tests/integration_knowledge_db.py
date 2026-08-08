@@ -70,6 +70,7 @@ try:
         llm_model="lfm2:24b",
         embed_fn=fake_embed,
         embedding_model="fake-embed-test",
+        ig_pk="12345",
     )
     if doc.id is not None:
         ok(f"save_document created document id={doc.id}")
@@ -123,6 +124,22 @@ try:
         bad("reindex_all did not update embedding model tags")
 except Exception as e:
     bad(f"reindex_all raised: {e}")
+finally:
+    session.close()
+
+print("== integration_knowledge_db: ig_pk dedup helpers ==")
+session = db.get_session()
+try:
+    if db.document_exists(session, ig_pk="12345"):
+        ok("document_exists(ig_pk) finds the saved document")
+    else:
+        bad("document_exists(ig_pk) did not find the saved document")
+
+    pks = db.list_ig_pks(session)
+    if "12345" in pks:
+        ok("list_ig_pks returns the stored ig_pk")
+    else:
+        bad(f"list_ig_pks = {pks!r}")
 finally:
     session.close()
 
