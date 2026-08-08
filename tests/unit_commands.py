@@ -418,6 +418,20 @@ if "COMMANDS.md" in mkdocs_yml:
 else:
     bad("COMMANDS.md exists but is not in the MkDocs nav — nobody can reach it")
 
+
+# The README carries a hand-written table of every tool. It is the first thing
+# anyone reads, and nothing regenerates it -- so a new tool silently leaves it
+# a tool short unless something says so.
+readme = (ROOT / "README.md").read_text(encoding="utf-8")
+undocumented = sorted(t for t in SPECS if f"`{t}`" not in readme)
+if not undocumented:
+    ok("every tool appears in the README table")
+else:
+    bad(
+        f"tools missing from the README table: {undocumented}. "
+        "Add them to the Slash commands section."
+    )
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

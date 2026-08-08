@@ -235,21 +235,39 @@ correct out of the frame and put it in the README instead.
 
 Every MCP tool has a matching command. `/minimax-*` drives the video pipeline, `/kb-*` the knowledge base.
 
-| Command | What it does |
-|---|---|
-| `/minimax-health` | ComfyUI reachable and all model files present |
-| `/minimax-gerar-video` | Prompt → rendered clip |
-| `/minimax-submit-scene` | Queue a render and return immediately |
-| `/minimax-status` | Is it queued, rendering, done or failed? |
-| `/minimax-wait` | Block until a render finishes |
-| `/minimax-outputs` | List everything rendered so far |
-| `/minimax-compose` | Concatenate scenes into a final cut |
-| `/minimax-download` | Fetch a video with browser cookies |
-| `/minimax-transcrever` | Whisper transcription with timestamps |
-| `/minimax-prompt-cinematico` | Transcript → structured H3 prompt |
-| `/minimax-studio` | The whole chain: URL → download → transcribe → prompt → render |
-| `/kb-ingest-texto` · `/kb-ingest-video` · `/kb-ingest-audio` · `/kb-ingest-markdown` | Feed the knowledge base |
-| `/kb-buscar` · `/kb-perguntar` · `/kb-reindex` | Search, ask, reindex |
+### Render pipeline
+
+| Tool | Command | What it does |
+|---|---|---|
+| `health_check` | `/minimax-health` | ComfyUI reachable and all four model files present |
+| `submit_scene` | `/minimax-submit-scene` | Queue a render, return the `prompt_id` immediately |
+| `wait_for_video` | `/minimax-wait` | Block until a render finishes, return the `.mp4` |
+| `get_status` | `/minimax-status` | Queued, rendering, finished or failed — for one render |
+| `queue_status` | `/minimax-fila` | The whole queue, with a sampler progress bar |
+| `list_outputs` | `/minimax-outputs` | Every clip rendered so far, newest first |
+| `compose_final` | `/minimax-compose` | Concatenate scenes into one file with ffmpeg |
+| `generate_video` | `/minimax-gerar-video` | Prompt → rendered clip, submit and wait in one call |
+
+### Studio
+
+| Tool | Command | What it does |
+|---|---|---|
+| `download_video` | `/minimax-download` | Fetch a Reel or YouTube video using browser cookies |
+| `transcribe_video` | `/minimax-transcrever` | Local Whisper transcription with timestamps |
+| `create_cinematic_prompt` | `/minimax-prompt-cinematico` | Turn a transcript into a structured H3 prompt |
+| `studio_pipeline` | `/minimax-studio` | The whole chain: URL → download → transcribe → prompt → render |
+
+### Knowledge base
+
+| Tool | Command | What it does |
+|---|---|---|
+| `knowledge_ingest_text` | `/kb-ingest-texto` | Summarise and store a text you already have |
+| `knowledge_ingest_video` | `/kb-ingest-video` | Download, transcribe and document a video |
+| `knowledge_ingest_audio` | `/kb-ingest-audio` | Transcribe and document a podcast |
+| `knowledge_ingest_markdown` | `/kb-ingest-markdown` | Import `.md` files; reuses `## Summary` and skips the LLM |
+| `knowledge_search` | `/kb-buscar` | Hybrid search — keyword and semantic, fused with RRF |
+| `knowledge_ask` | `/kb-perguntar` | Answer from your own base only, citing the sources |
+| `knowledge_reindex` | `/kb-reindex` | Recompute chunks and embeddings for everything |
 
 The command files are **generated from the tool signatures** — `uv run python scripts/generate_commands.py`. A test fails if a tool ever lacks one. Full reference: **[docs/COMMANDS.md](https://leonardodg.github.io/minimax-video-factory/COMMANDS/)**.
 
