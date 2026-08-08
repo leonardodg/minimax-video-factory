@@ -5,6 +5,7 @@ description = "OpenCode + MCP + ComfyUI orchestration for local MiniMax H3 video
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.28.1",
+    "instagrapi>=2.1.0",
     "fastmcp>=3.0.0",
     "pydantic>=2.11.4",
     "python-dotenv>=1.0.1",
