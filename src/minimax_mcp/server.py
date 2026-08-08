@@ -360,7 +360,7 @@ def generate_video(
     studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
     return studio.generate_video(
         prompt=prompt, duration=duration, width=width, height=height, seed=seed,
-        first_frame=first_frame,
+        first_frame=first_frame, filename_prefix=filename_prefix,
     )
 
 

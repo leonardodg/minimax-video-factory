@@ -87,6 +87,7 @@ class AudiovisualStudio:
         height: int = 576,
         seed: int | None = None,
         first_frame: str | None = None,
+        filename_prefix: str = "studio/",
     ) -> dict[str, Any]:
         """Generate video using the existing MiniMax H3 pipeline."""
         import logging
@@ -101,7 +102,7 @@ class AudiovisualStudio:
                 width=width,
                 height=height,
                 seed=seed,
-                filename_prefix="studio/",
+                filename_prefix=filename_prefix,
                 first_frame=first_frame,
             )
             if not result.get("ok"):

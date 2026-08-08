@@ -124,6 +124,47 @@ with tempfile.TemporaryDirectory() as td:
     else:
         bad(f"download failure result = {result!r}")
 
+print("== unit_orchestrator: generate_video honours its parameters ==")
+from unittest import mock as _mock
+
+from minimax_mcp import orchestrator as _orch
+
+_seen = {}
+def _spy(**kw):
+    _seen.update(kw)
+    return {"ok": True, "prompt_id": "x", "seed": 1}
+
+# __new__, not the constructor: AudiovisualStudio() builds a transcriber and
+# loads a Whisper model, which is minutes of work to test one parameter being
+# passed along.
+_studio = object.__new__(_orch.AudiovisualStudio)
+async def _done(prompt_id, timeout=0):
+    return {"ok": True, "output_path": "/tmp/out.mp4"}
+
+# Both are patched: generate_video submits and then blocks on
+# wait_for_video_core for up to 1800s, so leaving that real makes the test hang
+# on a prompt_id that will never complete.
+with _mock.patch.object(_orch, "submit_scene_core", _spy), \
+     _mock.patch.object(_orch, "wait_for_video_core", _done):
+    _studio.generate_video(prompt="p", duration=5.0, width=1024, height=576,
+                           seed=7, filename_prefix="showcase/mine",
+                           first_frame="/tmp/x.png")
+
+# filename_prefix was accepted by the MCP tool and then dropped here: every
+# clip landed under studio/ no matter what the caller asked for.
+if _seen.get("filename_prefix") == "showcase/mine":
+    ok("generate_video passes filename_prefix through")
+else:
+    bad(f"filename_prefix reached submit_scene_core as {_seen.get('filename_prefix')!r}")
+if _seen.get("first_frame") == "/tmp/x.png":
+    ok("generate_video passes first_frame through")
+else:
+    bad(f"first_frame = {_seen.get('first_frame')!r}")
+if _seen.get("seed") == 7 and _seen.get("width") == 1024:
+    ok("seed and size reach submit_scene_core")
+else:
+    bad(f"seed={_seen.get('seed')} width={_seen.get('width')}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

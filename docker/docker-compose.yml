@@ -37,6 +37,9 @@ services:
       # NOTE: use an ABSOLUTE host path (PROJECT_ROOT from .env) — relative paths
       # with --project-directory resolve one level too high.
       - ${PROJECT_ROOT:-..}:/workspace:ro
+    extra_hosts:
+      # Makes host.docker.internal resolve on Linux, where it does not by default.
+      - "host.docker.internal:host-gateway"
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
@@ -57,6 +60,18 @@ services:
       MODEL_TEXT_ENCODER: ${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}
       MODEL_VIDEO_VAE: ${MODEL_VIDEO_VAE:-minimax_h3_video_vae_fp16.safetensors}
       MODEL_AUDIO_VAE: ${MODEL_AUDIO_VAE:-minimax_h3_audio_vae_fp32.safetensors}
+      # --- knowledge base -------------------------------------------------
+      # Container view of the database: "postgres" is the compose service, on
+      # the shared network. The host's .env says 127.0.0.1, which inside this
+      # container means this container -- it would never have connected.
+      KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@postgres:5432/${KB_POSTGRES_DB:-knowledge}
+      # Ollama runs on the host, so the container needs the gateway rather than
+      # localhost. This is usually still blocked by the host firewall, which is
+      # why the /kb-* tools are documented as host-mode -- see AGENTS.md. The
+      # value is correct so that opening the firewall is all it takes.
+      OLLAMA_URL: ${CONTAINER_OLLAMA_URL:-http://host.docker.internal:11434}
+      LLM_MODEL: ${LLM_MODEL:-lfm2:24b}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mxbai-embed-large}
       # Remote MCP transport settings
       MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}

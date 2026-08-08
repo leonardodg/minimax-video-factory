@@ -231,12 +231,28 @@ def ingest_markdown(
         results.append({"file": str(f), **res})
         if res.get("ok"):
             imported += 1
-    return {
-        "ok": True,
+    failed = len(files) - imported
+
+    # ok reflects whether anything was actually imported. Returning ok=True with
+    # imported=0 reads as success and hides the common causes -- an unreachable
+    # database, Ollama down -- behind a green result. A partial import is still
+    # a success, but the caller is told how many fell over and why.
+    first_error = next(
+        (r.get("error") for r in results if not r.get("ok") and r.get("error")), None
+    )
+    out = {
+        "ok": imported > 0,
         "imported": imported,
+        "failed": failed,
         "total": len(files),
         "results": results,
     }
+    if failed:
+        out["error"] = (
+            f"{failed} of {len(files)} file(s) failed"
+            + (f": {first_error}" if first_error else "")
+        )
+    return out
 
 
 def _ingest_markdown_file(

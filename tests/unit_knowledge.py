@@ -215,6 +215,46 @@ for force_json in (True, False):
     else:
         bad(f"prompt was altered: {ollama_msgs[-1]['content']!r}")
 
+print("== unit_knowledge: ingest_markdown reports failure ==")
+import tempfile
+from unittest import mock
+
+_md_dir = tempfile.mkdtemp()
+for _n in ("a.md", "b.md"):
+    Path(_md_dir, _n).write_text("---\ntitle: t\n---\n\n## Summary\nx\n", encoding="utf-8")
+
+# Every file fails: the caller must not be told this succeeded. It used to
+# return ok=True with imported=0, which reads as success and hides a database
+# that is simply unreachable.
+with mock.patch.object(knowledge, "_ingest_markdown_file",
+                       return_value={"ok": False, "stage": "db", "error": "boom"}):
+    r = knowledge.ingest_markdown(_md_dir)
+if r.get("ok") is False:
+    ok("all files failing yields ok=False, not a silent success")
+else:
+    bad(f"ingest_markdown returned ok={r.get('ok')} with imported={r.get('imported')}")
+if r.get("failed") == 2:
+    ok("the failure count is reported")
+else:
+    bad(f"failed = {r.get('failed')!r}")
+if "boom" in str(r.get("error", "")):
+    ok("the underlying error reaches the caller")
+else:
+    bad(f"error = {r.get('error')!r}")
+
+# A partial import is still a success, but must say how many fell over.
+_calls = {"n": 0}
+def _half(f, **kw):
+    _calls["n"] += 1
+    return ({"ok": True, "document_id": 1} if _calls["n"] == 1
+            else {"ok": False, "stage": "db", "error": "boom"})
+with mock.patch.object(knowledge, "_ingest_markdown_file", _half):
+    r = knowledge.ingest_markdown(_md_dir)
+if r.get("ok") and r.get("imported") == 1 and r.get("failed") == 1:
+    ok("a partial import is ok=True with the failures counted")
+else:
+    bad(f"partial: ok={r.get('ok')} imported={r.get('imported')} failed={r.get('failed')}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
