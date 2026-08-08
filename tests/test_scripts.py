@@ -74,6 +74,20 @@ def test_unit_privacy():
 
 
 @pytest.mark.integration_db
+def test_container_deps():
+    """The image the README tells users to configure must be able to import
+    every tool. Marked integration_db only because it needs Docker up; it
+    touches no database itself."""
+    result = subprocess.run(
+        ["bash", str(ROOT / "tests" / "09_container_deps.sh")],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 78:
+        pytest.skip(result.stdout.strip().splitlines()[-1] if result.stdout else "skipped")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_db
 def test_integration_knowledge_db():
     result = _run_script("integration_knowledge_db.py")
     assert result.returncode == 0, result.stdout + result.stderr
