@@ -36,6 +36,7 @@ Instagram (conta logada, IG_SESSIONID)
         ├── vídeo → Whisper transcribe (GPU)
         ├── foto   → vision LLM (Ollama qwen2.5vl:7b via host-gateway) descreve
         ├── ingest no KB (LLM resumo/tutorial/tags + embedding) — reusa knowledge.py
+        ├── limpa arquivo baixado (conteúdo/contexto já salvo no banco)
         └── ack; duplicados pulados (ig_pk)
         │
         ▼
@@ -73,6 +74,12 @@ Peças novas: `minimax_mcp/ig_sync.py` (enumeração+publicação),
   processar: `ig_sync_saved` só publica; o daemon processa em background.
 - **RabbitMQ indisponível**: tools retornam `{ok: false, error}`; worker reconecta
   com backoff.
+- **Limpeza de downloads**: após o ingest concluído com sucesso no KB (conteúdo e
+  contexto salvos no banco), o worker **apaga o arquivo baixado** (vídeo/foto em
+  `IG_DOWNLOADS_DIR`). O conteúdo textual (transcrição/descrição), resumo, tutorial,
+  tags e embedding já estão no Postgres — o arquivo de mídia não é necessário depois.
+  Libera espaço (a pasta `downloads/ig` não acumula GB). Configurável via
+  `IG_DELETE_AFTER_INGEST` (default `true`).
 
 ## Contrato da mensagem
 
@@ -101,6 +108,7 @@ RABBITMQ_URL=amqp://guest:guest@localhost:5672/   # default local; VPS = trocar
 RABBITMQ_QUEUE=ig.saved
 IG_WORKER_CONCURRENCY=1
 IG_DOWNLOADS_DIR=downloads/ig
+IG_DELETE_AFTER_INGEST=true            # apaga o arquivo baixado após salvar no KB
 OLLAMA_VISION_MODEL=qwen2.5vl:7b
 WHISPER_MODEL=small                       # já existe
 ```
