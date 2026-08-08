@@ -155,6 +155,19 @@ def run() -> None:
                     Path(res["filepath"]).unlink(missing_ok=True)
                 except OSError:
                     logger.warning("could not delete %s", res["filepath"])
+            _state = os.environ.get("IG_STATE_FILE", "downloads/ig/state.json")
+            try:
+                import json as _json
+                from pathlib import Path as _P
+
+                _p = _P(_state)
+                _existing = _json.loads(_p.read_text(encoding="utf-8")) if _p.exists() else []
+                _existing.append({"ig_pk": message["ig_pk"], "status": "done",
+                                  "document_id": res["document_id"], "title": message.get("title")})
+                _p.parent.mkdir(parents=True, exist_ok=True)
+                _p.write_text(_json.dumps(_existing[-500:], ensure_ascii=False, indent=2), encoding="utf-8")
+            except Exception:
+                pass
             ch.basic_ack(method.delivery_tag)
         else:
             logger.warning("processing failed ig_pk=%s: %s", message["ig_pk"], res["error"])

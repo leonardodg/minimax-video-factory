@@ -53,6 +53,7 @@ from minimax_mcp.core import (
 from minimax_mcp.downloader import VideoDownloader
 from minimax_mcp.orchestrator import AudiovisualStudio
 from minimax_mcp.transcriber import AudioTranscriber
+from minimax_mcp import ig_queue
 
 # ---------------- logging ----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -479,6 +480,123 @@ def knowledge_reindex(
     """Recalcula chunks e embeddings de todos os documentos (use após trocar de modelo de embedding)."""
     from minimax_mcp import knowledge
     return knowledge.reindex(embedding_model=embedding_model)
+
+
+# =============================================================================
+# NEW: Instagram Saved Posts -> Knowledge Base (RabbitMQ queue + ig-worker)
+# =============================================================================
+
+@mcp.tool()
+def ig_sync_saved() -> dict[str, Any]:
+    """Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
+    Nao processa nada — o daemon ig-worker consome a fila em background.
+    Retorna {ok, published, skipped_existing, total}."""
+    from minimax_mcp import db, ig_sync
+
+    if not ig_sync.IG_SESSIONID:
+        return {"ok": False, "error": ig_sync.SESSIONID_MISSING}
+    conn = ig_queue.connect()
+    try:
+        channel = conn.channel()
+        ig_queue.declare(channel)
+        session = db.get_session()
+        try:
+            existing = db.list_ig_pks(session)
+        finally:
+            session.close()
+        client = ig_sync.make_client()
+        return ig_sync.sync_saved_posts(
+            client, existing_pks=existing,
+            publish_fn=lambda msg: ig_queue.publish(channel, msg),
+        )
+    except Exception as e:
+        return {"ok": False, "error": f"ig_sync_saved failed: {e}"}
+    finally:
+        ig_queue.close(conn)
+
+
+@mcp.tool()
+def ig_queue_status() -> dict[str, Any]:
+    """Mostra o tamanho da fila ig.saved (ready/dead) e quantos consumidores ativos."""
+    from minimax_mcp import ig_queue as _q
+
+    conn = _q.connect()
+    try:
+        return _q.queue_status(conn.channel())
+    except Exception as e:
+        return {"ok": False, "error": f"ig_queue_status failed: {e}"}
+    finally:
+        _q.close(conn)
+
+
+@mcp.tool()
+def ig_worker_start() -> dict[str, Any]:
+    """Envia o comando 'start' ao daemon ig-worker (retoma o consumo da fila)."""
+    from minimax_mcp import ig_queue as _q
+
+    conn = _q.connect()
+    try:
+        channel = conn.channel()
+        _q.declare(channel)
+        import json as _json
+
+        channel.basic_publish(
+            exchange="", routing_key=_q.CONTROL_QUEUE,
+            body=_json.dumps({"command": "start"}), properties=None,
+        )
+        return {"ok": True, "command": "start"}
+    except Exception as e:
+        return {"ok": False, "error": f"ig_worker_start failed: {e}"}
+    finally:
+        _q.close(conn)
+
+
+@mcp.tool()
+def ig_worker_stop() -> dict[str, Any]:
+    """Envia o comando 'stop' ao daemon ig-worker (pausa o consumo da fila)."""
+    from minimax_mcp import ig_queue as _q
+
+    conn = _q.connect()
+    try:
+        channel = conn.channel()
+        _q.declare(channel)
+        import json as _json
+
+        channel.basic_publish(
+            exchange="", routing_key=_q.CONTROL_QUEUE,
+            body=_json.dumps({"command": "stop"}), properties=None,
+        )
+        return {"ok": True, "command": "stop"}
+    except Exception as e:
+        return {"ok": False, "error": f"ig_worker_stop failed: {e}"}
+    finally:
+        _q.close(conn)
+
+
+@mcp.tool()
+def ig_get_progress(
+    last_n: int = Field(default=10, description="Quantos últimos resultados processados mostrar"),
+) -> dict[str, Any]:
+    """Mostra os últimos N posts do Instagram processados pelo ig-worker (state em downloads/ig)."""
+    from minimax_mcp import db
+
+    state_file = os.environ.get("IG_STATE_FILE", "downloads/ig/state.json")
+    entries: list[dict] = []
+    try:
+        from pathlib import Path as _P
+
+        if _P(state_file).exists():
+            import json as _json
+
+            entries = _json.loads(_P(state_file).read_text(encoding="utf-8"))
+    except Exception:
+        entries = []
+    session = db.get_session()
+    try:
+        total_ig = len(db.list_ig_pks(session))
+    finally:
+        session.close()
+    return {"ok": True, "last": entries[-last_n:], "documents_with_ig_pk": total_ig}
 
 
 # ---------------- entrypoint ----------------

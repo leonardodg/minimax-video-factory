@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Registry test for the MCP server: the 18 @mcp.tool functions are registered,
+"""Registry test for the MCP server: the 24 @mcp.tool functions are registered,
 required params have Field(description=...), and the set matches docs/MCP_TOOLS.md.
 
 Run: uv run --directory . python tests/unit_registry.py
@@ -49,6 +49,12 @@ EXPECTED_TOOLS = {
     "knowledge_search",
     "knowledge_ask",
     "knowledge_reindex",
+    # instagram saved-posts sync
+    "ig_sync_saved",
+    "ig_queue_status",
+    "ig_worker_start",
+    "ig_worker_stop",
+    "ig_get_progress",
 }
 
 # required params that MUST carry a Field(description=...)
@@ -118,7 +124,7 @@ async def main() -> None:
         doc_flat = {n for tup in doc_tool_names for n in tup if n}
         doc_flat = {n for n in doc_flat if n in EXPECTED_TOOLS}
         if doc_flat == EXPECTED_TOOLS:
-            ok("all 18 tools documented in docs/MCP_TOOLS.md")
+            ok("all 24 tools documented in docs/MCP_TOOLS.md")
         else:
             bad(f"MCP_TOOLS.md mentions {sorted(doc_flat)} but expected {sorted(EXPECTED_TOOLS)}")
 
