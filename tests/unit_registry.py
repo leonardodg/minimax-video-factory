@@ -128,6 +128,18 @@ async def main() -> None:
         else:
             bad(f"MCP_TOOLS.md mentions {sorted(doc_flat)} but expected {sorted(EXPECTED_TOOLS)}")
 
+    print("== unit_registry: tools fail soft (never raise) ==")
+    from unittest.mock import patch
+
+    from minimax_mcp import db as _db
+
+    with patch.object(_db, "get_session", side_effect=RuntimeError("db down")):
+        res = server.ig_get_progress()
+    if res.get("ok") is False and "ig_get_progress failed" in res.get("error", ""):
+        ok("ig_get_progress returns {ok: False} instead of raising when the DB is down")
+    else:
+        bad(f"ig_get_progress did not fail soft: {res!r}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

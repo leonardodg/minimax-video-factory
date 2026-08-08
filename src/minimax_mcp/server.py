@@ -591,11 +591,14 @@ def ig_get_progress(
             entries = _json.loads(_P(state_file).read_text(encoding="utf-8"))
     except Exception:
         entries = []
-    session = db.get_session()
     try:
-        total_ig = len(db.list_ig_pks(session))
-    finally:
-        session.close()
+        session = db.get_session()
+        try:
+            total_ig = len(db.list_ig_pks(session))
+        finally:
+            session.close()
+    except Exception as e:
+        return {"ok": False, "error": f"ig_get_progress failed: {e}"}
     return {"ok": True, "last": entries[-last_n:], "documents_with_ig_pk": total_ig}
 
 

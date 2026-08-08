@@ -23,7 +23,7 @@ GENERATED_HEADER = (
     "<!-- Não edite à mão: rode `uv run python scripts/generate_commands.py`. -->\n"
 )
 
-GROUP_ORDER = ("video", "kb")
+GROUP_ORDER = ("video", "kb", "ig")
 
 
 def _sorted_params(spec: ToolSpec) -> tuple[list[ParamSpec], list[ParamSpec]]:

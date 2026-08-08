@@ -374,3 +374,49 @@ Recalcula chunks e embeddings de todos os documentos da base.
 - Rode depois de trocar o modelo de embedding: vetores antigos não são comparáveis com os novos, e a busca degrada em silêncio até reindexar.
 - Percorre a base inteira — pode demorar proporcionalmente ao tamanho dela.
 
+## Instagram sync
+
+### `/ig-progress`
+
+Mostra os últimos N posts do Instagram processados pelo ig-worker (state em downloads/ig).
+
+```
+/ig-progress [last_n=10]
+```
+
+| Parâmetro | Obrigatório | Default | Descrição |
+|---|---|---|---|
+| `last_n` | não | `10` | Quantos últimos resultados processados mostrar |
+
+### `/ig-status`
+
+Mostra o tamanho da fila ig.saved (ready/dead) e quantos consumidores ativos.
+
+```
+/ig-status
+```
+
+### `/ig-sync`
+
+Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
+
+```
+/ig-sync
+```
+
+### `/ig-worker`
+
+Envia o comando 'start' ao daemon ig-worker (retoma o consumo da fila).
+
+```
+/ig-worker
+```
+
+### `/ig-worker-stop`
+
+Envia o comando 'stop' ao daemon ig-worker (pausa o consumo da fila).
+
+```
+/ig-worker-stop
+```
+
