@@ -194,40 +194,50 @@ The answer comes only from your own knowledge base, with the sources cited.
 
 ---
 
-## ✍️ Writing prompts that work
+## ✍️ What actually improves a clip
 
-Learned by getting it wrong. H3 takes a **subject + camera + lighting + audio**
-structure, in English, and it averages everything you throw at it.
+Measured, not guessed. Four renders of the same photograph with the same seed,
+changing one thing at a time:
 
-| ✅ Works | ❌ Comes out as mush |
-|---|---|
-| One concrete physical subject | Three subjects competing |
-| One action | A sequence of events |
-| One lighting condition | "volumetric beams + anamorphic flare + film grain + bloom" |
-| An audio cue (`faint meow`, `low drone`) | No audio mentioned — you lose half the model |
-| A `first_frame` for anything with a specific look | Hoping a long prompt pins the composition |
+| | Resolution | Prompt style | Time | Result |
+|---|---|---|---|---|
+| A | 512×320, 15 s | loose prose | 14 min | fine detail dissolves into noise |
+| B | 1024×576, 5 s | loose prose | **3 min** | buildings, bridge and hills all legible |
+| C | 1024×576, 5 s | HuggingFace structured format | 16 min | no visible gain over B |
+| D | 1024×576, 5 s | ComfyUI template format | 20 min | no visible gain over B |
 
-**A real failure from this repo.** This prompt —
+**Resolution is the lever.** A → B is a large, unambiguous jump: a city that was
+a grey smear at 512 px becomes a street grid at 1024 px. It was never "detail
+dissolving in the diffusion" — the detail did not fit in 512 pixels.
 
-> *dark studio void, faint blue wireframe grid receding into depth, slow dolly-in
-> toward a floating holographic terminal panel, lines of code lighting up,
-> drifting dust particles, volumetric beams, shallow depth of field, anamorphic
-> lens flare, film grain*
+**Prompt format is not.** Three formats that disagree with each other — loose
+prose, the model card's `integrated_multimodal_description:` fields, and the
+ComfyUI template's `<Picture 1>` / `SHOT 1:` convention — produced the same
+clip. Write clearly and stop optimising.
 
-— produced an unrecognisable cyan smear. Eight concepts averaged into one blur,
-and "lines of code" asked a video model to render text, which it cannot do.
+**A `first_frame` is the other lever.** Give the model a picture and it keeps
+the composition and animates it; ask it to invent one from text and it will,
+badly. Compare the hero clip above with what the same idea produced from text
+alone: an unrecognisable cyan smear.
 
-The fix was not a better prompt. It was `first_frame`.
+### So, in order
 
-**Video models do not write legible text.** If you need a readable title, draw it
-into the base image (ffmpeg, Figma, anything) and let H3 light it and move it. The
-hero clip at the top of this README is exactly that: a title card drawn with
-ffmpeg's `drawtext`, handed to H3 as a `first_frame`.
+1. **Render at 1024×576**, not lower. On 12 GB that is the ceiling; a 5 s clip
+   there beats a 15 s clip at 512×320 on both quality *and* wall-clock time.
+2. **Start from an image** whenever the look matters.
+3. **Describe plainly** — subject, what moves, the light, and an audio cue.
+   H3 generates sound, and a prompt with no audio wastes half the model.
+4. **Need something longer?** Render several clips and join them with
+   `compose_final`. One long low-res take is the worst of both.
 
-Even then, **small text degrades**. In that same render the 17 px caption came back
+**Video models do not write legible text.** Draw it into the base image and let
+H3 light it. The hero clip above is a title card drawn with ffmpeg's `drawtext`,
+handed to H3 as a `first_frame`.
+
+Even then, **small text degrades**. In that render the 17 px caption came back
 reading `local CPU · 22 GB VRAM` instead of `local GPU · 12 GB VRAM` — the model
-rewrote two characters. Large type survived untouched. Keep anything that must be
-correct out of the frame and put it in the README instead.
+rewrote two characters. Large type survived untouched. Keep anything that must
+be correct out of the frame.
 
 ---
 

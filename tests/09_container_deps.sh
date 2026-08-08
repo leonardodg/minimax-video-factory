@@ -91,11 +91,14 @@ done
 # A tool whose module fails to import can still leave the server running with
 # that tool silently absent; count them where the user actually calls them.
 EXPECTED=$(grep -c '^@mcp.tool()' "$ROOT/src/minimax_mcp/server.py")
+# list_tools(), not get_tools(): the latter does not exist on this FastMCP's
+# server object, and asking for it made the check report "none" against a
+# perfectly healthy container -- a false alarm that outlived the real bug.
 ACTUAL=$(docker exec -e PYTHONPATH=/workspace/src "$COMFY_CONTAINER" "$MCP_PY" -c "
 import asyncio, sys
 sys.path.insert(0, '/workspace/src')
 from minimax_mcp.server import mcp
-print(len(asyncio.run(mcp.get_tools())))
+print(len(asyncio.run(mcp.list_tools())))
 " 2>/dev/null | tail -1)
 
 if [ "$ACTUAL" = "$EXPECTED" ]; then
