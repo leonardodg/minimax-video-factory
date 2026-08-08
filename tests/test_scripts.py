@@ -115,3 +115,15 @@ def test_integration_knowledge_db():
 def test_integration_knowledge_llm():
     result = _run_script("integration_knowledge_llm.py")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_db
+def test_integration_ig_db():
+    result = _run_script("integration_ig_db.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_llm
+def test_integration_ig_llm():
+    result = _run_script("integration_ig_llm.py")
+    assert result.returncode == 0, result.stdout + result.stderr

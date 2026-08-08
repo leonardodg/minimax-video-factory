@@ -73,7 +73,8 @@ fi
 # present and the module still fail to import.
 MODULES="minimax_mcp.server minimax_mcp.core minimax_mcp.comfyui_client \
 minimax_mcp.db minimax_mcp.llm minimax_mcp.knowledge minimax_mcp.vault \
-minimax_mcp.downloader minimax_mcp.transcriber minimax_mcp.orchestrator"
+minimax_mcp.downloader minimax_mcp.transcriber minimax_mcp.orchestrator \
+minimax_mcp.ig_queue minimax_mcp.ig_sync minimax_mcp.ig_worker"
 
 for m in $MODULES; do
     if docker exec -e PYTHONPATH=/workspace/src "$COMFY_CONTAINER" \
