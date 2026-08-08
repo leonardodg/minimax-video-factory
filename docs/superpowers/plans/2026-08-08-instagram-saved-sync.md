@@ -41,9 +41,10 @@
   - `declare(channel) -> None`
   - `publish(channel, message: dict) -> None`
   - `parse_message(body: bytes) -> dict` → `{"ok": True, "message": {...}}` or `{"ok": False, "error": ...}`
-  - `attempts_of(properties) -> int`
-  - `handle_failure(channel, properties, body: bytes) -> str` → `"dead"` or `"requeue"`
-  - `queue_status(channel) -> dict`
+- `attempts_of(properties) -> int`
+- `handle_failure(channel, properties, body: bytes) -> str` → `"dead"` or `"requeue"`
+- `dead_letter(channel, properties, body: bytes) -> None` → publish straight to the DLQ (corrupted messages; no attempts bump, no requeue)
+- `queue_status(channel) -> dict`
   - `connect() -> BlockingConnection`, `close(connection) -> None`
 
 - [ ] **Step 1: Add pika to `pyproject.toml`**
@@ -189,6 +190,14 @@ if r == "dead" and ch.published and ch.published[0][0] == ig_queue.DLQ:
 else:
     bad(f"handle_failure(attempts=2) = {r}, published={ch.published}")
 
+print("== unit_ig_queue: dead_letter ==")
+ch = FakeChannel()
+ig_queue.dead_letter(ch, FakeProperties({"attempts": 2}), body)
+if ch.published and ch.published[0][0] == ig_queue.DLQ:
+    ok("dead_letter publishes straight to the DLQ (no requeue)")
+else:
+    bad(f"dead_letter = {ch.published!r}")
+
 print("== unit_ig_queue: queue_status ==")
 ch = FakeChannel()
 status = ig_queue.queue_status(ch)
@@ -233,7 +242,7 @@ DLQ = f"{QUEUE}.dead"
 CONTROL_QUEUE = "ig.worker.command"
 MAX_ATTEMPTS = int(os.environ.get("IG_MAX_ATTEMPTS", "3"))
 
-REQUIRED_KEYS = {"ig_pk", "media_type", "url"}
+REQUIRED_KEYS = {"ig_pk", "media_type", "url", "title", "owner_username", "collection_name", "status"}
 
 
 def connect() -> pika.BlockingConnection:
@@ -319,6 +328,20 @@ def handle_failure(channel: Any, properties: Any, body: bytes) -> str:
         properties=pika.BasicProperties(delivery_mode=2, headers={"attempts": attempts + 1}),
     )
     return "requeue"
+
+
+def dead_letter(channel: Any, properties: Any, body: bytes) -> None:
+    """Publish a message straight to the DLQ (corrupted bodies only).
+
+    Unlike handle_failure this never bumps attempts and never requeues —
+    a corrupted message goes to the DLQ exactly once.
+    """
+    channel.basic_publish(
+        exchange="",
+        routing_key=DLQ,
+        body=body,
+        properties=pika.BasicProperties(delivery_mode=2, headers={"attempts": attempts_of(properties) + 1}),
+    )
 
 
 def queue_status(channel: Any) -> dict:
@@ -1258,7 +1281,7 @@ def run() -> None:
         parsed = ig_queue.parse_message(body)
         if not parsed["ok"]:
             logger.warning("corrupted message -> DLQ: %s", parsed["error"])
-            ig_queue.handle_failure(ch, properties, body)
+            ig_queue.dead_letter(ch, properties, body)
             ch.basic_ack(method.delivery_tag)
             return
 
@@ -1375,7 +1398,7 @@ git commit -m "feat(ig): daemon worker consumes ig.saved, ingests into the KB"
 
 - [ ] **Step 1: Write the failing registry/commands tests**
 
-In `tests/unit_registry.py`, add the 5 tools to `EXPECTED_TOOLS` and nothing to `REQUIRED_DESCRIBED` (the tools have no required params; `ig_get_progress` has only an optional `last_n`). Update the module docstring count (18 → 23) if it states a number.
+In `tests/unit_registry.py`, add the 5 tools to `EXPECTED_TOOLS` and nothing to `REQUIRED_DESCRIBED` (the tools have no required params; `ig_get_progress` has only an optional `last_n`). Update the module docstring count (19 → 24) if it states a number.
 
 In `tests/unit_commands.py`, change the expected count from `19` to `24` and, if `group_of` changed, update the `group_of` assertions:
 
@@ -1651,7 +1674,7 @@ Append to `docker/docker-compose.yml` (after the `postgres` service):
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
     volumes:
-      - ${RABBITMQ_DATA_DIR:-${PROJECT_ROOT:-..}/.rabbitmq}:/var/lib/rabbitmq
+      - ${RABBITMQ_DATA_DIR:-.rabbitmq}:/var/lib/rabbitmq
 ```
 
 - [ ] **Step 2: Add the `ig-worker` service**
@@ -1953,7 +1976,7 @@ Run:
 ```bash
 cd /home/leodg/tools-local/minimax-video-factory/.worktrees/igsync
 uv run --project . alembic upgrade head
-uv run --project . pytest -m integration_db -m integration_llm
+uv run --project . pytest -m "integration_db or integration_llm"
 ```
 Expected: `integration_ig_db` PASS; `integration_ig_llm` PASS (or SKIP while the vision model is downloading). The 09-container-deps test requires a rebuilt image — skip it here and run after Task 9's rebuild.
 
