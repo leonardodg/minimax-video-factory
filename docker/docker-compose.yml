@@ -87,3 +87,64 @@ services:
       - "127.0.0.1:${KB_POSTGRES_PORT:-5432}:5432"
     volumes:
       - ${KB_POSTGRES_DATA_DIR:-${PROJECT_ROOT:-..}/.pgdata}:/var/lib/postgresql/data
+
+  # Message broker for the Instagram saved-posts sync. Local by default; a VPS
+  # RabbitMQ can be used instead by setting RABBITMQ_URL in .env.
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: ${RABBITMQ_CONTAINER:-minimax-rabbitmq}
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - ${RABBITMQ_DATA_DIR:-.rabbitmq}:/var/lib/rabbitmq
+
+  # Instagram saved-posts -> knowledge base worker. Same image/stack as the H3
+  # renderer (shares its GPU for Whisper/vision); reaches postgres + rabbitmq on
+  # the compose network and host Ollama via host.docker.internal.
+  ig-worker:
+    image: ${COMFY_IMAGE:-minimax-comfyui:local}
+    container_name: ${IG_WORKER_CONTAINER:-minimax-ig-worker}
+    depends_on:
+      - comfyui
+      - postgres
+      - rabbitmq
+    volumes:
+      - ${PROJECT_ROOT:-..}:/workspace:ro
+      - ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}:/downloads
+      - ${HF_CACHE_DIR:-${PROJECT_ROOT:-..}/.hf-cache}:/root/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
+      PYTHONPATH: /workspace/src
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-ig.saved}
+      KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@postgres:5432/${KB_POSTGRES_DB:-knowledge}
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen2.5vl:7b}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cuda}
+      LLM_MODEL: ${LLM_MODEL:-lfm2:24b}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-900}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mxbai-embed-large}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
+      IG_SESSIONID: ${IG_SESSIONID}
+      IG_DOWNLOADS_DIR: /downloads/ig
+      IG_DELETE_AFTER_INGEST: ${IG_DELETE_AFTER_INGEST:-true}
+      IG_STATE_FILE: /downloads/ig/state.json
+      VAULT_PATH: ${VAULT_PATH:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+    command: ["bash", "-c", "cd /workspace && /opt/mcp-venv/bin/python -m minimax_mcp.ig_worker"]
