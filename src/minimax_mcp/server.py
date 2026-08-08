@@ -46,6 +46,7 @@ from minimax_mcp.comfyui_client import ComfyUIClient
 from minimax_mcp.core import (
     compose_final_core,
     output_relpath,
+    progress_bar,
     submit_scene_core,
     wait_for_video_core,
 )
@@ -187,6 +188,56 @@ def submit_scene(
         prompt=prompt, duration=duration, width=width, height=height,
         seed=seed, filename_prefix=filename_prefix, first_frame=first_frame,
     )
+
+
+@mcp.tool()
+async def queue_status(
+    watch_seconds: float = Field(
+        default=20.0,
+        description="Segundos ouvindo o progresso do sampler. 0 pula e retorna só a fila",
+    ),
+) -> dict[str, Any]:
+    """Mostra a fila de renderização do ComfyUI: o que está rodando, o que espera,
+    e a barra de progresso do sampler quando disponível."""
+    client = ComfyUIClient(COMFYUI_URL)
+    snap = client.queue_snapshot()
+
+    progress = None
+    if watch_seconds > 0 and snap["running"]:
+        progress = await client.watch_progress(watch_seconds)
+
+    lines = []
+    for job in snap["running"]:
+        label = job["filename_prefix"] or job["prompt_id"][:8]
+        if progress and progress.get("prompt_id") in (None, job["prompt_id"]):
+            value, maximum = progress.get("value", 0), progress.get("max", 0)
+            lines.append(
+                f"RODANDO   {label}  {progress_bar(value, maximum)}  "
+                f"({value}/{maximum} steps)"
+            )
+        else:
+            lines.append(f"RODANDO   {label}  (progresso não capturado)")
+    for i, job in enumerate(snap["pending"], start=1):
+        label = job["filename_prefix"] or job["prompt_id"][:8]
+        lines.append(f"  {i}º na fila  {label}")
+    if not lines:
+        lines.append("fila vazia")
+
+    return {
+        "ok": True,
+        "running": snap["running"],
+        "pending": snap["pending"],
+        "total": snap["total"],
+        "progress": progress,
+        # A percentage counts sampler steps only. VAE decode and video encoding
+        # come after and are not represented, so 100% of the sampler is not
+        # 100% of the clip -- the step count is shown so nobody is misled.
+        "progress_note": (
+            "A porcentagem conta apenas os steps do sampler; o decode do VAE e a "
+            "codificação do vídeo vêm depois e não aparecem aqui."
+        ),
+        "summary": "\n".join(lines),
+    }
 
 
 @mcp.tool()

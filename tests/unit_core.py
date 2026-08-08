@@ -245,6 +245,61 @@ if LOAD_IMAGE_NODE_ID not in _WF:
 else:
     bad(f"node id {LOAD_IMAGE_NODE_ID!r} already exists in the workflow")
 
+print("== unit_core: queue snapshot + progress bar ==")
+from minimax_mcp.comfyui_client import queue_snapshot_from
+from minimax_mcp.core import progress_bar
+
+_Q = {
+    "queue_running": [[0, "aaa", {"5": {"inputs": {"width": 512, "height": 320}},
+                                  "14": {"inputs": {"filename_prefix": "showcase/01_plane"}}}]],
+    "queue_pending": [[1, "bbb", {"14": {"inputs": {"filename_prefix": "e2e_123/scene_0"}}}],
+                      [2, "ccc", {}]],
+}
+snap = queue_snapshot_from(_Q)
+if [j["prompt_id"] for j in snap["running"]] == ["aaa"]:
+    ok("snapshot separates the running job")
+else:
+    bad(f"running = {snap['running']}")
+if [j["prompt_id"] for j in snap["pending"]] == ["bbb", "ccc"]:
+    ok("snapshot keeps pending jobs in queue order")
+else:
+    bad(f"pending = {snap['pending']}")
+if snap["running"][0]["filename_prefix"] == "showcase/01_plane":
+    ok("snapshot pulls the output prefix, so a job is identifiable")
+else:
+    bad(f"prefix = {snap['running'][0].get('filename_prefix')}")
+if snap["pending"][1]["filename_prefix"] is None:
+    ok("a job with no recognisable prefix yields None, not a crash")
+else:
+    bad("missing prefix should be None")
+if snap["total"] == 3:
+    ok("snapshot totals running + pending")
+else:
+    bad(f"total = {snap['total']}")
+if queue_snapshot_from({})["total"] == 0:
+    ok("an empty queue payload is handled")
+else:
+    bad("empty payload should total 0")
+
+# The bar is what a human reads; keep it pure so it is testable.
+if progress_bar(0, 20, width=10) == "[          ]   0%":
+    ok("progress_bar at zero")
+else:
+    bad(f"bar(0,20) = {progress_bar(0, 20, width=10)!r}")
+if progress_bar(20, 20, width=10) == "[##########] 100%":
+    ok("progress_bar at full")
+else:
+    bad(f"bar(20,20) = {progress_bar(20, 20, width=10)!r}")
+if progress_bar(10, 20, width=10) == "[#####     ]  50%":
+    ok("progress_bar at half")
+else:
+    bad(f"bar(10,20) = {progress_bar(10, 20, width=10)!r}")
+# Division by zero is the obvious way this crashes in the wild.
+if progress_bar(0, 0, width=10) == "[          ]   0%":
+    ok("progress_bar tolerates max=0")
+else:
+    bad(f"bar(0,0) = {progress_bar(0, 0, width=10)!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

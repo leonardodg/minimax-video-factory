@@ -145,6 +145,28 @@ OVERRIDES: dict[str, Override] = {
             "use `/minimax-status` em vez deste."),
         ),
     ),
+    "queue_status": Override(
+        resumo="Mostra a fila de renderização com barra de progresso",
+        param_notas={
+            "watch_seconds": (
+                "quanto tempo ouvir o progresso. Um step em 1024x576 leva dezenas "
+                "de segundos, então uma janela curta pode não capturar nada — use 0 "
+                "para pular e ver só a fila"
+            ),
+        },
+        passos=(
+            "Mostre o campo `summary`, que já vem formatado para leitura humana.",
+            (
+                "A porcentagem conta apenas os steps do sampler. O decode do VAE e a "
+                "codificação do vídeo vêm depois e não aparecem — não anuncie 100% do "
+                "sampler como vídeo pronto."
+            ),
+            (
+                "Se a fila tiver itens que o usuário não submeteu, avise: podem ser "
+                "sobras de runs de CI cancelados, que já entupiram a fila antes."
+            ),
+        ),
+    ),
     "get_status": Override(
         resumo="Checa o estado de um render já submetido, sem bloquear",
         param_notas={"prompt_id": "o id devolvido por `/minimax-submit-scene`"},

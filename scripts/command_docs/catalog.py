@@ -12,6 +12,7 @@ COMMAND_NAMES: dict[str, str] = {
     "health_check": "minimax-health",
     "submit_scene": "minimax-submit-scene",
     "get_status": "minimax-status",
+    "queue_status": "minimax-fila",
     "wait_for_video": "minimax-wait",
     "list_outputs": "minimax-outputs",
     "compose_final": "minimax-compose",

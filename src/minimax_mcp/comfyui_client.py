@@ -49,6 +49,36 @@ def queue_state_from(queue_payload: dict[str, Any], prompt_id: str) -> str | Non
     return None
 
 
+def queue_snapshot_from(queue_payload: dict[str, Any]) -> dict[str, Any]:
+    """Turn a raw /queue payload into something a human can read.
+
+    Each entry is [queue_index, prompt_id, workflow, extra, outputs]; the
+    filename_prefix is dug out of the workflow because a bare prompt_id says
+    nothing about which job it is. Malformed entries are skipped rather than
+    raising -- this runs when someone is already trying to work out what is
+    stuck.
+    """
+    def _job(entry: Any) -> dict[str, Any] | None:
+        try:
+            prompt_id = entry[1]
+            workflow = entry[2] if len(entry) > 2 and isinstance(entry[2], dict) else {}
+        except (IndexError, TypeError):
+            return None
+        prefix = None
+        for node in workflow.values():
+            if not isinstance(node, dict):
+                continue
+            candidate = (node.get("inputs") or {}).get("filename_prefix")
+            if candidate:
+                prefix = candidate
+                break
+        return {"prompt_id": prompt_id, "filename_prefix": prefix}
+
+    running = [j for j in map(_job, queue_payload.get("queue_running") or []) if j]
+    pending = [j for j in map(_job, queue_payload.get("queue_pending") or []) if j]
+    return {"running": running, "pending": pending, "total": len(running) + len(pending)}
+
+
 class ComfyUIClient:
     def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
@@ -129,6 +159,44 @@ class ComfyUIClient:
             raise ComfyUIError(f"upload returned no name: {body}")
         sub = body.get("subfolder") or ""
         return f"{sub}/{name}" if sub else name
+
+    def queue_snapshot(self) -> dict[str, Any]:
+        """What the queue holds right now, running and pending."""
+        try:
+            return queue_snapshot_from(self.get_queue())
+        except Exception as e:
+            return {"running": [], "pending": [], "total": 0, "error": str(e)}
+
+    async def watch_progress(self, seconds: float = 20.0) -> dict[str, Any] | None:
+        """Listen briefly for one sampler progress event; None if none arrives.
+
+        ComfyUI sends progress only to the websocket whose clientId matches the
+        one that submitted the prompt, which is why this connects as
+        "minimax-factory" -- the id submit() uses.
+
+        A step at 1024x576 takes tens of seconds here, so a short window can
+        legitimately catch nothing. That returns None rather than a fabricated
+        number: a made-up percentage is worse than an honest absence.
+        """
+        from websockets.asyncio.client import connect
+
+        ws_url = self.base_url.replace("http", "ws", 1) + "/ws?clientId=minimax-factory"
+        deadline = asyncio.get_event_loop().time() + seconds
+        try:
+            async with connect(ws_url) as ws:
+                while asyncio.get_event_loop().time() < deadline:
+                    remaining = deadline - asyncio.get_event_loop().time()
+                    msg = await asyncio.wait_for(ws.recv(), timeout=max(0.1, remaining))
+                    if isinstance(msg, bytes):
+                        continue
+                    evt = json.loads(msg)
+                    if evt.get("type") == "progress":
+                        data = evt.get("data") or {}
+                        if "value" in data and "max" in data:
+                            return data
+        except Exception:
+            return None
+        return None
 
     def interrupt(self) -> None:
         self._client.post("/interrupt")

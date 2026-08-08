@@ -16,6 +16,7 @@ Um comando do OpenCode para cada ferramenta MCP. Esta página descreve o uso hum
 | `/kb-reindex` | `knowledge_reindex` | Recalcula chunks e embeddings de todos os documentos da base |
 | `/minimax-compose` | `compose_final` | Concatena cenas .mp4 em um vídeo final com ffmpeg |
 | `/minimax-download` | `download_video` | Baixa um vídeo (Instagram Reel, YouTube) via MCP yt-dlp, opcionalmente transcreve com Whisper |
+| `/minimax-fila` | `queue_status` | Mostra a fila de renderização com barra de progresso |
 | `/minimax-gerar-video` | `generate_video` | Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP |
 | `/minimax-health` | `health_check` | Verifica o ComfyUI e a presença dos modelos MiniMax H3 |
 | `/minimax-outputs` | `list_outputs` | Lista os vídeos .mp4 já gerados, do mais recente para o mais antigo |
@@ -66,6 +67,24 @@ Baixa um vídeo (Instagram Reel, YouTube) via MCP yt-dlp, opcionalmente transcre
 - Reporte o arquivo salvo (dir `downloads/`), título, duração e uploader.
 - Se `transcrever` foi pedido, chame `transcribe_video` com o caminho baixado (GPU, `device=cuda`) e reporte o texto + segmentos com timestamps. Alternativamente, o usuário pode usar o comando dedicado `/minimax-transcrever <arquivo>` depois.
 - Não gere vídeo a menos que o usuário peça explicitamente.
+
+### `/minimax-fila`
+
+Mostra a fila de renderização com barra de progresso.
+
+```
+/minimax-fila [watch_seconds=20.0]
+```
+
+| Parâmetro | Obrigatório | Default | Descrição |
+|---|---|---|---|
+| `watch_seconds` | não | `20.0` | quanto tempo ouvir o progresso. Um step em 1024x576 leva dezenas de segundos, então uma janela curta pode não capturar nada — use 0 para pular e ver só a fila |
+
+**Notas operacionais:**
+
+- Mostre o campo `summary`, que já vem formatado para leitura humana.
+- A porcentagem conta apenas os steps do sampler. O decode do VAE e a codificação do vídeo vêm depois e não aparecem — não anuncie 100% do sampler como vídeo pronto.
+- Se a fila tiver itens que o usuário não submeteu, avise: podem ser sobras de runs de CI cancelados, que já entupiram a fila antes.
 
 ### `/minimax-gerar-video`
 

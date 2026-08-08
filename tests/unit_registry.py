@@ -31,6 +31,7 @@ EXPECTED_TOOLS = {
     "health_check",
     "submit_scene",
     "get_status",
+    "queue_status",
     "wait_for_video",
     "list_outputs",
     "compose_final",

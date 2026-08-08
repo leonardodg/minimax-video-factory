@@ -139,6 +139,20 @@ def to_container_path(p: str | os.PathLike[str]) -> str:
     return s
 
 
+def progress_bar(value: float, maximum: float, width: int = 20) -> str:
+    """`[#####     ]  50%` -- the part a human actually reads.
+
+    Pure so it can be tested without a render in flight. maximum=0 yields an
+    empty bar instead of dividing by zero.
+    """
+    try:
+        ratio = 0.0 if not maximum else max(0.0, min(1.0, float(value) / float(maximum)))
+    except (TypeError, ValueError, ZeroDivisionError):
+        ratio = 0.0
+    filled = round(ratio * width)
+    return f"[{'#' * filled}{' ' * (width - filled)}] {round(ratio * 100):>3}%"
+
+
 def output_relpath(path: Path, output_dir: Path) -> str:
     """Path of `path` relative to `output_dir`, or its bare name if outside it.
 

@@ -129,7 +129,10 @@ def _sized_functions(path: Path) -> set[str]:
             for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults)
             if default is not None
         }
-        if with_defaults & {"width", "height"}:
+        # BOTH, not either: a function that sizes a render takes width and
+        # height together. progress_bar(value, maximum, width=20) has a width
+        # that is a text column count, and matching it here was a false alarm.
+        if {"width", "height"} <= with_defaults:
             found.add(node.name)
     return found
 

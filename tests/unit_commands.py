@@ -33,10 +33,10 @@ SPECS = {s.tool_name: s for s in parse_tools(SERVER_PY)}
 
 print("== unit_commands: parser ==")
 
-if len(SPECS) == 18:
-    ok("found all 18 @mcp.tool() functions")
+if len(SPECS) == 19:
+    ok("found all 19 @mcp.tool() functions")
 else:
-    bad(f"found {len(SPECS)} tools, expected 18: {sorted(SPECS)}")
+    bad(f"found {len(SPECS)} tools, expected 19: {sorted(SPECS)}")
 
 # Only @mcp.tool()-decorated functions, not every function in the module.
 if "main" not in SPECS and "to_host_path" not in SPECS:
