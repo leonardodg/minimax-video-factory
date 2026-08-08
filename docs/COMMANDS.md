@@ -191,7 +191,7 @@ Pipeline completo: URL → download → transcrição → prompt → vídeo.
 Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 
 ```
-/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame]
+/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [steps]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -203,6 +203,7 @@ Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `OUTPUT_PREFIX` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
+| `steps` | não | `None` | Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente |
 
 **Notas operacionais:**
 

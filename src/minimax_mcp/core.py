@@ -32,6 +32,9 @@ SAVE_NODE_CLASS = "SaveVideo"
 # only when a first_frame is supplied, under an id well clear of that range so
 # it can never collide as the workflow grows.
 LOAD_IMAGE_NODE_ID = "90"
+SCHEDULER_NODE_ID = "9"          # BasicScheduler
+DEFAULT_STEPS = 20               # what the workflow ships with, and what every
+                                 # render used until steps became tunable
 
 DIFFUSION_MODEL = os.environ.get("MODEL_DIFFUSION", "minimax_h3_fl2va_pruned_int4_convrot.safetensors")
 TEXT_ENCODER = os.environ.get("MODEL_TEXT_ENCODER", "qwen3vl_32b_minimax_h3_int4_convrot.safetensors")
@@ -54,7 +57,8 @@ def duration_to_frames(duration: float, fps: int = 24) -> int:
 
 def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
                  width: int, height: int, seed: int, filename_prefix: str,
-                 first_frame: str | None = None) -> dict[str, Any]:
+                 first_frame: str | None = None,
+                 steps: int | None = None) -> dict[str, Any]:
     """Patch the API workflow for one scene.
 
     `first_frame` is the name of an image already present in ComfyUI's input
@@ -96,6 +100,15 @@ def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
             "inputs": {"image": first_frame, "upload": "image"},
         }
         inputs["first_frame"] = [LOAD_IMAGE_NODE_ID, 0]
+
+    if steps is not None:
+        sched = wf.get(SCHEDULER_NODE_ID)
+        if sched is None or "steps" not in sched.get("inputs", {}):
+            raise KeyError(
+                f"scheduler node id '{SCHEDULER_NODE_ID}' has no steps input; "
+                "adjust SCHEDULER_NODE_ID"
+            )
+        sched["inputs"]["steps"] = steps
 
     noise = wf.get(NOISE_NODE_ID)
     if noise is not None and "noise_seed" in noise.get("inputs", {}):
@@ -176,6 +189,7 @@ def submit_scene_core(
     seed: int | None = None,
     filename_prefix: str = "video/factory",
     first_frame: str | None = None,
+    steps: int | None = None,
 ) -> dict[str, Any]:
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
@@ -193,14 +207,15 @@ def submit_scene_core(
     workflow = load_workflow()
     wf = inject_scene(workflow, prompt=prompt, duration=duration,
                       width=width, height=height, seed=seed,
-                      filename_prefix=filename_prefix, first_frame=uploaded)
+                      filename_prefix=filename_prefix, first_frame=uploaded,
+                      steps=steps)
     try:
         prompt_id = client.submit(wf)
     except ComfyUIError as e:
         return {"ok": False, "error": str(e)}
     return {"ok": True, "prompt_id": prompt_id, "seed": seed,
             "duration": duration, "width": width, "height": height,
-            "first_frame": uploaded}
+            "first_frame": uploaded, "steps": steps or DEFAULT_STEPS}
 
 
 async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[str, Any]:

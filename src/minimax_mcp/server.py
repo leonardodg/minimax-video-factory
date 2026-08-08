@@ -179,6 +179,7 @@ def submit_scene(
     seed: int | None = Field(default=None, description="Random seed (defaults to random)"),
     filename_prefix: str = Field(default=OUTPUT_PREFIX, description="Output filename prefix (default from OUTPUT_PREFIX env)"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
+    steps: int | None = Field(default=None, description="Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente"),
 ) -> dict[str, Any]:
     """Inject a scene prompt into the API workflow and submit it to ComfyUI.
 
@@ -187,6 +188,7 @@ def submit_scene(
     return submit_scene_core(
         prompt=prompt, duration=duration, width=width, height=height,
         seed=seed, filename_prefix=filename_prefix, first_frame=first_frame,
+        steps=steps,
     )
 
 

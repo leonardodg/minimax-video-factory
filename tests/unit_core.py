@@ -300,6 +300,30 @@ if progress_bar(0, 0, width=10) == "[          ]   0%":
 else:
     bad(f"bar(0,0) = {progress_bar(0, 0, width=10)!r}")
 
+print("== unit_core: sampler steps are tunable ==")
+from minimax_mcp.core import SCHEDULER_NODE_ID
+
+_wf_default = _inject(_WF, prompt="p", duration=5.0, width=512, height=320,
+                      seed=1, filename_prefix="x")
+if _wf_default[SCHEDULER_NODE_ID]["inputs"]["steps"] == 20:
+    ok("default stays at 20 steps")
+else:
+    bad(f"default steps = {_wf_default[SCHEDULER_NODE_ID]['inputs']['steps']}")
+
+_wf_40 = _inject(_WF, prompt="p", duration=5.0, width=512, height=320,
+                 seed=1, filename_prefix="x", steps=40)
+if _wf_40[SCHEDULER_NODE_ID]["inputs"]["steps"] == 40:
+    ok("steps=40 reaches the scheduler node")
+else:
+    bad(f"steps=40 produced {_wf_40[SCHEDULER_NODE_ID]['inputs']['steps']}")
+
+# The workflow on disk had steps hardcoded and nothing could change it; make
+# sure tuning one render does not mutate the shared workflow.
+if _WF[SCHEDULER_NODE_ID]["inputs"]["steps"] == 20:
+    ok("tuning steps does not mutate the source workflow")
+else:
+    bad("inject_scene mutated the workflow's step count")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
