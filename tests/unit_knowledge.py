@@ -215,6 +215,13 @@ for force_json in (True, False):
     else:
         bad(f"prompt was altered: {ollama_msgs[-1]['content']!r}")
 
+print("== unit_knowledge: llm.build_vision_prompt ==")
+prompt = llm.build_vision_prompt()
+if "portugu" in prompt and "imagem" in prompt:
+    ok("build_vision_prompt asks for a PT-BR image description")
+else:
+    bad(f"build_vision_prompt = {prompt[:120]!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

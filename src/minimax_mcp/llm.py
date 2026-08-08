@@ -1,9 +1,11 @@
 """Abstract LLM client for the knowledge base: Ollama (default) or OpenAI-compatible."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -173,3 +175,42 @@ def chat(prompt: str, *, provider: str | None = None, model: str | None = None) 
     if provider == "openai-compatible":
         return _openai_compatible_generate(prompt, model, force_json=False)
     raise RuntimeError(f"Unknown LLM_PROVIDER: {provider}")
+
+
+VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
+
+
+def build_vision_prompt() -> str:
+    return (
+        "Descreva esta imagem em português, com detalhes: o que aparece, "
+        "cores, composição, texto visível e o contexto. Descreva apenas o "
+        "que está na imagem; não invente informações."
+    )
+
+
+def describe_image(image_path: str, *, model: str | None = None) -> dict:
+    """Describe an image with a local vision LLM via Ollama /api/generate."""
+    model = model or VISION_MODEL
+    try:
+        b64 = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
+    except OSError as e:
+        return {"ok": False, "error": f"read image failed: {e}"}
+
+    payload = {
+        "model": model,
+        "prompt": build_vision_prompt(),
+        "images": [b64],
+        "stream": False,
+        "options": {"num_predict": 512, "temperature": 0.2},
+    }
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_URL}/api/generate", json=payload, timeout=LLM_TIMEOUT
+        )
+        resp.raise_for_status()
+        text = (resp.json().get("response") or "").strip()
+    except Exception as e:
+        return {"ok": False, "error": f"vision failed: {e}"}
+    if not text:
+        return {"ok": False, "error": "vision returned empty text"}
+    return {"ok": True, "text": text}

@@ -4,7 +4,12 @@ OLLAMA_URL with LLM_MODEL and EMBEDDING_MODEL already pulled.
 
 Run: uv run --directory . python tests/integration_knowledge_llm.py
 """
+import os
+import shutil
+import struct
 import sys
+import tempfile
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,6 +66,35 @@ if isinstance(answer, str) and len(answer.strip()) > 0:
     ok(f"chat returned non-empty answer: {answer[:80]!r}...")
 else:
     bad(f"chat returned unexpected value: {answer!r}")
+
+print("== integration_knowledge_llm: vision describe (skippable) ==")
+VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
+have = os.popen(f"ollama list 2>/dev/null | awk '{{print $1}}'").read()
+if VISION_MODEL.split(":")[0] not in have:
+    print("  [SKIP] vision model not pulled; run: ollama pull qwen2.5vl:7b")
+else:
+    img = Path(tempfile.mkdtemp()) / "pixel.png"
+    # 4x4 solid-color PNG (a real file the vision model can read)
+    def _png(path):
+        raw = b""
+        for y in range(4):
+            raw += b"\x00" + b"\x60\x40\xc0" * 4
+        def chunk(typ, data):
+            c = struct.pack(">I", len(data)) + typ + data
+            return c + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
+        png = (b"\x89PNG\r\n\x1a\n"
+               + chunk(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+               + chunk(b"IDAT", zlib.compress(raw))
+               + chunk(b"IEND", b""))
+        path.write_bytes(png)
+
+    _png(img)
+    res = llm.describe_image(str(img), model=VISION_MODEL)
+    if res.get("ok") and res["text"]:
+        ok(f"describe_image returned text ({len(res['text'])} chars)")
+    else:
+        bad(f"describe_image = {res!r}")
+    shutil.rmtree(img.parent)
 
 print()
 if FAIL:
