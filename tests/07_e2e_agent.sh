@@ -9,6 +9,12 @@ if [ -f "$ROOT/scripts/config.sh" ]; then
     source "$ROOT/scripts/config.sh"
 fi
 
+# --- do not jump somebody's render queue ------------------------------------
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib_queue.sh"
+skip() { echo "  [SKIP] $1"; exit 78; }
+wait_for_idle_queue || skip "render queue still busy after ${CI_QUEUE_WAIT_SECONDS:-600}s — the GPU is in use, not broken"
+
 echo "== E2E agent flow (MCP stdio) =="
 # Client (fastmcp) runs on the host with uv; SERVER runs inside the container
 # (docker exec) so the full dockerized stack is exercised. Falls back to host-uv

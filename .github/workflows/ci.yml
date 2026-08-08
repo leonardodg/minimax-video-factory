@@ -145,6 +145,12 @@ jobs:
       # host output dir" step below -- see the comment there for why.
       MODELS_DIR: /var/tmp/minimax/models
       COMFYUI_URL: http://127.0.0.1:8188
+      # The runner's GPU is somebody's desk machine. The render tests wait for
+      # the queue to drain rather than pushing a person's job behind CI's, and
+      # skip if it never does -- an occupied GPU is not a broken pipeline.
+      # 15 minutes is roughly one 1024x576 clip, so a run started mid-render
+      # usually still gets to test.
+      CI_QUEUE_WAIT_SECONDS: "900"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

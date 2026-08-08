@@ -14,6 +14,13 @@ OUTPUT_DIR="${OUTPUT_DIR:-$ROOT/output}"
 
 echo "== Smoke render (short clip, real pipeline) =="
 
+# --- do not jump somebody's render queue ------------------------------------
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/lib_queue.sh"
+skip() { echo "  [SKIP] $1"; exit 78; }
+wait_for_idle_queue || skip "render queue still busy after ${CI_QUEUE_WAIT_SECONDS:-600}s — the GPU is in use, not broken"
+
+
 if [ ! -f "$WORKFLOW" ]; then
     echo "  [MISS] workflow not found: $WORKFLOW"
     exit 1
