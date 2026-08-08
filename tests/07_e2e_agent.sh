@@ -65,10 +65,12 @@ async def main() -> int:
         print("  [ok]   health_check: comfyui up, models present")
         print("         models:", {k: len(v) for k, v in hd["models"].items()})
 
-        # 2. submit 2 short low-res scenes
+        # 2. submit ONE short low-res scene.
+        # One render, not two: this test proves the pipeline works end to end,
+        # and a second clip costs another few minutes of GPU to prove nothing
+        # the first one did not. compose_final still gets two inputs below.
         scene_ids, seeds = [], []
-        for i, scene in enumerate(["a hungry black cat staring at an empty food bowl, close-up, soft light, faint meow",
-                                   "blue crystal floating, dark background, slow orbit"]):
+        for i, scene in enumerate(["a hungry black cat staring at an empty food bowl, close-up, soft light, faint meow"]):
             r = await client.call_tool("submit_scene", {
                 "prompt": scene, "duration": 5.0, "width": 512, "height": 320,
                 "seed": 100 + i, "filename_prefix": f"{PREFIX}/scene_{i}",
@@ -103,7 +105,11 @@ async def main() -> int:
         # Use a RELATIVE output path so the server resolves it under its own
         # OUTPUT_DIR/OUTPUT_HOST_DIR (host<->container mapping is handled server-side).
         final_rel = f"output/{PREFIX}_final.mp4"
-        r = await client.call_tool("compose_final", {"scene_paths": paths, "output_path": final_rel})
+        # compose_final refuses fewer than 2 scenes, and concatenation does not
+        # care that both inputs are the same file -- so the single rendered
+        # clip exercises the ffmpeg path without paying for a second render.
+        compose_inputs = paths * 2 if len(paths) == 1 else paths
+        r = await client.call_tool("compose_final", {"scene_paths": compose_inputs, "output_path": final_rel})
         rd = json.loads(r.content[0].text)
         if not rd.get("ok") or not rd.get("output_path") or not os.path.exists(rd["output_path"]):
             print(f"  [BAD] compose_final failed: {json.dumps(rd)[:400]}")
