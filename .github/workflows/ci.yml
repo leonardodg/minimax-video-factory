@@ -111,7 +111,27 @@ jobs:
   gpu-validation:
     name: GPU Validation (self-hosted)
     needs: [static-lint, unit, mcp-handshake]
-    if: always()
+    # NEVER run a fork's code on the self-hosted runner. This repo is public and
+    # the runner is a personal machine: a job here executes as the owning user,
+    # with their SSH keys, cloud credentials and the docker socket -- which is
+    # root on the host. `pull_request` checks out the FORK's tree, so without
+    # this guard any accepted PR is arbitrary code execution on that machine.
+    #
+    # The repository's "require approval for all external contributors" setting
+    # is defence in depth, not the defence: it moves the decision to a human
+    # clicking Approve, and a hostile change can hide in .github/ or tests/
+    # under an innocent-looking diff. This condition does not depend on anyone
+    # reading carefully.
+    #
+    # Fork PRs still get static-lint, unit and mcp-handshake on GitHub's
+    # throwaway runners, which is the feedback a contributor actually needs.
+    #
+    # always() is kept so this job still runs when an earlier job fails -- the
+    # GPU suite is the slow one and its result is wanted either way.
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: [self-hosted, linux, gpu]
     timeout-minutes: 120
     env:
@@ -120,13 +140,9 @@ jobs:
       # Host-side path resolution in tests 05/07 must therefore point at the same
       # host dirs, or the MCP's host<->container path mapping produces paths the
       # host tests cannot find.
-      # No hardcoded home directory here: this file is public. Set a repository
-      # variable PROJECT_ROOT (Settings > Secrets and variables > Actions) when
-      # the runner's checkout is not the same directory docker-compose binds;
-      # otherwise the workspace path is already correct.
-      PROJECT_ROOT: ${{ vars.PROJECT_ROOT || github.workspace }}
-      OUTPUT_DIR: ${{ vars.PROJECT_ROOT || github.workspace }}/output
-      OUTPUT_HOST_DIR: ${{ vars.PROJECT_ROOT || github.workspace }}/output
+      # PROJECT_ROOT, OUTPUT_DIR and OUTPUT_HOST_DIR are NOT set here. They are
+      # resolved at runtime from the container's bind mount, in the "Resolve
+      # host output dir" step below -- see the comment there for why.
       MODELS_DIR: /var/tmp/minimax/models
       COMFYUI_URL: http://127.0.0.1:8188
     steps:
@@ -148,6 +164,33 @@ jobs:
           else
             echo "Stack already running"
           fi
+
+      # Ask docker where it actually binds the output directory instead of
+      # naming it here. Tests 05/07 resolve rendered files on the HOST, and the
+      # container writes to whatever the compose file bound at start time --
+      # which is the project directory, not the runner's checkout. Guessing
+      # github.workspace made 05 look in an empty directory and report "no .mp4
+      # in history outputs" while the clip sat happily in the real one.
+      #
+      # Deriving it has two properties a hardcoded path or a repo variable do
+      # not: it cannot drift from what docker is really doing, and it keeps
+      # this public file free of anyone's home directory.
+      - name: Resolve host output dir from the container's bind mount
+        run: |
+          set -euo pipefail
+          out=$(docker inspect minimax-comfyui \
+            --format '{{range .Mounts}}{{if eq .Destination "/comfy/ComfyUI/output"}}{{.Source}}{{end}}{{end}}')
+          if [ -z "$out" ]; then
+            echo "::error::minimax-comfyui has no bind mount on /comfy/ComfyUI/output"
+            exit 1
+          fi
+          # Written to GITHUB_ENV, not echoed: the path contains a home directory.
+          {
+            echo "OUTPUT_DIR=$out"
+            echo "OUTPUT_HOST_DIR=$out"
+            echo "PROJECT_ROOT=$(dirname "$out")"
+          } >> "$GITHUB_ENV"
+          echo "✅ resolved output dir from the container bind mount"
 
       - name: Run full diagnose.sh (00–07)
         run: |
