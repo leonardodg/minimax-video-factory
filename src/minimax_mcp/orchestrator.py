@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from minimax_mcp.comfyui_client import ComfyUIError
 from minimax_mcp.core import (
     submit_scene_core,
     wait_for_video_core,
@@ -88,8 +89,17 @@ class AudiovisualStudio:
         seed: int | None = None,
         first_frame: str | None = None,
         filename_prefix: str = "studio/",
+        steps: int | None = None,
+        wait_seconds: float = 240.0,
     ) -> dict[str, Any]:
-        """Generate video using the existing MiniMax H3 pipeline."""
+        """Submit a render and wait up to `wait_seconds` for it.
+
+        It used to block for 1800s. No MCP client waits that long, so the caller
+        gave up first -- and lost the prompt_id with it, leaving a render running
+        that nothing could reach. Now the wait is bounded: if the clip is not
+        ready in time the prompt_id comes back with state="rendering", and
+        wait_for_video picks it up from there.
+        """
         import logging
         logger = logging.getLogger(__name__)
 
@@ -104,6 +114,7 @@ class AudiovisualStudio:
                 seed=seed,
                 filename_prefix=filename_prefix,
                 first_frame=first_frame,
+                steps=steps,
             )
             if not result.get("ok"):
                 return {"ok": False, "error": result.get("error", "Submit failed")}
@@ -112,9 +123,33 @@ class AudiovisualStudio:
             logger.info("Submitted prompt_id=%s, waiting for render...", prompt_id)
 
             import asyncio
-            wait_result = asyncio.run(wait_for_video_core(prompt_id, timeout=1800))
+            try:
+                wait_result = asyncio.run(
+                    wait_for_video_core(prompt_id, timeout=wait_seconds)
+                )
+            except ComfyUIError as e:
+                # Only a timeout is survivable: the render is still going and the
+                # caller can pick it up. A real execution error is a failure.
+                if "Timed out" not in str(e):
+                    return {"ok": False, "prompt_id": prompt_id, "error": str(e)}
+                wait_result = {"ok": False, "timed_out": True}
+
             if not wait_result.get("ok"):
-                return {"ok": False, "error": wait_result.get("error", "Render timeout")}
+                if wait_result.get("timed_out"):
+                    return {
+                        "ok": True,
+                        "state": "rendering",
+                        "prompt_id": prompt_id,
+                        "seed": result.get("seed"),
+                        "output_path": None,
+                        "message": (
+                            f"still rendering after {wait_seconds:.0f}s. Use "
+                            f"wait_for_video(prompt_id) or /minimax-wait to collect "
+                            f"it, or queue_status to watch progress."
+                        ),
+                    }
+                return {"ok": False, "prompt_id": prompt_id,
+                        "error": wait_result.get("error", "Render failed")}
 
             return {
                 "ok": True,

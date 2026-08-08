@@ -165,6 +165,49 @@ if _seen.get("seed") == 7 and _seen.get("width") == 1024:
 else:
     bad(f"seed={_seen.get('seed')} width={_seen.get('width')}")
 
+print("== unit_orchestrator: generate_video does not hold the connection open ==")
+
+async def _never(prompt_id, timeout=0):
+    # Stands in for a render that outlives the caller's patience.
+    raise _orch.ComfyUIError(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
+
+_studio2 = object.__new__(_orch.AudiovisualStudio)
+with _mock.patch.object(_orch, "submit_scene_core",
+                        lambda **kw: {"ok": True, "prompt_id": "abc123", "seed": 1}), \
+     _mock.patch.object(_orch, "wait_for_video_core", _never):
+    _r = _studio2.generate_video(prompt="p", duration=5.0, wait_seconds=1.0)
+
+# Blocking for up to 1800s meant every MCP client gave up first and the caller
+# lost the prompt_id along with it -- the render kept going, unreachable.
+if _r.get("prompt_id") == "abc123":
+    ok("a render that outlives the wait still returns its prompt_id")
+else:
+    bad(f"prompt_id lost: {_r}")
+if _r.get("state") == "rendering":
+    ok("the state says it is still rendering, not that it failed")
+else:
+    bad(f"state = {_r.get('state')!r}")
+if _r.get("ok") is True:
+    ok("submitting successfully is not reported as a failure")
+else:
+    bad(f"ok = {_r.get('ok')!r}")
+if "wait_for_video" in str(_r.get("message", "")):
+    ok("the message names the tool that finishes the job")
+else:
+    bad(f"message = {_r.get('message')!r}")
+
+# And when it does finish in time, nothing changes for the caller.
+async def _quick(prompt_id, timeout=0):
+    return {"ok": True, "output_path": "/tmp/done.mp4"}
+with _mock.patch.object(_orch, "submit_scene_core",
+                        lambda **kw: {"ok": True, "prompt_id": "z", "seed": 1}), \
+     _mock.patch.object(_orch, "wait_for_video_core", _quick):
+    _r2 = _studio2.generate_video(prompt="p", duration=5.0, wait_seconds=60.0)
+if _r2.get("ok") and _r2.get("output_path") == "/tmp/done.mp4":
+    ok("a render that finishes in time still returns the file")
+else:
+    bad(f"fast path: {_r2}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

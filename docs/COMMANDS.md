@@ -91,7 +91,7 @@ Mostra a fila de renderização com barra de progresso.
 Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP.
 
 ```
-/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame]
+/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=240.0]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -103,13 +103,15 @@ Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `studio/` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
+| `steps` | não | `None` | Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo |
+| `wait_seconds` | não | `240.0` | Quanto esperar antes de devolver só o prompt_id. Um render de 1024x576 leva ~3min |
 
 **Notas operacionais:**
 
 - Se `prompt` vier em PT, traduza para uma descrição visual EN rica antes de chamar a tool.
 - Aguarde o render completar (5-20 min; use `wait_for_video` se a tool retornar só o prompt_id). Reporte o caminho final do vídeo (host, via `OUTPUT_HOST_DIR`) e o prompt_id.
 - Se houver erro de OOM, reduza para 512x320 e tente novamente.
-- Se a tool travar com timeout de client MCP, chame primeiro `submit_scene` e depois `wait_for_video(prompt_id)` em separado.
+- A tool espera até `wait_seconds` (default 240s). Se o render não terminar nesse prazo ela devolve `state=rendering` com o `prompt_id` — isso não é erro. Colete com `/minimax-wait <prompt_id>` ou acompanhe com `/minimax-fila`.
 
 ### `/minimax-health`
 

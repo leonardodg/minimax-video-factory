@@ -114,8 +114,12 @@ OVERRIDES: dict[str, Override] = {
             "retornar só o prompt_id). Reporte o caminho final do vídeo (host, via "
             "`OUTPUT_HOST_DIR`) e o prompt_id."),
             "Se houver erro de OOM, reduza para 512x320 e tente novamente.",
-            ("Se a tool travar com timeout de client MCP, chame primeiro "
-            "`submit_scene` e depois `wait_for_video(prompt_id)` em separado."),
+            (
+                "A tool espera até `wait_seconds` (default 240s). Se o render não "
+                "terminar nesse prazo ela devolve `state=rendering` com o "
+                "`prompt_id` — isso não é erro. Colete com `/minimax-wait "
+                "<prompt_id>` ou acompanhe com `/minimax-fila`."
+            ),
         ),
     ),
     "submit_scene": Override(

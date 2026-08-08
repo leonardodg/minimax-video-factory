@@ -356,13 +356,19 @@ def generate_video(
     seed: int | None = Field(default=None, description="Random seed"),
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
+    steps: int | None = Field(default=None, description="Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo"),
+    wait_seconds: float = Field(default=240.0, description="Quanto esperar antes de devolver só o prompt_id. Um render de 1024x576 leva ~3min"),
 ) -> dict[str, Any]:
-    """Generate a video using the MiniMax H3 model via ComfyUI."""
+    """Generate a video using the MiniMax H3 model via ComfyUI.
+
+    Espera até wait_seconds; se o render não terminar, devolve state=rendering
+    com o prompt_id em vez de segurar a conexão."""
     from minimax_mcp.orchestrator import AudiovisualStudio
     studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
     return studio.generate_video(
         prompt=prompt, duration=duration, width=width, height=height, seed=seed,
         first_frame=first_frame, filename_prefix=filename_prefix,
+        steps=steps, wait_seconds=wait_seconds,
     )
 
 
