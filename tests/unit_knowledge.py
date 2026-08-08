@@ -280,6 +280,44 @@ finally:
     if _saved is not None:
         os.environ["KB_DATABASE_URL"] = _saved
 
+print("== unit_knowledge: VRAM contention is survivable ==")
+from unittest import mock as _m2
+
+from minimax_mcp import llm as _llm2
+from minimax_mcp import transcriber as _tr
+
+# Whisper on a busy card raised RuntimeError("CUDA failed with error out of
+# memory") and gave up. The GPU being occupied is not a reason to refuse to
+# transcribe -- the CPU can do it, slower.
+_attempts = []
+class _FakeWhisper:
+    def __init__(self, size, **kw):
+        _attempts.append(kw.get("device"))
+        if kw.get("device") == "cuda":
+            raise RuntimeError("CUDA failed with error out of memory")
+    def transcribe(self, *a, **kw):
+        class _S:
+            start, end, text = 0.0, 1.0, "ok"
+        return [_S()], type("I", (), {"language": "pt", "language_probability": 1.0})()
+
+with _m2.patch.object(_tr, "WhisperModel", _FakeWhisper):
+    _t = _tr.AudioTranscriber(model_size="tiny", device="cuda")
+    _t._model_cache.clear()
+    _model = _t._get_model()
+
+if _attempts == ["cuda", "cpu"]:
+    ok("a CUDA OOM falls back to the CPU instead of failing")
+else:
+    bad(f"devices tried: {_attempts}")
+
+# Ollama held 10 GB after every knowledge-base call, which is what starved
+# Whisper and the sampler in the first place.
+_payload = _llm2._ollama_payload("prompt", "modelo", force_json=False)
+if "keep_alive" in _payload:
+    ok("ollama calls carry keep_alive so the model is released")
+else:
+    bad(f"payload keys: {sorted(_payload)}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

@@ -90,7 +90,10 @@ class AudiovisualStudio:
         first_frame: str | None = None,
         filename_prefix: str = "studio/",
         steps: int | None = None,
-        wait_seconds: float = 240.0,
+        # 900, not the 240 first guessed: a 512x320 clip measured 270-278s
+        # here, so 240 expired before every render finished and studio_pipeline
+        # failed on a limit of our own making.
+        wait_seconds: float = 900.0,
     ) -> dict[str, Any]:
         """Submit a render and wait up to `wait_seconds` for it.
 

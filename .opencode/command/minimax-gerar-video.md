@@ -1,5 +1,5 @@
 ---
-description: Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP. Uso: /minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=240.0]
+description: Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP. Uso: /minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=900.0]
 ---
 
 Execute a ferramenta MCP **`minimax-video-factory_generate_video`** (server `minimax-video-factory`).
@@ -17,7 +17,7 @@ Instruções obrigatórias:
    - `filename_prefix`: prefixo do arquivo de saída (default `studio/`).
    - `first_frame`: Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) (default `None`).
    - `steps`: Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo (default `None`).
-   - `wait_seconds`: Quanto esperar antes de devolver só o prompt_id. Um render de 1024x576 leva ~3min (default `240.0`).
+   - `wait_seconds`: Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente (default `900.0`).
 2. Chame `generate_video` com esses parâmetros. Se a variante default do servidor MCP estiver indisponível, use a variante conectada (`minimax-video-factory-remote` ou `minimax-video-factory-uv`).
 3. Se `prompt` vier em PT, traduza para uma descrição visual EN rica antes de chamar a tool.
 4. Aguarde o render completar (5-20 min; use `wait_for_video` se a tool retornar só o prompt_id). Reporte o caminho final do vídeo (host, via `OUTPUT_HOST_DIR`) e o prompt_id.

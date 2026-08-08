@@ -51,7 +51,23 @@ class AudioTranscriber:
             }
             if self.download_root:
                 kwargs["download_root"] = str(self.download_root)
-            self._model_cache[cache_key] = WhisperModel(self.model_size, **kwargs)
+            try:
+                self._model_cache[cache_key] = WhisperModel(self.model_size, **kwargs)
+            except RuntimeError as e:
+                # A busy card is not a reason to refuse to transcribe. The GPU
+                # is routinely occupied here -- by a render, or by Ollama, which
+                # holds ~10 GB after any knowledge-base call -- and the CPU can
+                # do this job, just slower. Only fall back for memory, since
+                # other RuntimeErrors mean something actually broke.
+                if self.device == "cpu" or "out of memory" not in str(e).lower():
+                    raise
+                logger.warning(
+                    "Whisper could not load on %s (%s). Falling back to CPU/int8 -- "
+                    "slower, but the GPU is occupied.", self.device, e,
+                )
+                kwargs["device"] = "cpu"
+                kwargs["compute_type"] = "int8"
+                self._model_cache[cache_key] = WhisperModel(self.model_size, **kwargs)
         return self._model_cache[cache_key]
 
     def transcribe(

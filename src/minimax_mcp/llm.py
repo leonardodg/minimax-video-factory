@@ -16,6 +16,13 @@ EMBEDDING_DIM_HINT = int(os.environ.get("EMBEDDING_DIM", "1024"))
 OPENAI_API_URL = os.environ.get("OPENAI_API_URL", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "900.0"))
+# How long Ollama keeps the model resident after a call. It defaults to five
+# minutes, and lfm2:24b occupies ~10 GB -- enough that a render or a Whisper
+# load right after a knowledge-base call fails with CUDA out of memory on a
+# 12 GB card. "0" hands the memory back immediately, at the cost of reloading
+# on the next call. Raise it if you run many knowledge calls in a row and
+# nothing else needs the GPU.
+OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "0")
 EMBED_TIMEOUT = float(os.environ.get("EMBED_TIMEOUT", "120.0"))
 
 SUMMARY_PROMPT_TEMPLATE = """\
@@ -98,15 +105,22 @@ def _build_messages(prompt: str, *, force_json: bool) -> list[dict[str, str]]:
     ]
 
 
-def _ollama_generate(prompt: str, model: str, *, force_json: bool) -> str:
+def _ollama_payload(prompt: str, model: str, *, force_json: bool) -> dict[str, Any]:
+    """The /api/chat body. Split out so keep_alive is visible to a test."""
     payload: dict[str, Any] = {
         "model": model,
         "messages": _build_messages(prompt, force_json=force_json),
         "stream": False,
         "options": {"num_predict": 2048, "temperature": 0.2},
+        "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     if force_json:
         payload["format"] = "json"
+    return payload
+
+
+def _ollama_generate(prompt: str, model: str, *, force_json: bool) -> str:
+    payload = _ollama_payload(prompt, model, force_json=force_json)
     resp = httpx.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=LLM_TIMEOUT)
     resp.raise_for_status()
     return resp.json()["message"]["content"]
@@ -158,7 +172,9 @@ def embed(text: str, *, model: str | None = None) -> list[float]:
     """Generate an embedding via Ollama. Always local, independent of LLM_PROVIDER."""
     model = model or EMBEDDING_MODEL
     resp = httpx.post(
-        f"{OLLAMA_URL}/api/embeddings", json={"model": model, "prompt": text}, timeout=EMBED_TIMEOUT
+        f"{OLLAMA_URL}/api/embeddings",
+        json={"model": model, "prompt": text, "keep_alive": OLLAMA_KEEP_ALIVE},
+        timeout=EMBED_TIMEOUT
     )
     resp.raise_for_status()
     return resp.json()["embedding"]

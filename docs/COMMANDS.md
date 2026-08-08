@@ -91,7 +91,7 @@ Mostra a fila de renderização com barra de progresso.
 Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP.
 
 ```
-/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=240.0]
+/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=900.0]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -104,7 +104,7 @@ Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
 | `filename_prefix` | não | `studio/` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
 | `steps` | não | `None` | Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo |
-| `wait_seconds` | não | `240.0` | Quanto esperar antes de devolver só o prompt_id. Um render de 1024x576 leva ~3min |
+| `wait_seconds` | não | `900.0` | Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente |
 
 **Notas operacionais:**
 

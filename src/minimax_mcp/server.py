@@ -357,7 +357,7 @@ def generate_video(
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
     steps: int | None = Field(default=None, description="Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo"),
-    wait_seconds: float = Field(default=240.0, description="Quanto esperar antes de devolver só o prompt_id. Um render de 1024x576 leva ~3min"),
+    wait_seconds: float = Field(default=900.0, description="Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente"),
 ) -> dict[str, Any]:
     """Generate a video using the MiniMax H3 model via ComfyUI.
 
