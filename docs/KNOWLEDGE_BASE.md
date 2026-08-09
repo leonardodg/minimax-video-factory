@@ -233,7 +233,7 @@ Relationship: **1 document → N chunks → 1 embedding per chunk.**
 | Column | Type | Description |
 |---|---|---|
 | `id` | integer PK | |
-| `type` | varchar(20) | `text`, `video`, `audio` |
+| `type` | varchar(20) | `text`, `video`, `image`, `audio` |
 | `source_url` | text nullable | source URL |
 | `platform` | varchar(50) nullable | `manual`, `instagram`, `youtube`, `podcast` |
 | `title` | text nullable | |
@@ -246,6 +246,7 @@ Relationship: **1 document → N chunks → 1 embedding per chunk.**
 | `raw_file_path` | text nullable | path of the original downloaded file |
 | `llm_provider` | varchar(50) nullable | `ollama` |
 | `llm_model` | varchar(100) nullable | e.g. `lfm2:24b` |
+| `ig_pk` | varchar nullable | Instagram media pk (dedup key for saved-posts sync) |
 | `created_at` | datetime | default `now()` |
 
 ### `chunks` — overlapping text snippets for embedding
@@ -287,9 +288,10 @@ Turn every post you saved on Instagram into a knowledge-base document
 automatically. `ig_sync_saved` enumerates your saved posts (using the
 `IG_SESSIONID` cookie) and publishes each *new* one (no document with that
 `ig_pk` yet) onto the RabbitMQ `ig.saved` queue. The `ig-worker` daemon consumes
-the queue in the background: downloads the media with yt-dlp, transcribes it
-(video) or describes it (photo, via the local Ollama vision model), ingests it
-into the KB with `ig_pk` dedup, and optionally deletes the downloaded file
+the queue in the background: downloads the media with **instagrapi autenticado**
+(fallback yt-dlp), transcribes it (video, Whisper GPU) or describes it (photo
+or carousel, via the local Ollama vision model), ingests it into the KB with
+`ig_pk` dedup, and optionally deletes the downloaded file
 (`IG_DELETE_AFTER_INGEST`).
 
 | Tool | Command | O que faz |
@@ -329,15 +331,19 @@ este procedimento quando o sync parar de funcionar.
    ```bash
    IG_SESSIONID=<valor-copiado>
    ```
-7. Recrie o worker para carregar a env nova:
+7. Suba o worker — **no HOST (uv), não no container**: ele precisa alcançar o
+   Ollama (`localhost:11434`) e o Postgres (`127.0.0.1:5432`), ambos bloqueados
+   para containers pelo firewall do host. Reinicie o daemon para carregar a env:
    ```bash
-   source scripts/config.sh
-   docker compose $COMPOSE_ARGS up -d --force-recreate ig-worker
+   systemctl --user restart ig-worker-host   # se estiver rodando como serviço
+   # ou, sem systemd:
+   uv run --directory <projeto> python -m minimax_mcp.ig_worker
    ```
 
-**Teste rápido** (o instagrapi valida a sessão sozinho):
+**Teste rápido** (o instagrapi valida a sessão sozinho — API v2:
+`collections()` + `collection_medias()`, não mais `saved_posts()`):
 ```bash
-uv run python -c "from minimax_mcp.ig_sync import make_client; c=make_client(); p=list(c.saved_posts()); print(f'sessao OK, {len(p)} posts salvos')"
+uv run python -c "from minimax_mcp.ig_sync import make_client, saved_posts; c=make_client(); print(f'sessao OK, {len(saved_posts(c, max_per_collection=5))} posts salvos (amostra)')"
 ```
 Se isso falhar com checkpoint/login, o cookie expirou — refaça os passos 1–5.
 

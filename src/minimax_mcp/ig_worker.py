@@ -99,6 +99,30 @@ def apply_command(state: dict, command: str) -> str:
     return "unknown"
 
 
+def _pick_download_target(client: Any, pk: str) -> tuple[str, str]:
+    """Choose the download method + media pk for a saved post.
+
+    Returns ("photo_download"|"clip_download", target_pk). Carousels
+    (media_type 8) have no clip of their own — the pk is an album container and
+    clip_download raises "Must been video". Instead, pick the first video
+    resource (or the first image when the album has no video) and download that
+    individual resource. Single media fall through to the pk itself.
+    """
+    info = client.media_info(pk)
+    mtype = int(getattr(info, "media_type", 0) or 0)
+    if mtype == 8:
+        resources = list(getattr(info, "resources", None) or [])
+        for r in resources:
+            if int(getattr(r, "media_type", 0) or 0) == 2:
+                return "clip_download", str(r.pk)
+        if resources:
+            return "photo_download", str(resources[0].pk)
+        return "photo_download", pk
+    if mtype == 1:
+        return "photo_download", pk
+    return "clip_download", pk
+
+
 def _default_download(message: dict) -> dict:
     """Download the media for a saved post.
 
@@ -115,11 +139,8 @@ def _default_download(message: dict) -> dict:
 
             client = ig_sync.make_client()
             client.delay_range = [0.5, 1.0]
-            info = client.media_info(pk)
-            if getattr(info, "media_type", None) == 1:
-                out = client.photo_download(pk, folder=str(IG_DOWNLOADS_DIR))
-            else:
-                out = client.clip_download(pk, folder=str(IG_DOWNLOADS_DIR))
+            method, target = _pick_download_target(client, pk)
+            out = getattr(client, method)(target, folder=str(IG_DOWNLOADS_DIR))
             if out and Path(out).exists():
                 return {"ok": True, "filepath": str(Path(out))}
         except Exception as e:
@@ -132,11 +153,24 @@ def _default_download(message: dict) -> dict:
     return downloader.download(url)
 
 
+_active_transcriber = None
+
+
 def _default_transcribe(filepath: str) -> dict:
     from minimax_mcp.transcriber import AudioTranscriber
 
+    global _active_transcriber
     transcriber = AudioTranscriber(model_size=WHISPER_MODEL, device=WHISPER_DEVICE)
-    return transcriber.transcribe(filepath)
+    _active_transcriber = transcriber
+    try:
+        return transcriber.transcribe(filepath)
+    finally:
+        # Release the Whisper VRAM right after transcribing, before the LLM
+        # step: lfm2:24b needs ~6 GB and the worker runs on the same 12 GB GPU
+        # as ComfyUI. Otherwise the next knowledge call 500s with cudaMalloc
+        # out-of-memory until a retry happens to run after the cache cleared.
+        transcriber.free()
+        _active_transcriber = None
 
 
 def _safe_ack(ch, method) -> None:

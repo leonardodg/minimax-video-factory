@@ -136,6 +136,28 @@ class AudioTranscriber:
             logger.exception("Transcription failed for %s", video_path)
             return {"ok": False, "error": f"Transcription failed: {e!s}"}
 
+    def free(self) -> None:
+        """Unload the cached Whisper model and release the VRAM it occupies.
+
+        The model lives in a class-level cache so repeated transcriptions skip
+        the load; but a loaded whisper keeps its weights resident on the GPU,
+        which can starve Ollama (lfm2:24b needs ~6 GB) on the same 12 GB card.
+        Call this between the Whisper step and the LLM step in a long pipeline.
+        """
+        cache_key = f"{self.model_size}-{self.device}-{self.compute_type}"
+        if cache_key in self._model_cache:
+            try:
+                del self._model_cache[cache_key]
+            except Exception:
+                pass
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
 
 def transcribe_video(
     video_path: str | Path,

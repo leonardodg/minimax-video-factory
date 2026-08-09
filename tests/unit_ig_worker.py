@@ -135,6 +135,88 @@ if ig_worker.apply_command(state, "stop") == "paused" and state["paused"] is Tru
 else:
     bad("apply_command(stop) did not pause")
 
+print("== unit_ig_worker: _pick_download_target ==")
+class FakeRes:
+    def __init__(self, media_type, pk):
+        self.media_type = media_type
+        self.pk = pk
+class FakeInfo:
+    def __init__(self, media_type, resources=()):
+        self.media_type = media_type
+        self.resources = list(resources)
+class FakeClient:
+    def __init__(self, info):
+        self._info = info
+        self.calls = []
+    def media_info(self, pk):
+        self.calls.append(("media_info", pk))
+        return self._info
+
+# photo single
+r = ig_worker._pick_download_target(FakeClient(FakeInfo(1)), "111")
+if r == ("photo_download", "111"):
+    ok("single photo -> photo_download(pk)")
+else:
+    bad(f"photo target = {r!r}")
+
+# video single
+r = ig_worker._pick_download_target(FakeClient(FakeInfo(2)), "222")
+if r == ("clip_download", "222"):
+    ok("single video -> clip_download(pk)")
+else:
+    bad(f"video target = {r!r}")
+
+# carousel with video resource -> picks the video
+car = FakeInfo(8, [FakeRes(1, "p1"), FakeRes(2, "v2"), FakeRes(1, "p3")])
+r = ig_worker._pick_download_target(FakeClient(car), "888")
+if r == ("clip_download", "v2"):
+    ok("carousel picks first video resource")
+else:
+    bad(f"carousel video target = {r!r}")
+
+# carousel with only images -> picks the first image
+car_img = FakeInfo(8, [FakeRes(1, "p1"), FakeRes(1, "p2")])
+r = ig_worker._pick_download_target(FakeClient(car_img), "888")
+if r == ("photo_download", "p1"):
+    ok("carousel without video -> first image")
+else:
+    bad(f"carousel img target = {r!r}")
+
+# carousel with no resources -> falls back to photo_download(pk)
+r = ig_worker._pick_download_target(FakeClient(FakeInfo(8, [])), "888")
+if r == ("photo_download", "888"):
+    ok("empty carousel -> photo_download(pk)")
+else:
+    bad(f"empty carousel target = {r!r}")
+
+print("== unit_ig_worker: _default_download with carousel ==")
+class FakeClientDownload(FakeClient):
+    def photo_download(self, pk, folder=""):
+        self.calls.append(("photo_download", pk))
+        p = Path(folder) / f"fake_{pk}.jpg"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return str(p)
+    def clip_download(self, pk, folder=""):
+        self.calls.append(("clip_download", pk))
+        p = Path(folder) / f"fake_{pk}.mp4"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return str(p)
+
+_orig_client = None
+import minimax_mcp.ig_sync as ig_sync
+_orig_make_client = ig_sync.make_client
+ig_sync.make_client = lambda: FakeClientDownload(FakeInfo(8, [FakeRes(1, "p1"), FakeRes(2, "v2")]))
+try:
+    res = ig_worker._default_download({**MESSAGE, "media_type": "carousel", "ig_pk": "999", "url": ""})
+finally:
+    ig_sync.make_client = _orig_make_client
+if res.get("ok") and res["filepath"].endswith("fake_v2.mp4"):
+    ok("carousel download -> first video resource file")
+else:
+    bad(f"carousel download = {res!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
