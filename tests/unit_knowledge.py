@@ -363,6 +363,109 @@ if "imagem/post do Instagram" in llm.build_summary_prompt("x", is_image=True):
 else:
     bad("is_image=True did not add the image context line")
 
+print("== unit_knowledge: categoria no caminho do resumo (vídeo) ==")
+
+CATS = ["Dev", "Receitas", "Inglês"]
+with_cats = llm.build_summary_prompt("x", categories=CATS)
+
+if '"categoria"' in with_cats and all(c in with_cats for c in CATS):
+    ok("categories are asked for, by name, in the summary prompt")
+else:
+    bad("summary prompt does not request categoria from the vocabulary")
+
+if "outros" in with_cats:
+    ok("the prompt keeps the 'outros' escape hatch, like the vision one")
+else:
+    bad("no escape hatch: the model is forced to pick a wrong category")
+
+# Videos never reached the vision model, so before this they had no category at
+# all -- and videos are most of what gets saved.
+if '"categoria"' not in llm.build_summary_prompt("x"):
+    ok("without categories the prompt is unchanged")
+else:
+    bad("categoria leaked into the prompt when no vocabulary was given")
+
+print("== unit_knowledge: ingest_text turns categoria into a tag ==")
+
+_real_generate = llm.generate_structured
+_real_unavail = knowledge._kb_unavailable
+_real_session = knowledge.db.get_session
+_real_save = knowledge.db.save_document
+
+captured_tags = {}
+
+
+def _fake_generate(text, **kw):
+    captured_tags["categories_arg"] = kw.get("categories")
+    return {"ok": True, "resumo": "r", "tutorial": "t", "objetivos": [],
+            "tags": ["alpha"], "categoria": kw.get("_force", "Dev")}
+
+
+class _FakeDoc:
+    """Just the attributes ingest_text reads back off the saved row."""
+
+    def __init__(self, **kw):
+        self.id = 1
+        self.title = kw.get("title")
+        self.summary = kw.get("summary")
+        self.tutorial = kw.get("tutorial")
+        self.tags = kw.get("tags")
+        self.source_url = kw.get("source_url")
+        self.platform = kw.get("platform")
+        self.type = kw.get("type")
+        self.transcription_text = kw.get("transcription_text")
+
+
+class _FakeSession:
+    def close(self):
+        pass
+
+    def rollback(self):
+        pass
+
+
+def _fake_save(session, **kw):
+    captured_tags["tags"] = kw.get("tags")
+    return _FakeDoc(**kw)
+
+
+_real_vault = knowledge.vault.write_markdown_copy
+
+llm.generate_structured = _fake_generate
+knowledge._kb_unavailable = lambda: None
+knowledge.db.get_session = _FakeSession
+knowledge.db.save_document = _fake_save
+knowledge.vault.write_markdown_copy = lambda doc, path: {"ok": True}
+try:
+    knowledge.ingest_text("conteudo", categories=CATS, extra_tags=["colecao:Dev"])
+    tags = captured_tags.get("tags") or []
+    if "categoria:Dev" in tags:
+        ok("the generated categoria becomes a categoria:<name> tag")
+    else:
+        bad(f"categoria did not become a tag: {tags!r}")
+    if "colecao:Dev" in tags and "alpha" in tags:
+        ok("extra_tags and the model's own tags both survive alongside it")
+    else:
+        bad(f"tags were lost: {tags!r}")
+
+    # "outros" means nothing matched; tagging it would create a bucket that
+    # says only "we could not tell".
+    llm.generate_structured = lambda text, **kw: {
+        "ok": True, "resumo": "r", "tutorial": "t", "objetivos": [],
+        "tags": ["alpha"], "categoria": "outros",
+    }
+    knowledge.ingest_text("conteudo", categories=CATS)
+    if not any(t.startswith("categoria:") for t in (captured_tags.get("tags") or [])):
+        ok("categoria 'outros' is not tagged")
+    else:
+        bad(f"'outros' was tagged: {captured_tags.get('tags')!r}")
+finally:
+    llm.generate_structured = _real_generate
+    knowledge._kb_unavailable = _real_unavail
+    knowledge.db.get_session = _real_session
+    knowledge.db.save_document = _real_save
+    knowledge.vault.write_markdown_copy = _real_vault
+
 if "imagem/post do Instagram" not in llm.build_summary_prompt("x", is_image=False):
     ok("is_image=False omits the image context line")
 else:
