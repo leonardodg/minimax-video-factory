@@ -20,6 +20,41 @@ SESSIONID_MISSING = "IG_SESSIONID not configured"
 # instagrapi MediaType values: 1 = image, 2 = video, 8 = album/carousel
 MEDIA_TYPES = {1: "image", 2: "video", 8: "carousel"}
 
+# Auto-collections that are not real categories; kept out of the vocabulary.
+AUTO_COLLECTION_NAMES = {"all posts", "todos os posts", "all", "todos"}
+
+# Static fallback used when collections are unavailable (offline, API error).
+FALLBACK_CATEGORIES = [
+    "receita", "dica", "tutorial", "tech", "curso", "estudo", "inglês",
+    "viagem", "house", "bitcoin", "treino", "car", "dog", "livro",
+    "notícia", "outros",
+]
+
+
+def list_categories(client: Any) -> list[str]:
+    """Normalized unique collection names — the category vocabulary for vision.
+
+    Auto-collections ("All posts"/"Todos os posts") are excluded. Names are
+    stripped, inner whitespace collapsed, and deduplicated case-insensitively
+    keeping the first spelling. Any failure (or a None client) returns the
+    static fallback list, never raises.
+    """
+    if client is None:
+        return list(FALLBACK_CATEGORIES)
+    try:
+        names: list[str] = []
+        seen: set[str] = set()
+        for col in client.collections():
+            raw = (getattr(col, "name", "") or "").strip()
+            key = " ".join(raw.lower().split())
+            if not key or key in AUTO_COLLECTION_NAMES or key in seen:
+                continue
+            seen.add(key)
+            names.append(" ".join(raw.split()))
+        return names or list(FALLBACK_CATEGORIES)
+    except Exception:
+        return list(FALLBACK_CATEGORIES)
+
 
 def make_client() -> Any:
     """Build an authenticated instagrapi Client from IG_SESSIONID."""

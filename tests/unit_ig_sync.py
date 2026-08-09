@@ -136,6 +136,46 @@ if (
 else:
     bad(f"sync_saved_posts = {result!r}")
 
+print("== unit_ig_sync: list_categories ==")
+class FakeCol:
+    def __init__(self, name):
+        self.name = name
+class FakeClientCols:
+    def __init__(self, cols):
+        self._cols = cols
+    def collections(self):
+        return self._cols
+
+cols = [
+    FakeCol("Receitas "), FakeCol("receitas"), FakeCol("  Python "),
+    FakeCol("Treino"), FakeCol("Treino "), FakeCol("All posts"),
+    FakeCol("Todos os posts"), FakeCol(""),
+]
+cats = ig_sync.list_categories(FakeClientCols(cols))
+expected = {"Receitas", "Python", "Treino"}
+if set(cats) == expected and len(cats) == len(expected):
+    ok("list_categories strips whitespace, dedups case-insensitively, drops auto-collections")
+else:
+    bad(f"list_categories = {cats!r}")
+
+if ig_sync.list_categories(FakeClientCols([])) == ig_sync.FALLBACK_CATEGORIES:
+    ok("list_categories with no collections falls back to static list")
+else:
+    bad(f"list_categories([]) = {ig_sync.list_categories(FakeClientCols([]))!r}")
+
+class Boom:
+    def collections(self):
+        raise RuntimeError("boom")
+if ig_sync.list_categories(Boom()) == ig_sync.FALLBACK_CATEGORIES:
+    ok("list_categories swallows client errors -> fallback")
+else:
+    bad(f"list_categories(boom) = {ig_sync.list_categories(Boom())!r}")
+
+if ig_sync.list_categories(None) == ig_sync.FALLBACK_CATEGORIES:
+    ok("list_categories(None) -> fallback")
+else:
+    bad(f"list_categories(None) = {ig_sync.list_categories(None)!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
