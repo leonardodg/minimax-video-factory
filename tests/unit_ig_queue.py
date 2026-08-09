@@ -56,7 +56,6 @@ class FakeChannel:
 
 from minimax_mcp import ig_queue
 
-
 print("== unit_ig_queue: parse_message ==")
 good = ig_queue.parse_message(
     json.dumps({
@@ -88,7 +87,7 @@ if {ig_queue.QUEUE, ig_queue.DLQ, ig_queue.CONTROL_QUEUE} <= names:
 else:
     bad(f"declare created: {names}")
 
-work_decl = [d for d in ch.declared if d[0] == ig_queue.QUEUE][0]
+work_decl = next(d for d in ch.declared if d[0] == ig_queue.QUEUE)
 if work_decl[1] is True and work_decl[2].get("x-dead-letter-routing-key") == ig_queue.DLQ:
     ok("ig.saved is durable and dead-letters to the DLQ")
 else:

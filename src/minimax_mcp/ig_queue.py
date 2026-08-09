@@ -8,10 +8,13 @@ channel (see tests/unit_ig_queue.py).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
 import pika
+
+logger = logging.getLogger(__name__)
 
 RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
 QUEUE = os.environ.get("RABBITMQ_QUEUE", "ig.saved")
@@ -30,8 +33,11 @@ def close(connection: pika.BlockingConnection | None) -> None:
     if connection is not None:
         try:
             connection.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            # Closing a connection the broker already dropped raises, and there
+            # is nothing left to do about it -- but swallowing it silently hid
+            # exactly the transport drops the worker was reconnecting around.
+            logger.debug("ignoring error while closing connection: %s", exc)
 
 
 def declare(channel: Any) -> None:

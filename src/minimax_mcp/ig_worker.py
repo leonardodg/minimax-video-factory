@@ -15,8 +15,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from minimax_mcp import db, ig_queue, knowledge, llm
 
@@ -234,7 +235,7 @@ def _safe_ack(ch, method) -> None:
     the worker reconnects."""
     try:
         ch.basic_ack(method.delivery_tag)
-    except Exception as exc:  # noqa: BLE001 - connection-level errors
+    except Exception as exc:
         logger.warning("ack failed for delivery_tag=%s (%s); will redeliver", method.delivery_tag, exc)
 
 
@@ -257,7 +258,7 @@ def run() -> None:
             logger.warning("corrupted message -> DLQ: %s", parsed["error"])
             try:
                 ig_queue.dead_letter(ch, properties, body)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("dead_letter failed: %s", exc)
             _safe_ack(ch, method)
             return
@@ -299,14 +300,17 @@ def run() -> None:
                                   "document_id": res["document_id"], "title": message.get("title")})
                 _p.parent.mkdir(parents=True, exist_ok=True)
                 _p.write_text(_json.dumps(_existing[-500:], ensure_ascii=False, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+            except Exception as exc:
+                # The progress file is a convenience for /ig-progress, not the
+                # source of truth -- the document is already in the KB. Failing
+                # to write it must not nack a message that actually succeeded.
+                logger.warning("could not update the progress file: %s", exc)
             _safe_ack(ch, method)
         else:
             logger.warning("processing failed ig_pk=%s: %s", message["ig_pk"], res["error"])
             try:
                 ig_queue.handle_failure(ch, properties, body)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.warning("handle_failure failed: %s", exc)
             _safe_ack(ch, method)
 
@@ -333,7 +337,7 @@ def run() -> None:
             channel.start_consuming()
         except KeyboardInterrupt:
             raise
-        except Exception as exc:  # noqa: BLE001 - connection-level errors
+        except Exception as exc:
             logger.warning("consumer connection dropped: %s", exc)
         finally:
             ig_queue.close(connection)

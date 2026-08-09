@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable
-
-from minimax_mcp import db, ig_queue
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +65,7 @@ def make_client() -> Any:
     # name was removed, not just deprecated.
     login = getattr(client, "login_by_sessionid", None)
     if login is None:
-        login = getattr(client, "set_sessionid")
+        login = client.set_sessionid
     login(IG_SESSIONID)
     return client
 
@@ -91,7 +90,11 @@ def saved_posts(client: Any, max_per_collection: int = 200) -> list[dict]:
                 name = getattr(col, "name", "") or "sem coleção"
             try:
                 medias = list(client.collection_medias(col.id, amount=max_per_collection))
-            except Exception:
+            except Exception as exc:
+                # One unreadable collection must not abort the whole sync, but
+                # silence here means a collection can go missing from every run
+                # with nothing to show for it.
+                logger.warning("skipping collection %r: %s", name, exc)
                 continue
             for m in medias:
                 results.append({"media": m, "collection_name": name})

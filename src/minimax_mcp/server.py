@@ -42,6 +42,7 @@ from dotenv import load_dotenv
 from fastmcp import FastMCP
 from pydantic import Field
 
+from minimax_mcp import ig_queue
 from minimax_mcp.comfyui_client import ComfyUIClient
 from minimax_mcp.core import (
     compose_final_core,
@@ -53,7 +54,6 @@ from minimax_mcp.core import (
 from minimax_mcp.downloader import VideoDownloader
 from minimax_mcp.orchestrator import AudiovisualStudio
 from minimax_mcp.transcriber import AudioTranscriber
-from minimax_mcp import ig_queue
 
 # ---------------- logging ----------------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")

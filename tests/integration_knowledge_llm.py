@@ -69,7 +69,7 @@ else:
 
 print("== integration_knowledge_llm: vision describe (skippable) ==")
 VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
-have = os.popen(f"ollama list 2>/dev/null | awk '{{print $1}}'").read()
+have = os.popen("ollama list 2>/dev/null | awk '{print $1}'").read()
 if VISION_MODEL.split(":")[0] not in have:
     print("  [SKIP] vision model not pulled; run: ollama pull qwen2.5vl:7b")
 else:
