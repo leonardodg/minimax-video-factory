@@ -6,6 +6,7 @@ frontmatter with a usage line, $ARGUMENTS, then numbered instructions.
 """
 from __future__ import annotations
 
+from scripts.command_docs import catalog
 from scripts.command_docs.overrides import Override
 from scripts.command_docs.parser import ParamSpec, ToolSpec
 
@@ -99,11 +100,44 @@ def _param_line(param: ParamSpec, override: Override) -> str:
     return line.rstrip(".") + "."
 
 
+def _numbered_steps(spec: ToolSpec, override: Override, call_step: str) -> list[str]:
+    """The numbered instruction list, shared by every client dialect.
+
+    Only `call_step` differs between clients: how a tool is named and which
+    servers to fall back to are client-specific, everything else is not.
+    """
+    required, optional = _sorted_params(spec)
+    lines: list[str] = []
+
+    step = 1
+    if required or optional or override.params_extra:
+        lines.append(f"{step}. Extraia:")
+        for param in required + optional:
+            lines.append(_param_line(param, override))
+        for name, extra in override.params_extra.items():
+            line = f"   - `{name}`: {extra.descricao}"
+            if extra.default:
+                line += f" (default `{extra.default}`)"
+            lines.append(line.rstrip(".") + ".")
+        step += 1
+
+    lines.append(f"{step}. {call_step}")
+    step += 1
+
+    for passo in override.passos:
+        lines.append(f"{step}. {passo}")
+        step += 1
+
+    if not override.passos:
+        lines.append(f"{step}. Reporte o resultado da tool ao usuário.")
+
+    return lines
+
+
 def render_command(spec: ToolSpec, override: Override, command: str) -> str:
-    """The complete .md body for one slash command."""
+    """The complete .md body for one OpenCode slash command."""
     summary = _summary(spec, override)
     usage = render_usage(spec, override, command)
-    required, optional = _sorted_params(spec)
 
     lines = [
         "---",
@@ -118,29 +152,77 @@ def render_command(spec: ToolSpec, override: Override, command: str) -> str:
         "",
         "Instruções obrigatórias:",
     ]
+    lines += _numbered_steps(
+        spec, override, FALLBACK_STEP.format(tool=spec.tool_name, server=MCP_SERVER)
+    )
+    return "\n".join(lines) + "\n"
 
-    step = 1
-    if required or optional or override.params_extra:
-        lines.append(f"{step}. Extraia:")
-        for param in required + optional:
-            lines.append(_param_line(param, override))
-        for name, extra in override.params_extra.items():
-            line = f"   - `{name}`: {extra.descricao}"
-            if extra.default:
-                line += f" (default `{extra.default}`)"
-            lines.append(line.rstrip(".") + ".")
-        step += 1
 
-    lines.append(f"{step}. " + FALLBACK_STEP.format(tool=spec.tool_name, server=MCP_SERVER))
-    step += 1
+def claude_tool_ref(server: str, tool: str) -> str:
+    """How Claude Code names an MCP tool: `mcp__<server>__<tool>`.
 
-    for passo in override.passos:
-        lines.append(f"{step}. {passo}")
-        step += 1
+    Not the same shape as OpenCode's `<server>_<tool>`. Writing the OpenCode
+    form into a Claude Code command produces a command that lists fine and
+    fails on every run, because no tool by that name is ever exposed.
+    """
+    return f"mcp__{server}__{tool}"
 
-    if not override.passos:
-        lines.append(f"{step}. Reporte o resultado da tool ao usuário.")
 
+def _claude_call_step(spec: ToolSpec, command: str) -> str:
+    """The 'call the tool' step, with the fallbacks that apply to its group."""
+    server = catalog.server_of(command)
+    fallbacks = catalog.fallbacks_of(command)
+    step = (
+        f"Chame `{claude_tool_ref(server, spec.tool_name)}` com esses parâmetros."
+    )
+    if fallbacks:
+        alts = " ou ".join(
+            f"`{claude_tool_ref(alt, spec.tool_name)}`" for alt in fallbacks
+        )
+        step += f" Se o servidor `{server}` não estiver conectado, use {alts}."
+    else:
+        step += (
+            f" Esta tool só existe no servidor `{server}`, que roda no host com "
+            f"acesso direto a Postgres e Ollama. Se ele não estiver conectado, "
+            f"diga isso ao usuário — não tente as variantes do container, que "
+            f"não alcançam o Postgres e só devolvem timeout."
+        )
+    return step
+
+
+def render_claude_command(spec: ToolSpec, override: Override, command: str) -> str:
+    """The complete .md body for one Claude Code slash command.
+
+    Same instructions as the OpenCode form, three differences that matter:
+    the tool reference is `mcp__server__tool`, the usage line moves out of
+    `description` into the dedicated `argument-hint` field, and the server
+    fallbacks are the ones that can actually serve this command's group.
+    """
+    summary = _summary(spec, override)
+    usage = render_usage(spec, override, command)
+    # argument-hint shows only the arguments; the leading "/command" that
+    # render_usage emits is already on screen when the hint appears.
+    hint = usage[len(f"/{command}") :].strip()
+
+    lines = ["---", f"description: {summary}"]
+    if hint:
+        lines.append(f"argument-hint: {hint}")
+    lines += [
+        "---",
+        "",
+        GENERATED_HEADER.rstrip("\n"),
+        "",
+        (
+            "Execute a ferramenta MCP "
+            f"**`{claude_tool_ref(catalog.server_of(command), spec.tool_name)}`**."
+        ),
+        "",
+        "Entrada do usuário (tudo depois do comando):",
+        "$ARGUMENTS",
+        "",
+        "Instruções obrigatórias:",
+    ]
+    lines += _numbered_steps(spec, override, _claude_call_step(spec, command))
     return "\n".join(lines) + "\n"
 
 
@@ -156,9 +238,15 @@ def render_catalog_page(entries) -> str:
         "# Slash commands",
         "",
         GENERATED_HEADER,
-        ("Um comando do OpenCode para cada ferramenta MCP. Esta página descreve o "
-        "uso humano; a referência de programação das tools está em "
-        "[MCP Tools Reference](MCP_TOOLS.md)."),
+        ("Um comando para cada ferramenta MCP, gerado para os dois clientes: "
+        "OpenCode (`.opencode/command/`) e Claude Code (`.claude/commands/`). "
+        "Esta página descreve o uso humano; a referência de programação das "
+        "tools está em [MCP Tools Reference](MCP_TOOLS.md)."),
+        "",
+        ("Os comandos `kb-*` só funcionam contra o servidor **host** "
+        "(`minimax-knowledge-base`): as tools `knowledge_*` falam direto com "
+        "Postgres e Ollama, que o container não alcança. Os demais rodam no "
+        "container."),
         "",
         "| Comando | Tool | O que faz |",
         "|---|---|---|",

@@ -47,7 +47,7 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 
 - 🎬 **Text → video + audio in one pass** — H3 generates native stereo sound with the picture, not a soundtrack pasted on afterwards
 - 🔌 **18 MCP tools** — drive the whole pipeline from an AI agent, no CLI to memorise
-- ⌨️ **18 slash commands** — generated from the code, so they can never drift from what the tools actually accept
+- ⌨️ **24 slash commands, for OpenCode and Claude Code** — generated from the code, so they can never drift from what the tools actually accept
 - 📥 **Ingest what you already watch** — download Instagram Reels and YouTube with browser cookies, transcribe locally with Whisper
 - 🧠 **Personal knowledge base** — Postgres + pgvector, hybrid search and RAG, all with a local LLM
 - 🔒 **Fully local** — models, inference, database and transcription run on your machine
@@ -281,6 +281,14 @@ be correct out of the frame.
 
 Every MCP tool has a matching command. `/minimax-*` drives the video pipeline, `/kb-*` the knowledge base.
 
+Generated for both clients: `.opencode/command/` for OpenCode and `.claude/commands/`
+for Claude Code. The two differ in how they name an MCP tool — Claude Code uses
+`mcp__server__tool` — so each gets its own file from the same source.
+
+The `/kb-*` commands only answer against the **host** server
+(`minimax-knowledge-base`): the `knowledge_*` tools need direct Postgres and Ollama,
+which the container cannot reach. Everything else runs in the container.
+
 ### Render pipeline
 
 | Tool | Command | What it does |
@@ -391,7 +399,9 @@ minimax-video-factory/
 ├── .github/workflows/
 │   ├── ci.yml                    # cloud lint/tests + self-hosted GPU suite
 │   └── docs.yml                  # builds and publishes the docs site
-├── .opencode/command/            # 18 generated slash commands
+├── .claude/commands/             # 24 generated slash commands (Claude Code)
+├── .mcp.json                     # MCP servers, for Claude Code
+├── .opencode/command/            # 24 generated slash commands (OpenCode)
 ├── docker/
 │   ├── Dockerfile                # ComfyUI + in-image MCP venv
 │   └── docker-compose.yml        # GPU passthrough, Postgres for the KB
@@ -460,6 +470,40 @@ docker compose -f docker/docker-compose.yml logs -f comfyui
 
 Three variants (in-container, host `uv`, remote over HTTP) are documented in
 **[Remote MCP](https://leonardodg.github.io/minimax-video-factory/MCP_REMOTE/)**.
+
+---
+
+## 🔌 Claude Code MCP config
+
+The two portable servers are already checked in as `.mcp.json`, so Claude Code picks
+them up on trust:
+
+```json
+{
+  "mcpServers": {
+    "minimax-video-factory": {
+      "command": "docker",
+      "args": ["exec", "-i", "minimax-comfyui",
+               "bash", "/workspace/scripts/mcp_runner.sh"]
+    },
+    "minimax-video-factory-remote": {
+      "type": "http",
+      "url": "http://127.0.0.1:8848/mcp"
+    }
+  }
+}
+```
+
+The other two hardcode absolute host paths, so they are not versioned — add them per
+machine:
+
+```bash
+claude mcp add-json minimax-knowledge-base --scope local '{ ... }'   # host: Postgres + Ollama
+claude mcp add-json minimax-video-factory-uv --scope local '{ ... }' # host uv, no docker
+```
+
+`minimax-knowledge-base` is not optional if you want the `/kb-*` commands: the
+container has no route to Postgres.
 
 ---
 

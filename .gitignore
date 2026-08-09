@@ -35,3 +35,7 @@ site/
 
 # Git worktrees
 .worktrees/
+
+# Claude Code per-machine permissions. `.claude/commands/` IS versioned (it is
+# generated from the code, like .opencode/command/); this one file is not.
+.claude/settings.local.json

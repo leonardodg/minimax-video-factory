@@ -44,8 +44,33 @@ GROUP_TITLES: dict[str, str] = {
 }
 
 # Commands in .opencode/command/ that are not backed by an MCP tool. The
-# coverage test must not demand a tool for these.
+# coverage test must not demand a tool for these. They are deliberately NOT
+# ported to .claude/commands/: Claude Code already ships `compress` and
+# `search-sessions` as global skills, and a project command of the same name
+# would shadow them.
 NON_TOOL_COMMANDS: frozenset[str] = frozenset({"compress", "search-sessions"})
+
+# Which server actually answers each group, for clients that can route.
+#
+# The knowledge_* tools talk straight to Postgres (127.0.0.1:5432) and Ollama
+# (localhost:11434), neither of which the container can reach, so they only
+# work on the host server. Video and IG tools want the container, where the
+# models and the ComfyUI bind-mounts live. OpenCode names one server for all
+# 24 and leans on the fallback step; Claude Code gets told the truth up front.
+SERVER_BY_GROUP: dict[str, str] = {
+    "video": "minimax-video-factory",
+    "ig": "minimax-video-factory",
+    "kb": "minimax-knowledge-base",
+}
+
+# Variants to try when the primary server is not connected, in order. The kb
+# group has none on purpose: the container variants cannot reach Postgres, so
+# retrying there turns a clear "not connected" into a confusing timeout.
+FALLBACKS_BY_GROUP: dict[str, tuple[str, ...]] = {
+    "video": ("minimax-video-factory-remote", "minimax-video-factory-uv"),
+    "ig": ("minimax-video-factory-remote", "minimax-video-factory-uv"),
+    "kb": (),
+}
 
 
 def command_name(tool: str) -> str:
@@ -67,3 +92,13 @@ def group_of(command: str) -> str:
     if command.startswith("ig-"):
         return "ig"
     return "video"
+
+
+def server_of(command: str) -> str:
+    """The MCP server that actually answers `command`."""
+    return SERVER_BY_GROUP[group_of(command)]
+
+
+def fallbacks_of(command: str) -> tuple[str, ...]:
+    """Server variants to try for `command` when the primary is not connected."""
+    return FALLBACKS_BY_GROUP[group_of(command)]
