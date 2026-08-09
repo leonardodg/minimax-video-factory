@@ -224,6 +224,54 @@ if res.get("ok") and res["filepath"] == res["filepaths"][0] and res["filepath"].
 else:
     bad(f"single video download = {res!r}")
 
+print("== unit_ig_worker: process_message carousel concatenates descriptions ==")
+
+def dl_carousel_multi(msg):
+    assert msg["media_type"] == "carousel"
+    return {"ok": True, "filepath": "/tmp/c1.jpg", "filepaths": ["/tmp/c1.jpg", "/tmp/c2.jpg"]}
+
+def describe_structured(path):
+    return {
+        "ok": True, "text": f"conteudo {path}",
+        "tipo": "dica", "categoria": "courses", "conteudo_principal": f"conteudo {path}",
+    }
+
+def ingest_carousel(text, **kw):
+    assert text == "conteudo /tmp/c1.jpg\n\nconteudo /tmp/c2.jpg", f"text={text!r}"
+    assert kw["doc_type"] == "image"
+    assert "categoria:courses" in (kw.get("extra_tags") or []), f"tags={kw.get('extra_tags')!r}"
+    return {"ok": True, "document_id": 70}
+
+res = ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=dl_carousel_multi, transcribe=None, describe=describe_structured, ingest=ingest_carousel,
+)
+if res["status"] == "done" and res["kind"] == "image" and len(res["filepaths"]) == 2:
+    ok("carousel -> describe each photo -> concatenated text + categoria tag")
+else:
+    bad(f"carousel process = {res!r}")
+
+print("== unit_ig_worker: describe-only contract still works ==")
+
+def dl_single(msg):
+    return {"ok": True, "filepath": "/tmp/x.jpg"}
+
+def describe_legacy(path):
+    return {"ok": True, "text": "descrição da foto"}
+
+def ingest_legacy(text, **kw):
+    assert text == "descrição da foto"
+    assert kw["doc_type"] == "image"
+    return {"ok": True, "document_id": 71}
+
+res = ig_worker.process_message(
+    MESSAGE, download=dl_single, transcribe=None, describe=describe_legacy, ingest=ingest_legacy,
+)
+if res["status"] == "done" and res["kind"] == "image":
+    ok("describe returning only text (no conteudo_principal) still ingested")
+else:
+    bad(f"legacy describe process = {res!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

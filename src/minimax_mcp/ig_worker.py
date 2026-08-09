@@ -44,20 +44,30 @@ def process_message(
     describe: Callable[[str], dict] | None,
     ingest: Callable[[str], dict],
 ) -> dict:
-    """Download -> transcribe/describe -> ingest. Pure; all IO injected."""
+    """Download -> transcribe/describe -> ingest. Pure; all IO injected.
+
+    Videos transcribe the first downloaded file. Images/carousels describe
+    EVERY downloaded file and join their conteudo_principal into one text so
+    content spread across carousel photos is captured. The first photo's
+    categoria becomes a `categoria:<name>` tag.
+    """
     if not message:
         return {"status": "error", "error": "empty message"}
 
     dl = download(message)
     if not dl.get("ok"):
         return {"status": "error", "error": dl.get("error", "download failed")}
-    filepath = dl["filepath"]
+    filepaths = dl.get("filepaths") or [dl.get("filepath")]
+    filepaths = [f for f in filepaths if f]
+    if not filepaths:
+        return {"status": "error", "error": "no file downloaded"}
 
-    kind = classify_file(filepath)
+    kind = classify_file(filepaths[0])
+    categoria = None
     if kind == "video":
         if transcribe is None:
             return {"status": "error", "error": "no transcribe provided for video"}
-        tr = transcribe(filepath)
+        tr = transcribe(filepaths[0])
         if not tr.get("ok"):
             return {"status": "error", "error": tr.get("error", "transcribe failed")}
         text, lang = tr["text"], tr.get("language", "pt")
@@ -65,13 +75,21 @@ def process_message(
     else:
         if describe is None:
             return {"status": "error", "error": "no describe provided for image"}
-        de = describe(filepath)
-        if not de.get("ok"):
-            return {"status": "error", "error": de.get("error", "describe failed")}
-        text, lang = de["text"], "pt"
+        pieces: list[str] = []
+        for fp in filepaths:
+            de = describe(fp)
+            if not de.get("ok"):
+                return {"status": "error", "error": de.get("error", "describe failed")}
+            pieces.append(de.get("conteudo_principal") or de.get("text") or "")
+            if categoria is None:
+                categoria = de.get("categoria")
+        text = "\n\n".join(p for p in pieces if p)
+        lang = "pt"
         doc_type = "image"
 
     extra_tags = [message["collection_name"]] if message.get("collection_name") else None
+    if categoria and categoria != "outros":
+        extra_tags = (extra_tags or []) + [f"categoria:{categoria}"]
     ing = ingest(
         text,
         source_url=message.get("url"),
@@ -85,7 +103,13 @@ def process_message(
     if not ing.get("ok"):
         return {"status": "error", "error": ing.get("error", "ingest failed")}
 
-    return {"status": "done", "document_id": ing.get("document_id"), "kind": kind, "filepath": filepath}
+    return {
+        "status": "done",
+        "document_id": ing.get("document_id"),
+        "kind": kind,
+        "filepath": filepaths[0],
+        "filepaths": filepaths,
+    }
 
 
 def apply_command(state: dict, command: str) -> str:
@@ -161,6 +185,26 @@ def _default_download(message: dict) -> dict:
     return dl
 
 
+_categories_cache: list[str] | None = None
+
+
+def _default_describe(filepath: str) -> dict:
+    """Describe an image with the category vocabulary threaded in.
+
+    Fetches the category list once per process and reuses it for every
+    describe call, so the worker doesn't hit instagrapi per message.
+    """
+    global _categories_cache
+    if _categories_cache is None:
+        try:
+            from minimax_mcp import ig_sync
+
+            _categories_cache = ig_sync.list_categories(ig_sync.make_client())
+        except Exception:
+            _categories_cache = ig_sync.list_categories(None)
+    return llm.describe_image(filepath, categories=_categories_cache)
+
+
 def _default_transcribe(filepath: str) -> dict:
     from minimax_mcp.transcriber import AudioTranscriber
 
@@ -233,16 +277,17 @@ def run() -> None:
             message,
             download=_default_download,
             transcribe=_default_transcribe,
-            describe=llm.describe_image,
+            describe=_default_describe,
             ingest=knowledge.ingest_text,
         )
         if res["status"] == "done":
             logger.info("ingested ig_pk=%s document_id=%s", message["ig_pk"], res["document_id"])
             if IG_DELETE_AFTER_INGEST:
-                try:
-                    Path(res["filepath"]).unlink(missing_ok=True)
-                except OSError:
-                    logger.warning("could not delete %s", res["filepath"])
+                for fp in res.get("filepaths") or [res.get("filepath")]:
+                    try:
+                        Path(fp).unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("could not delete %s", fp)
             _state = os.environ.get("IG_STATE_FILE", "downloads/ig/state.json")
             try:
                 import json as _json
