@@ -353,6 +353,14 @@ contra a versão anterior: 2 BAD, exit 1, um por bug.**
 
 ## Pendências
 
+- **O enquadramento da rodada 3 é aberto demais para diálogo.** Achado em
+  2026-08-09 no `H1_raposa_A_p1`: a raposa ocupa ~5% do quadro, então as falas
+  se ouvem mas **não se vê ninguém falando**. A causa é o vocabulário herdado da
+  rodada 2 (`wide shot`, `the camera pans gently`), que era de paisagem, não de
+  conversa. **Decisão do usuário: não mexer no meio da bancada** — mudar o
+  enquadramento agora contaminaria a comparação entre A, B e C, que existe para
+  responder sobre *montagem*. Corrigir na rodada 4, com a montagem já escolhida:
+  `medium shot`, personagem grande no quadro, nas batidas com fala.
 - **Portar o encadeamento de frame + a unificação de áudio para tools MCP.**
   Hoje só existem em `round2.py` e `unify_audio.py`. São as duas peças que
   faltam para durações longas, e as duas foram validadas em 4 vídeos.
