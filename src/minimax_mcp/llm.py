@@ -5,6 +5,7 @@ import base64
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -211,6 +212,8 @@ def generate_structured(
         missing = required - parsed.keys()
         if missing:
             return {"ok": False, "error": f"LLM response missing keys: {missing}", "raw": raw}
+        if categories:
+            parsed["categoria"] = coerce_categoria(parsed.get("categoria"), categories)
         return {"ok": True, "provider": provider, "model": model, **parsed}
     except Exception as e:
         return {"ok": False, "error": f"LLM generation failed: {e}"}
@@ -267,6 +270,36 @@ def build_vision_prompt(categories: list[str] | None = None) -> str:
     )
 
 
+def coerce_categoria(value: Any, categories: list[str] | None) -> str:
+    """Force `value` into the allowed vocabulary, or "outros".
+
+    Asking for a closed list does not produce one. Measured on a 26-category
+    vocabulary, lfm2:24b answered "Saúde" -- a category that simply does not
+    exist -- and did it across separate runs. A value outside the list is worse
+    than "outros": it neither filters nor groups, and it never appears in the
+    list the user believes they are choosing from.
+
+    Matching is case- and accent-tolerant so "ingles" and "Inglês" both resolve
+    to whatever the vocabulary actually spells, and the canonical spelling is
+    what comes back -- otherwise the same category splits into several tags.
+    """
+    if not categories:
+        return str(value or "outros").strip() or "outros"
+    raw = str(value or "").strip()
+    if not raw:
+        return "outros"
+
+    def norm(s: str) -> str:
+        decomposed = unicodedata.normalize("NFKD", s.casefold())
+        return "".join(c for c in decomposed if not unicodedata.combining(c)).strip()
+
+    wanted = norm(raw)
+    for cat in categories:
+        if norm(cat) == wanted:
+            return cat
+    return "outros"
+
+
 def parse_vision_reply(raw: str) -> dict:
     """Parse the vision model's reply into {tipo, categoria, conteudo_principal}.
 
@@ -318,6 +351,6 @@ def describe_image(
         "ok": True,
         "text": text,
         "tipo": parsed.get("tipo"),
-        "categoria": parsed.get("categoria"),
+        "categoria": coerce_categoria(parsed.get("categoria"), categories),
         "conteudo_principal": text,
     }
