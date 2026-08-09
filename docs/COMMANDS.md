@@ -7,6 +7,11 @@ Um comando do OpenCode para cada ferramenta MCP. Esta página descreve o uso hum
 
 | Comando | Tool | O que faz |
 |---|---|---|
+| `/ig-progress` | `ig_get_progress` | Mostra os últimos N posts do Instagram processados pelo ig-worker (state em downloads/ig) |
+| `/ig-status` | `ig_queue_status` | Mostra o tamanho da fila ig.saved (ready/dead) e quantos consumidores ativos |
+| `/ig-sync` | `ig_sync_saved` | Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved |
+| `/ig-worker` | `ig_worker_start` | Envia o comando 'start' ao daemon ig-worker (retoma o consumo da fila) |
+| `/ig-worker-stop` | `ig_worker_stop` | Envia o comando 'stop' ao daemon ig-worker (pausa o consumo da fila) |
 | `/kb-buscar` | `knowledge_search` | Busca na base de conhecimento (palavra-chave + semântica) |
 | `/kb-ingest-audio` | `knowledge_ingest_audio` | Transcreve e documenta um áudio/podcast na base de conhecimento |
 | `/kb-ingest-markdown` | `knowledge_ingest_markdown` | Importa arquivos markdown (ex.: Obsidian) para a base de conhecimento |
@@ -371,4 +376,50 @@ Recalcula chunks e embeddings de todos os documentos da base.
 
 - Rode depois de trocar o modelo de embedding: vetores antigos não são comparáveis com os novos, e a busca degrada em silêncio até reindexar.
 - Percorre a base inteira — pode demorar proporcionalmente ao tamanho dela.
+
+## Instagram sync
+
+### `/ig-progress`
+
+Mostra os últimos N posts do Instagram processados pelo ig-worker (state em downloads/ig).
+
+```
+/ig-progress [last_n=10]
+```
+
+| Parâmetro | Obrigatório | Default | Descrição |
+|---|---|---|---|
+| `last_n` | não | `10` | Quantos últimos resultados processados mostrar |
+
+### `/ig-status`
+
+Mostra o tamanho da fila ig.saved (ready/dead) e quantos consumidores ativos.
+
+```
+/ig-status
+```
+
+### `/ig-sync`
+
+Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
+
+```
+/ig-sync
+```
+
+### `/ig-worker`
+
+Envia o comando 'start' ao daemon ig-worker (retoma o consumo da fila).
+
+```
+/ig-worker
+```
+
+### `/ig-worker-stop`
+
+Envia o comando 'stop' ao daemon ig-worker (pausa o consumo da fila).
+
+```
+/ig-worker-stop
+```
 

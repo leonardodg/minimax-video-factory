@@ -83,6 +83,8 @@ def ingest_text(
     platform: str = "manual",
     doc_type: str = "text",
     language: str = "pt",
+    ig_pk: str | None = None,
+    extra_tags: list[str] | None = None,
 ) -> dict[str, Any]:
     """Summarize+document `text` via the LLM and store it in the knowledge base."""
     if (unavailable := _kb_unavailable()):
@@ -93,6 +95,8 @@ def ingest_text(
     gen = llm.generate_structured(text)
     if not gen.get("ok"):
         return {"ok": False, "stage": "llm", "error": gen.get("error")}
+
+    tags = list(dict.fromkeys([t for t in (gen.get("tags") or []) + (extra_tags or []) if t]))
 
     session = db.get_session()
     try:
@@ -107,12 +111,13 @@ def ingest_text(
             summary=gen.get("resumo"),
             tutorial=gen.get("tutorial"),
             objectives="\n".join(gen.get("objetivos") or []),
-            tags=gen.get("tags") or [],
+            tags=tags,
             raw_file_path=None,
             llm_provider=gen.get("provider"),
             llm_model=gen.get("model"),
             embed_fn=llm.embed,
             embedding_model=llm.EMBEDDING_MODEL,
+            ig_pk=ig_pk,
         )
         doc_dict = {
             "id": doc.id, "title": doc.title, "summary": doc.summary, "tutorial": doc.tutorial,

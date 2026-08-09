@@ -73,6 +73,24 @@ def test_unit_privacy():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.unit
+def test_unit_ig_queue():
+    result = _run_script("unit_ig_queue.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_ig_sync():
+    result = _run_script("unit_ig_sync.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_ig_worker():
+    result = _run_script("unit_ig_worker.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.integration_db
 def test_container_deps():
     """The image the README tells users to configure must be able to import
@@ -96,4 +114,16 @@ def test_integration_knowledge_db():
 @pytest.mark.integration_llm
 def test_integration_knowledge_llm():
     result = _run_script("integration_knowledge_llm.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_db
+def test_integration_ig_db():
+    result = _run_script("integration_ig_db.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.integration_llm
+def test_integration_ig_llm():
+    result = _run_script("integration_ig_llm.py")
     assert result.returncode == 0, result.stdout + result.stderr

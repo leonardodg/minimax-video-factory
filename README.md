@@ -315,6 +315,16 @@ Every MCP tool has a matching command. `/minimax-*` drives the video pipeline, `
 | `knowledge_ask` | `/kb-perguntar` | Answer from your own base only, citing the sources |
 | `knowledge_reindex` | `/kb-reindex` | Recompute chunks and embeddings for everything |
 
+### Instagram sync
+
+| Tool | Command | What it does |
+|---|---|---|
+| `ig_sync_saved` | `/ig-sync` | Enqueue every Instagram saved post (via IG_SESSIONID) onto the RabbitMQ queue |
+| `ig_queue_status` | `/ig-status` | RabbitMQ queue depth and active consumers |
+| `ig_worker_start` | `/ig-worker` | Send 'start' to the ig-worker daemon |
+| `ig_worker_stop` | `/ig-worker-stop` | Send 'stop' to the ig-worker daemon |
+| `ig_get_progress` | `/ig-progress` | Last processed Instagram items + KB document count |
+
 The command files are **generated from the tool signatures** — `uv run python scripts/generate_commands.py`. A test fails if a tool ever lacks one. Full reference: **[docs/COMMANDS.md](https://leonardodg.github.io/minimax-video-factory/COMMANDS/)**.
 
 ---

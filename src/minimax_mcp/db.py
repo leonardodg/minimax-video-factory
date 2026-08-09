@@ -42,6 +42,7 @@ class Document(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column(String(20))
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ig_pk: Mapped[str | None] = mapped_column(String(64), nullable=True)
     platform: Mapped[str | None] = mapped_column(String(50), nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
@@ -147,6 +148,7 @@ def save_document(
     llm_model: str | None,
     embed_fn: Callable[[str], list[float]],
     embedding_model: str,
+    ig_pk: str | None = None,
 ) -> Document:
     """Insert a Document + its chunks + their embeddings in one transaction."""
     doc = Document(
@@ -154,6 +156,7 @@ def save_document(
         language=language, transcription_text=transcription_text, summary=summary,
         tutorial=tutorial, objectives=objectives, tags=tags,
         raw_file_path=raw_file_path, llm_provider=llm_provider, llm_model=llm_model,
+        ig_pk=ig_pk,
     )
     session.add(doc)
     session.flush()  # assigns doc.id
@@ -283,3 +286,27 @@ def delete_documents(session: Session, *, source_url: str | None = None) -> int:
         session.delete(doc)
     session.commit()
     return len(docs)
+
+
+def document_exists(
+    session: Session,
+    *,
+    ig_pk: str | None = None,
+    source_url: str | None = None,
+) -> bool:
+    """True if a document with that ig_pk (or source_url) already exists."""
+    if ig_pk is not None:
+        stmt = select(Document.id).where(Document.ig_pk == ig_pk)
+    elif source_url is not None:
+        stmt = select(Document.id).where(Document.source_url == source_url)
+    else:
+        return False
+    return session.execute(stmt.limit(1)).first() is not None
+
+
+def list_ig_pks(session: Session) -> set[str]:
+    """Every non-null ig_pk currently stored (used to skip re-publishing)."""
+    rows = session.execute(
+        select(Document.ig_pk).where(Document.ig_pk.isnot(None))
+    ).all()
+    return {r[0] for r in rows}

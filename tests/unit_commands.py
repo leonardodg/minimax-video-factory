@@ -33,10 +33,10 @@ SPECS = {s.tool_name: s for s in parse_tools(SERVER_PY)}
 
 print("== unit_commands: parser ==")
 
-if len(SPECS) == 19:
-    ok("found all 19 @mcp.tool() functions")
+if len(SPECS) == 24:
+    ok("found all 24 @mcp.tool() functions")
 else:
-    bad(f"found {len(SPECS)} tools, expected 19: {sorted(SPECS)}")
+    bad(f"found {len(SPECS)} tools, expected 24: {sorted(SPECS)}")
 
 # Only @mcp.tool()-decorated functions, not every function in the module.
 if "main" not in SPECS and "to_host_path" not in SPECS:
@@ -153,8 +153,12 @@ if not wrong_prefix:
 else:
     bad(f"prefix mismatch: {wrong_prefix}")
 
-if catalog.group_of("kb-buscar") == "kb" and catalog.group_of("minimax-health") == "video":
-    ok("group_of splits the two product areas")
+if (
+    catalog.group_of("kb-buscar") == "kb"
+    and catalog.group_of("minimax-health") == "video"
+    and catalog.group_of("ig-status") == "ig"
+):
+    ok("group_of splits the three product areas")
 else:
     bad("group_of returned the wrong group")
 

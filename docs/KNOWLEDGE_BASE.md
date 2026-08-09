@@ -12,8 +12,9 @@ In this document:
 - [4. Recommended flows step by step](#4-recommended-flows)
 - [5. Using it from the OpenCode chat (prompt examples)](#5-using-it-from-the-opencode-chat)
 - [6. Database structure](#6-database-structure)
-- [7. Configuration (.env)](#7-configuration-env)
-- [8. Troubleshooting](#8-troubleshooting)
+- [7. Instagram saved-posts sync (optional)](#7-instagram-saved-posts-sync-optional)
+- [8. Configuration (.env)](#8-configuration-env)
+- [9. Troubleshooting](#9-troubleshooting)
 
 ---
 
@@ -280,7 +281,40 @@ docker exec minimax-kb-postgres psql -U kb -d knowledge \
 
 ---
 
-## 7. Configuration (.env)
+## 7. Instagram saved-posts sync (optional)
+
+Turn every post you saved on Instagram into a knowledge-base document
+automatically. `ig_sync_saved` enumerates your saved posts (using the
+`IG_SESSIONID` cookie) and publishes each *new* one (no document with that
+`ig_pk` yet) onto the RabbitMQ `ig.saved` queue. The `ig-worker` daemon consumes
+the queue in the background: downloads the media with yt-dlp, transcribes it
+(video) or describes it (photo, via the local Ollama vision model), ingests it
+into the KB with `ig_pk` dedup, and optionally deletes the downloaded file
+(`IG_DELETE_AFTER_INGEST`).
+
+| Tool | Command | O que faz |
+|---|---|---|
+| `ig_sync_saved` | `/ig-sync` | Enfileira os posts salvos (novos) na fila `ig.saved` |
+| `ig_queue_status` | `/ig-status` | Tamanho da fila (ready/dead) e consumidores ativos |
+| `ig_worker_start` | `/ig-worker` | Envia `start` ao daemon ig-worker (retoma) |
+| `ig_worker_stop` | `/ig-worker-stop` | Envia `stop` ao daemon ig-worker (pausa) |
+| `ig_get_progress` | `/ig-progress` | Últimos N posts processados + total com `ig_pk` |
+
+**Prerequisites**
+- `IG_SESSIONID` — o cookie `sessionid` do Instagram (logado). Nunca uma senha.
+- RabbitMQ no `RABBITMQ_URL` (default `amqp://guest:guest@localhost:5672/`).
+- Modelo de visão local para fotos: `ollama pull qwen2.5vl:7b` (igual ao
+  `OLLAMA_VISION_MODEL`).
+- O daemon consome a fila com `uv run python -m minimax_mcp.ig_worker`.
+
+**Golden rule:** nunca rebuild/restart do stack (nem o container do ComfyUI)
+enquanto a fila de render estiver ocupada — confira antes com `queue_status`.
+O ig-worker compartilha a GPU com o renderer H3; um restart no meio do ingest
+perde o item em voo (ele volta à fila e é retomado pelos retries).
+
+---
+
+## 8. Configuration (.env)
 
 | Var | Default | Description |
 |---|---|---|
@@ -298,7 +332,7 @@ docker exec minimax-kb-postgres psql -U kb -d knowledge \
 
 ---
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|

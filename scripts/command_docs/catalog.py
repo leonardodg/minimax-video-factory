@@ -29,11 +29,18 @@ COMMAND_NAMES: dict[str, str] = {
     "knowledge_search": "kb-buscar",
     "knowledge_ask": "kb-perguntar",
     "knowledge_reindex": "kb-reindex",
+    # Instagram sync
+    "ig_sync_saved": "ig-sync",
+    "ig_queue_status": "ig-status",
+    "ig_worker_start": "ig-worker",
+    "ig_worker_stop": "ig-worker-stop",
+    "ig_get_progress": "ig-progress",
 }
 
 GROUP_TITLES: dict[str, str] = {
     "video": "Pipeline de vídeo",
     "kb": "Base de conhecimento",
+    "ig": "Instagram sync",
 }
 
 # Commands in .opencode/command/ that are not backed by an MCP tool. The
@@ -54,5 +61,9 @@ def command_name(tool: str) -> str:
 
 
 def group_of(command: str) -> str:
-    """Which product area a command belongs to: 'kb' or 'video'."""
-    return "kb" if command.startswith("kb-") else "video"
+    """Which product area a command belongs to: 'kb', 'ig' or 'video'."""
+    if command.startswith("kb-"):
+        return "kb"
+    if command.startswith("ig-"):
+        return "ig"
+    return "video"
