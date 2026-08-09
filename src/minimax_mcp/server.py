@@ -180,6 +180,7 @@ def submit_scene(
     seed: int | None = Field(default=None, description="Random seed (defaults to random)"),
     filename_prefix: str = Field(default=OUTPUT_PREFIX, description="Output filename prefix (default from OUTPUT_PREFIX env)"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
+    last_frame: str | None = Field(default=None, description="Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só"),
     steps: int | None = Field(default=None, description="Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente"),
 ) -> dict[str, Any]:
     """Inject a scene prompt into the API workflow and submit it to ComfyUI.
@@ -189,7 +190,7 @@ def submit_scene(
     return submit_scene_core(
         prompt=prompt, duration=duration, width=width, height=height,
         seed=seed, filename_prefix=filename_prefix, first_frame=first_frame,
-        steps=steps,
+        last_frame=last_frame, steps=steps,
     )
 
 
@@ -357,6 +358,7 @@ def generate_video(
     seed: int | None = Field(default=None, description="Random seed"),
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
+    last_frame: str | None = Field(default=None, description="Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só"),
     steps: int | None = Field(default=None, description="Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo"),
     wait_seconds: float = Field(default=900.0, description="Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente"),
 ) -> dict[str, Any]:
@@ -368,7 +370,8 @@ def generate_video(
     studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
     return studio.generate_video(
         prompt=prompt, duration=duration, width=width, height=height, seed=seed,
-        first_frame=first_frame, filename_prefix=filename_prefix,
+        first_frame=first_frame, last_frame=last_frame,
+        filename_prefix=filename_prefix,
         steps=steps, wait_seconds=wait_seconds,
     )
 

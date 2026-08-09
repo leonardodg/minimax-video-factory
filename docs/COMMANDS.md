@@ -98,7 +98,7 @@ Mostra a fila de renderização com barra de progresso.
 Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP.
 
 ```
-/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=900.0]
+/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [last_frame] [steps] [wait_seconds=900.0]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -110,6 +110,7 @@ Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `studio/` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
+| `last_frame` | não | `None` | Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só |
 | `steps` | não | `None` | Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo |
 | `wait_seconds` | não | `900.0` | Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente |
 
@@ -200,7 +201,7 @@ Pipeline completo: URL → download → transcrição → prompt → vídeo.
 Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 
 ```
-/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [steps]
+/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [last_frame] [steps]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -212,6 +213,7 @@ Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `OUTPUT_PREFIX` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
+| `last_frame` | não | `None` | Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só |
 | `steps` | não | `None` | Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente |
 
 **Notas operacionais:**
