@@ -324,6 +324,42 @@ if not (captured.get("extra_tags") or []):
 else:
     bad(f"tags appeared without a collection: {captured.get('extra_tags')!r}")
 
+print("== unit_ig_worker: a mídia é descartada mesmo quando falha ==")
+
+# Só o caminho de sucesso apagava. Um post que falhava deixava o arquivo, e o
+# retry da DLQ baixava de novo a cada tentativa -- num sync de 2000+ posts é a
+# diferença entre alguns MB de rotatividade e encher o disco.
+for label, res in [
+    ("transcrição falhou", {"status": "error", "error": "x", "filepaths": ["/tmp/_t1.mp4"]}),
+    ("ingestão falhou", {"status": "error", "error": "x", "filepaths": ["/tmp/_t2.mp4"]}),
+    ("sucesso", {"status": "done", "document_id": 1, "filepaths": ["/tmp/_t3.mp4"]}),
+    ("carrossel, vários arquivos", {"status": "error", "error": "x",
+                                    "filepaths": ["/tmp/_t4a.jpg", "/tmp/_t4b.jpg"]}),
+]:
+    paths = res["filepaths"]
+    for p in paths:
+        Path(p).write_text("x")
+    ig_worker._discard_media(res)
+    left = [p for p in paths if Path(p).exists()]
+    if not left:
+        ok(f"{label}: mídia apagada")
+    else:
+        bad(f"{label}: sobrou no disco {left}")
+
+# Erro antes do download não tem o que apagar, e não pode explodir.
+try:
+    ig_worker._discard_media({"status": "error", "error": "download failed"})
+    ok("um erro sem arquivo nenhum não quebra a limpeza")
+except Exception as e:
+    bad(f"_discard_media levantou sem filepaths: {e!r}")
+
+# Um arquivo que já sumiu (retry, limpeza concorrente) também não pode explodir.
+try:
+    ig_worker._discard_media({"status": "done", "filepaths": ["/tmp/_nao_existe_.mp4"]})
+    ok("arquivo já inexistente é ignorado")
+except Exception as e:
+    bad(f"_discard_media levantou em arquivo ausente: {e!r}")
+
 print("== unit_ig_worker: vídeo também recebe categoria ==")
 
 VOCAB = ["Dev", "Receitas", "Inglês"]

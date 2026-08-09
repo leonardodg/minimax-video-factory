@@ -68,20 +68,20 @@ def process_message(
     categoria = None
     if kind == "video":
         if transcribe is None:
-            return {"status": "error", "error": "no transcribe provided for video"}
+            return {"status": "error", "error": "no transcribe provided for video", "filepaths": filepaths}
         tr = transcribe(filepaths[0])
         if not tr.get("ok"):
-            return {"status": "error", "error": tr.get("error", "transcribe failed")}
+            return {"status": "error", "error": tr.get("error", "transcribe failed"), "filepaths": filepaths}
         text, lang = tr["text"], tr.get("language", "pt")
         doc_type = "video"
     else:
         if describe is None:
-            return {"status": "error", "error": "no describe provided for image"}
+            return {"status": "error", "error": "no describe provided for image", "filepaths": filepaths}
         pieces: list[str] = []
         for fp in filepaths:
             de = describe(fp)
             if not de.get("ok"):
-                return {"status": "error", "error": de.get("error", "describe failed")}
+                return {"status": "error", "error": de.get("error", "describe failed"), "filepaths": filepaths}
             pieces.append(de.get("conteudo_principal") or de.get("text") or "")
             if categoria is None:
                 categoria = de.get("categoria")
@@ -115,7 +115,7 @@ def process_message(
         categories=None if classified else categories,
     )
     if not ing.get("ok"):
-        return {"status": "error", "error": ing.get("error", "ingest failed")}
+        return {"status": "error", "error": ing.get("error", "ingest failed"), "filepaths": filepaths}
 
     return {
         "status": "done",
@@ -200,6 +200,25 @@ def _default_download(message: dict) -> dict:
 
 
 _categories_cache: list[str] | None = None
+
+
+def _discard_media(res: dict) -> None:
+    """Apaga a mídia baixada, tenha a ingestão dado certo ou não.
+
+    O download é rascunho: o que fica é o documento na base. Chamar isto no
+    caminho de erro é o que impede um sync completo de encher o disco, já que
+    a mídia de um post que falhou não tem nenhum uso posterior -- se ele for
+    retentado, baixa de novo.
+    """
+    if not IG_DELETE_AFTER_INGEST:
+        return
+    for fp in (res.get("filepaths") or [res.get("filepath")]):
+        if not fp:
+            continue
+        try:
+            Path(fp).unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("could not delete %s: %s", fp, exc)
 
 
 def _category_vocabulary() -> list[str]:
@@ -302,14 +321,16 @@ def run() -> None:
             ingest=knowledge.ingest_text,
             categories=_category_vocabulary(),
         )
+        # Unconditional: the media is scratch either way. Deleting only on
+        # success meant a failing post left its download behind -- and with the
+        # DLQ retrying up to IG_MAX_ATTEMPTS, one bad post downloaded and
+        # abandoned its file on every attempt. Over a full sync of 2000+ saved
+        # posts that is the difference between a few hundred MB of churn and
+        # filling the disk.
+        _discard_media(res)
+
         if res["status"] == "done":
             logger.info("ingested ig_pk=%s document_id=%s", message["ig_pk"], res["document_id"])
-            if IG_DELETE_AFTER_INGEST:
-                for fp in res.get("filepaths") or [res.get("filepath")]:
-                    try:
-                        Path(fp).unlink(missing_ok=True)
-                    except OSError:
-                        logger.warning("could not delete %s", fp)
             _state = os.environ.get("IG_STATE_FILE", "downloads/ig/state.json")
             try:
                 import json as _json
