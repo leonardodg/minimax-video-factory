@@ -324,6 +324,72 @@ if not (captured.get("extra_tags") or []):
 else:
     bad(f"tags appeared without a collection: {captured.get('extra_tags')!r}")
 
+print("== unit_ig_worker: vídeo também recebe categoria ==")
+
+VOCAB = ["Dev", "Receitas", "Inglês"]
+seen = {}
+
+
+def _ingest_seen(text, **kw):
+    seen.clear()
+    seen.update(kw)
+    return {"ok": True, "document_id": 80}
+
+
+# Video: no vision runs, so the summary model is the only judge there is.
+# Before this, `categoria` was reachable only through describe_image, and 11 of
+# the 12 documents in the first real run were videos -- so in practice almost
+# nothing was ever categorised.
+ig_worker.process_message(
+    MESSAGE,
+    download=lambda m: {"ok": True, "filepath": "/tmp/v.mp4"},
+    transcribe=lambda p: {"ok": True, "text": "conteudo", "language": "pt"},
+    describe=None,
+    ingest=_ingest_seen,
+    categories=VOCAB,
+)
+if seen.get("categories") == VOCAB:
+    ok("video ingestion receives the category vocabulary")
+else:
+    bad(f"video got categories={seen.get('categories')!r}")
+
+# Image: vision already looked at the picture. Asking the summary model to
+# classify the same post again would be a second, weaker opinion.
+ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/a.jpg", "filepaths": ["/tmp/a.jpg"]},
+    transcribe=None,
+    describe=lambda p: {"ok": True, "text": "x", "tipo": "dica",
+                        "categoria": "Dev", "conteudo_principal": "x"},
+    ingest=_ingest_seen,
+    categories=VOCAB,
+)
+if seen.get("categories") is None:
+    ok("image ingestion does not ask again — vision already classified it")
+else:
+    bad(f"image got categories={seen.get('categories')!r}, a duplicate judgement")
+
+if "categoria:Dev" in (seen.get("extra_tags") or []):
+    ok("the vision categoria still becomes the tag for images")
+else:
+    bad(f"vision categoria lost: {seen.get('extra_tags')!r}")
+
+# An image whose vision categoria is "outros" carries no judgement, so the
+# summary model should get its turn.
+ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/a.jpg", "filepaths": ["/tmp/a.jpg"]},
+    transcribe=None,
+    describe=lambda p: {"ok": True, "text": "x", "tipo": "dica",
+                        "categoria": "outros", "conteudo_principal": "x"},
+    ingest=_ingest_seen,
+    categories=VOCAB,
+)
+if seen.get("categories") == VOCAB:
+    ok("'outros' from vision is not a judgement — the summary model gets a turn")
+else:
+    bad(f"'outros' blocked the second attempt: categories={seen.get('categories')!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

@@ -85,18 +85,32 @@ def ingest_text(
     language: str = "pt",
     ig_pk: str | None = None,
     extra_tags: list[str] | None = None,
+    categories: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Summarize+document `text` via the LLM and store it in the knowledge base."""
+    """Summarize+document `text` via the LLM and store it in the knowledge base.
+
+    `categories` asks the summary model to classify the content into that
+    vocabulary; the result lands as a `categoria:<name>` tag. Callers that
+    already know the category -- the Instagram worker does, for images, from
+    the vision model -- should leave it None instead of asking twice.
+    """
     if (unavailable := _kb_unavailable()):
         return unavailable
     if not text or not text.strip():
         return {"ok": False, "error": "empty text"}
 
-    gen = llm.generate_structured(text, is_image=(doc_type == "image"))
+    gen = llm.generate_structured(
+        text, is_image=(doc_type == "image"), categories=categories
+    )
     if not gen.get("ok"):
         return {"ok": False, "stage": "llm", "error": gen.get("error")}
 
-    tags = list(dict.fromkeys([t for t in (gen.get("tags") or []) + (extra_tags or []) if t]))
+    generated_tags = list(gen.get("tags") or [])
+    categoria = (gen.get("categoria") or "").strip()
+    if categoria and categoria.lower() != "outros":
+        generated_tags.append(f"categoria:{categoria}")
+
+    tags = list(dict.fromkeys([t for t in generated_tags + (extra_tags or []) if t]))
 
     session = db.get_session()
     try:

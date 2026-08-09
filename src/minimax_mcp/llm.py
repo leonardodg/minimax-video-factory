@@ -58,15 +58,36 @@ Conteúdo a documentar:
 """
 
 
-def build_summary_prompt(transcription: str, *, is_image: bool = False) -> str:
+def build_summary_prompt(
+    transcription: str,
+    *,
+    is_image: bool = False,
+    categories: list[str] | None = None,
+) -> str:
+    """The summary prompt. With `categories`, it also asks for a `categoria`.
+
+    The vision prompt has always classified into the user's own collection
+    vocabulary, but vision only runs on images -- so videos, which are the bulk
+    of what gets saved, never received a category at all. Asking for it here
+    closes that gap using the same vocabulary and the same "outros" escape
+    hatch, so both paths produce comparable values.
+    """
     image_note = (
         "\nA entrada é a descrição estruturada de uma imagem/post do Instagram. "
         "Extraia dela o conteúdo principal (dica, lista, receita)."
         if is_image
         else ""
     )
+    category_note = ""
+    if categories:
+        category_note = (
+            '\nInclua também a chave "categoria": uma destas categorias — '
+            f'{", ".join(categories)}. Escolha pelo ASSUNTO do conteúdo. '
+            'Se nenhuma combinar, use "outros".'
+        )
     return SUMMARY_PROMPT_TEMPLATE.format(
-        transcription=transcription.strip(), image_note=image_note
+        transcription=transcription.strip(),
+        image_note=category_note + image_note,
     )
 
 
@@ -163,11 +184,20 @@ def generate_structured(
     provider: str | None = None,
     model: str | None = None,
     is_image: bool = False,
+    categories: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Ask the configured LLM for {resumo, tutorial, objetivos, tags} as JSON."""
+    """Ask the configured LLM for {resumo, tutorial, objetivos, tags} as JSON.
+
+    With `categories`, a `categoria` is requested too. It stays OUT of the
+    required keys on purpose: a model that ignores the extra instruction must
+    still produce a usable document rather than failing the whole ingestion
+    over a classification that is nice to have.
+    """
     provider = provider or LLM_PROVIDER
     model = model or LLM_MODEL
-    prompt = build_summary_prompt(transcription, is_image=is_image)
+    prompt = build_summary_prompt(
+        transcription, is_image=is_image, categories=categories
+    )
     try:
         if provider == "ollama":
             raw = _ollama_generate(prompt, model, force_json=True)

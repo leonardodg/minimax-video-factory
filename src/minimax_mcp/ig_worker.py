@@ -44,6 +44,7 @@ def process_message(
     transcribe: Callable[[str], dict] | None,
     describe: Callable[[str], dict] | None,
     ingest: Callable[[str], dict],
+    categories: list[str] | None = None,
 ) -> dict:
     """Download -> transcribe/describe -> ingest. Pure; all IO injected.
 
@@ -92,7 +93,11 @@ def process_message(
     # from a semantic tag the LLM produced, and it was landing on nearly every
     # document, so tag search could not tell "about Dev" from "filed under Dev".
     extra_tags = [f"colecao:{message['collection_name']}"] if message.get("collection_name") else None
-    if categoria and categoria != "outros":
+    # "outros" is the vision model saying none matched -- an absence, not a
+    # classification. It must not be tagged, and it must not count as "already
+    # classified" further down either.
+    classified = bool(categoria) and categoria != "outros"
+    if classified:
         extra_tags = (extra_tags or []) + [f"categoria:{categoria}"]
     ing = ingest(
         text,
@@ -103,6 +108,11 @@ def process_message(
         language=lang,
         ig_pk=message.get("ig_pk"),
         extra_tags=extra_tags,
+        # Only when vision did not already classify it. Vision looks at the
+        # picture; the summary model only ever sees words, so it is the weaker
+        # judge -- but for a video it is the only one there is, and videos are
+        # the bulk of what gets saved.
+        categories=None if classified else categories,
     )
     if not ing.get("ok"):
         return {"status": "error", "error": ing.get("error", "ingest failed")}
@@ -192,21 +202,28 @@ def _default_download(message: dict) -> dict:
 _categories_cache: list[str] | None = None
 
 
-def _default_describe(filepath: str) -> dict:
-    """Describe an image with the category vocabulary threaded in.
+def _category_vocabulary() -> list[str]:
+    """The user's collection names, fetched once per process.
 
-    Fetches the category list once per process and reuses it for every
-    describe call, so the worker doesn't hit instagrapi per message.
+    Instagram rate-limits hard (the second full sync of the morning came back
+    with 429s), so this must never become per-message. Falls back to the
+    built-in vocabulary when the fetch fails.
     """
     global _categories_cache
     if _categories_cache is None:
-        try:
-            from minimax_mcp import ig_sync
+        from minimax_mcp import ig_sync
 
+        try:
             _categories_cache = ig_sync.list_categories(ig_sync.make_client())
-        except Exception:
+        except Exception as exc:
+            logger.warning("could not read collections, using defaults: %s", exc)
             _categories_cache = ig_sync.list_categories(None)
-    return llm.describe_image(filepath, categories=_categories_cache)
+    return _categories_cache
+
+
+def _default_describe(filepath: str) -> dict:
+    """Describe an image with the category vocabulary threaded in."""
+    return llm.describe_image(filepath, categories=_category_vocabulary())
 
 
 def _default_transcribe(filepath: str) -> dict:
@@ -283,6 +300,7 @@ def run() -> None:
             transcribe=_default_transcribe,
             describe=_default_describe,
             ingest=knowledge.ingest_text,
+            categories=_category_vocabulary(),
         )
         if res["status"] == "done":
             logger.info("ingested ig_pk=%s document_id=%s", message["ig_pk"], res["document_id"])
