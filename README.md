@@ -229,13 +229,39 @@ cp .env.example .env          # edit PROJECT_ROOT, MODELS_DIR, OUTPUT_DIR
 ### Generate a scene
 
 ```
-/minimax-gerar-video "a hungry black cat staring at an empty food bowl,
-                      close-up, soft kitchen daylight, faint meow"
+/minimax-gerar-video "2D hand-drawn animation, a small orange fox runs across a
+                      snowy hill and leaps into the air, flat colours, bold ink
+                      outlines, Studio Ghibli style.
+                      Audio: crunching snow, a playful flute melody"
 ```
 
-<img width="360" alt="Generated cat clip" src="docs/assets/demo-cat.gif">
+<img width="360" alt="Hand-drawn fox leaping over a snowy hill" src="docs/assets/demo-cartoon.gif">
 
-*512×320, 5 s, ~4 min. Rendered with native audio — the meow is generated, not added.*
+*1024×576, 5 s, 871 s to render. The flute and the crunching snow are generated
+in the same pass as the picture — no audio track was added afterwards.*
+
+### Four clips, four subjects
+
+Text prompts only — no reference image. All 1024×576, 5 s, INT8 weights on a
+12 GB card. The GIFs below are silent; every clip has native stereo audio.
+
+<table>
+<tr>
+<td width="50%"><img alt="Hand-drawn fox leaping over a snowy hill" src="docs/assets/demo-cartoon.gif"><br>
+<sub><b>Animation</b> — flat colours, bold ink outlines, Studio Ghibli style. <b>871 s</b></sub></td>
+<td width="50%"><img alt="Dark coffee pouring into a white cup in slow motion" src="docs/assets/demo-liquid.gif"><br>
+<sub><b>Liquid</b> — slow-motion pour, steam, soft morning light. <b>848 s</b></sub></td>
+</tr>
+<tr>
+<td width="50%"><img alt="Red sports car on a rain-soaked neon street at night" src="docs/assets/demo-action.gif"><br>
+<sub><b>Action</b> — neon reflections on wet asphalt, camera tracking. <b>852 s</b></sub></td>
+<td width="50%"><img alt="Astronaut walking across a red desert planet under two suns" src="docs/assets/demo-scifi.gif"><br>
+<sub><b>Sci-fi</b> — red desert, twin suns, dust around the boots. <b>851 s</b></sub></td>
+</tr>
+</table>
+
+Four different subjects, **851–871 s** — a 2% spread. Render cost tracks
+`width × height × frames`, not how hard the scene looks.
 
 ### Reel → transcription → new video
 
