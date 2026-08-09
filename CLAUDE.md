@@ -76,8 +76,40 @@ dentro de `integrated_multimodal_description` / `overall_soundscape` / `non_dieg
 **Diálogo em português funciona** (medido 2026-08-09): Whisper large-v3 devolveu as
 falas escritas **palavra por palavra**, com `(S1)` e `(S2)` virando dois turnos
 separados. Densidade que coube com folga: **2 falas em 5 s, 4 falas em 15 s**,
-distribuídas ao longo do clipe. Descrever o timbre junto do personagem
-(*"hoarse mocking voice"*) faz parte da sintaxe, não é enfeite.
+distribuídas ao longo do clipe.
+
+### A voz precisa de uma ficha travada, senão ela troca
+
+Não existe `first_audio` — o nó só aceita imagem. Cada clipe **reinventa o timbre**
+a partir do texto, e uma descrição vaga (*"bright childlike voice"*) deixa o modelo
+escolher de novo a cada render. Medido por F0 (`~/bkp/minimax-night/voice_check.py`)
+nas MESMAS seis falas, antes e depois:
+
+| fala | quem | descrição vaga | ficha travada |
+|---|---|---|---|
+| primeira do vídeo | raposa (aguda) | **116 Hz** ❌ | **235 Hz** ✓ |
+| depois da emenda | corvo (grave) | **254 Hz** ❌ | **113 Hz** ✓ |
+| as outras quatro | — | ✓ | ✓ |
+
+O defeito **não** é o clipe inteiro subir de tom: é `(S1)`/`(S2)` não ficarem
+amarrados a vozes distintas — pior na primeira fala do clipe e logo depois de uma
+emenda. A ficha travada zerou isso: o corvo ficou em 107 → 96 → 113 Hz ao longo de
+30 s e atravessando um corte de cena (dispersão de 2,7 semitons, que é expressão).
+
+A ficha vai **antes de qualquer ação**, declarada como invariante, com idade, sexo,
+registro, textura, velocidade e sotaque:
+
+```
+Character voices, identical in every shot and never changing:
+(S1) is <personagem>, a young girl's voice, high and clear, light and breathy,
+     quick eager delivery, Brazilian Portuguese;
+(S2) is <personagem>, an old man's voice, low and hoarse, dry and gravelly,
+     slow amused delivery, Brazilian Portuguese.
+```
+
+⚠️ **Ao medir, olhe a dispersão POR PERSONAGEM, não por capítulo.** A média por
+capítulo mistura os dois e acusa salto onde só houve distribuição desigual das
+falas — quase virou conclusão errada em 2026-08-09.
 
 ## Durações longas: encadeamento de frame
 
@@ -101,10 +133,33 @@ prompt faz avançar), e **cada prompt tem de recarregar as âncoras de estilo** 
 modelo só enxerga *um* quadro do passado, não os clipes anteriores.
 
 **O áudio não é encadeado.** Não existe `first_audio`: cada capítulo inventa a trilha
-do zero (degrau medido de até 31,7 dB). Duas defesas: `non_diegetic_music` **idêntico,
-literalmente**, em todos os capítulos; e `scripts/unify_audio.py` depois (ganho
-estático até −21 LUFS + limitador + fades de 80 ms, **nunca `acrossfade`**, que
-dessincroniza).
+do zero. Três defesas: `non_diegetic_music` **idêntico, literalmente**, em todos os
+capítulos (derrubou o degrau de 31,7 dB da rodada 2 para **0,2 dB**); a ficha de voz
+travada, acima; e `unify_audio3.py` depois (ganho estático até −21 LUFS + limitador
++ fades de 80 ms).
+
+**O degrau de áudio cresce com o número de capítulos**, mesmo com direção idêntica:
+2 capítulos → 0,2 dB · 4 capítulos → 5,2 dB · 6 capítulos (rodada 2) → 8,3 a 31,7 dB.
+Mais uma razão para preferir poucos clipes longos a muitos curtos.
+
+### Emenda: três tratamentos, e o melhor não é o mais óbvio
+
+- **Cruzamento** (`smooth_seam.py`): `xfade` no vídeo **e** `acrossfade` no áudio
+  **pela mesma duração**. A proibição antiga do `acrossfade` valia para ele sozinho
+  — aí ele encurta só o áudio e dessincroniza. Cruzando as duas trilhas igual, a
+  sincronia se mantém (medido: 17 ms de diferença em 29,6 s, menos de meio quadro).
+- **Corte de cena**: não encadear, e anunciar `Cut to a new shot from a different
+  angle`. O que incomoda numa emenda encadeada não é a cena mudar — é ela ser
+  *quase* a mesma e não exatamente; o olho perdoa um corte e não perdoa um plano
+  que escorrega. Exige **ficha de elenco** (`cast_lock`), porque sem quadro
+  atravessando a emenda nada garante que o personagem continue o mesmo.
+- **Abrir em repouso**: o capítulo N já fechava parado, mas o N+1 abria em
+  movimento — imagem contínua, movimento aos saltos. As duas pontas têm de ser
+  repouso.
+
+**Efeito colateral medido:** descrever os personagens em detalhe (a ficha de elenco)
+faz o modelo **enquadrá-los mais perto** por conta própria. Resolveu de graça a
+queixa de "o personagem ocupa 5% do quadro".
 
 ---
 
