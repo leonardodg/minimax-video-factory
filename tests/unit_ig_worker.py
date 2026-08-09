@@ -200,7 +200,8 @@ class FakeClientDownload(FakeClient):
         p.write_bytes(b"x")
         return str(p)
 
-import minimax_mcp.ig_sync as ig_sync
+from minimax_mcp import ig_sync
+
 _orig_make_client = ig_sync.make_client
 ig_sync.make_client = lambda: FakeClientDownload(FakeInfo(8, [FakeRes(1, "p1"), FakeRes(2, "v2")]))
 try:

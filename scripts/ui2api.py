@@ -42,9 +42,7 @@ def is_primitive(info: dict) -> bool:
     if t in PRIMITIVE_TYPES:
         return True
     # "INT" etc. may be wrapped: ['INT', {'default': ...}]
-    if isinstance(t, list) and t and t[0] in PRIMITIVE_TYPES:
-        return True
-    return False
+    return isinstance(t, list) and bool(t) and t[0] in PRIMITIVE_TYPES
 
 
 def inputs_ordered(node_def: dict) -> list[dict]:
@@ -65,7 +63,7 @@ def convert(ui: dict, obj_info: dict, comfy_url: str) -> dict:
     for link in ui.get("links", []):
         if len(link) < 5:
             continue
-        link_id, from_node, from_slot, to_node, to_slot = link[:5]
+        _link_id, from_node, from_slot, to_node, to_slot = link[:5]
         link_map[(to_node, to_slot)] = (from_node, from_slot)
 
     for node in ui.get("nodes", []):
@@ -103,12 +101,10 @@ def convert(ui: dict, obj_info: dict, comfy_url: str) -> dict:
                     api_inputs[name] = list(src)
                 continue
 
-            # No link -> try to consume a primitive widget value
-            if is_primitive(info):
-                if widget_values:
-                    val = widget_values.pop(0)
-                    api_inputs[name] = val
-                # if no widget value left, omit (ComfyUI uses default)
+            # No link -> try to consume a primitive widget value.
+            # If no widget value is left, omit it (ComfyUI uses the default).
+            if is_primitive(info) and widget_values:
+                api_inputs[name] = widget_values.pop(0)
             # non-primitive without link -> leave out (null/default)
 
         # SaveVideo: ensure filename_prefix exists (usually first widget)

@@ -5,11 +5,12 @@ import sys
 from logging.config import fileConfig
 from pathlib import Path
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-from minimax_mcp.db import Base  # noqa: E402
+from minimax_mcp.db import Base
 
 config = context.config
 if config.config_file_name is not None:
