@@ -14,11 +14,16 @@ models/
 # Generated videos & outputs
 downloads/
 output/
+input/
 comfyui/output/
 
 # Environment / secrets
+# Every .env variant, not just the two by name: .env.bak-int4 was sitting here
+# untracked with a live OPENAI_API_KEY, one `git add -A` away from a public
+# repo. .env.example is the template and stays versioned.
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 
 # OS / editor
@@ -35,6 +40,8 @@ site/
 
 # Git worktrees
 .worktrees/
+
+.rabbitmq
 
 # Claude Code per-machine permissions. `.claude/commands/` IS versioned (it is
 # generated from the code, like .opencode/command/); this one file is not.
