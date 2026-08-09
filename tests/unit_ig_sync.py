@@ -43,7 +43,8 @@ items = [
     Media("1003", 8),
     Media(None, 2),
 ]
-msgs = ig_sync.to_messages(items)
+entries = [{"media": m, "collection_name": None} for m in items]
+msgs = ig_sync.to_messages(entries)
 
 if len(msgs) == 3:
     ok("to_messages keeps video/image/carousel, drops pk-less")
@@ -69,6 +70,11 @@ if msgs[1]["media_type"] == "image" and msgs[2]["media_type"] == "carousel":
 else:
     bad(f"media types = {[m['media_type'] for m in msgs]}")
 
+if ig_sync.to_messages([{"media": Media("2001", 2), "collection_name": "Receitas"}])[0]["collection_name"] == "Receitas":
+    ok("to_messages carries the collection name")
+else:
+    bad("collection_name not propagated")
+
 print("== unit_ig_sync: split_new ==")
 new, skipped = ig_sync.split_new(msgs, existing_pks={"1001"})
 if len(new) == 2 and skipped == 1:
@@ -76,17 +82,46 @@ if len(new) == 2 and skipped == 1:
 else:
     bad(f"split_new = new={len(new)} skipped={skipped}")
 
+print("== unit_ig_sync: saved_posts (modern API) ==")
+class Col:
+    def __init__(self, cid, name, ctype):
+        self.id, self.name, self.type = cid, name, ctype
+
+
+class FakeClient:
+    def collections(self):
+        return [
+            Col("ALL_MEDIA_AUTO_COLLECTION", "All posts", "ALL_MEDIA_AUTO_COLLECTION"),
+            Col("c2", "Receitas", "MEDIA"),
+        ]
+
+    def collection_medias(self, cid, amount=200):
+        return {
+            "ALL_MEDIA_AUTO_COLLECTION": items[:2],
+            "c2": [items[2]],
+        }[cid]
+
+    def saved_posts(self):  # legacy path, not exercised here
+        return items
+
+
+collected = ig_sync.saved_posts(FakeClient())
+if len(collected) == 3:
+    ok("saved_posts collects All posts + named collections")
+else:
+    bad(f"saved_posts returned {len(collected)} entries")
+names = {e["collection_name"] for e in collected}
+if names == {"Todos os posts", "Receitas"}:
+    ok("collection names map correctly (All posts -> Todos os posts)")
+else:
+    bad(f"collection names = {names}")
+
 print("== unit_ig_sync: sync_saved_posts ==")
 published = []
 
 
 def fake_publish(msg):
     published.append(msg)
-
-
-class FakeClient:
-    def saved_posts(self):
-        return items
 
 
 result = ig_sync.sync_saved_posts(FakeClient(), existing_pks={"1001"}, publish_fn=fake_publish)

@@ -27,18 +27,54 @@ def make_client() -> Any:
 
     client = Client()
     client.delay_range = [1, 3]  # avoid Instagram checkpoint/rate-limit
-    client.set_sessionid(IG_SESSIONID)
+    # instagrapi renamed set_sessionid -> login_by_sessionid (v2+); the old
+    # name was removed, not just deprecated.
+    login = getattr(client, "login_by_sessionid", None)
+    if login is None:
+        login = getattr(client, "set_sessionid")
+    login(IG_SESSIONID)
     return client
 
 
-def to_messages(media_items: list[Any]) -> list[dict]:
-    """Map instagrapi Media-like objects to queue message dicts.
+def saved_posts(client: Any, max_per_collection: int = 200) -> list[dict]:
+    """Enumerate saved posts across the "All posts" collection + named ones.
 
-    Duck-typed on .pk/.media_type/.caption_text/.user.username so tests can
-    pass simple stand-ins. Skips items with no pk or unknown media_type.
+    instagrapi v2 renamed saved_posts() to collections()/collection_medias();
+    older versions keep saved_posts(). This prefers the modern API (which also
+    carries the collection name for the message) and falls back to the legacy
+    single list.
+
+    Returns a flat list of {"media": Media, "collection_name": str} dicts.
+    """
+    if hasattr(client, "collection_medias"):
+        results: list[dict] = []
+        cols = list(client.collections())
+        for col in cols:
+            if getattr(col, "type", "") == "ALL_MEDIA_AUTO_COLLECTION":
+                name = "Todos os posts"
+            else:
+                name = getattr(col, "name", "") or "sem coleção"
+            try:
+                medias = list(client.collection_medias(col.id, amount=max_per_collection))
+            except Exception:
+                continue
+            for m in medias:
+                results.append({"media": m, "collection_name": name})
+        return results
+    # Legacy API
+    return [{"media": m, "collection_name": None} for m in client.saved_posts()]
+
+
+def to_messages(items: list[dict]) -> list[dict]:
+    """Map saved-post entries (from saved_posts) to queue message dicts.
+
+    `items` is a list of {"media": Media-like, "collection_name": str}. The
+    Media is duck-typed on .pk/.media_type/.caption_text/.user.username so tests
+    can pass simple stand-ins. Skips items with no pk or unknown media_type.
     """
     messages: list[dict] = []
-    for m in media_items:
+    for entry in items:
+        m = entry["media"]
         pk = getattr(m, "pk", None)
         media_type = MEDIA_TYPES.get(getattr(m, "media_type", None))
         if not pk or not media_type:
@@ -52,7 +88,7 @@ def to_messages(media_items: list[Any]) -> list[dict]:
             "url": f"https://www.instagram.com/p/{pk}/",
             "title": title,
             "owner_username": getattr(user, "username", None),
-            "collection_name": getattr(m, "collection_name", None),
+            "collection_name": entry.get("collection_name"),
             "status": "queued",
         })
     return messages
@@ -81,7 +117,7 @@ def sync_saved_posts(
     `publish_fn` is injected so the tool can wire it to ig_queue.publish with a
     real channel while tests pass a recorder.
     """
-    posts = list(client.saved_posts())
+    posts = saved_posts(client)
     messages = to_messages(posts)
     new, skipped = split_new(messages, existing_pks)
     for msg in new:

@@ -307,6 +307,47 @@ into the KB with `ig_pk` dedup, and optionally deletes the downloaded file
   `OLLAMA_VISION_MODEL`).
 - O daemon consome a fila com `uv run python -m minimax_mcp.ig_worker`.
 
+### 7.1 Como pegar o `IG_SESSIONID` (tutorial)
+
+O `IG_SESSIONID` é o valor do cookie `sessionid` do Instagram com a conta logada.
+**Nunca** use a senha — só o cookie. Ele expira (horas a dias), então refaça
+este procedimento quando o sync parar de funcionar.
+
+> **Aviso para Chrome 127+ (criptografia app-bound):** o yt-dlp extrai cookies
+> do navegador (`--cookies-from-browser chrome`), mas desde o Chrome 127 o
+> `sessionid` fica criptografado de um jeito que as ferramentas de script **não
+> conseguem descriptografar**. A única forma confiável é copiar o valor
+> manualmente pelo DevTools, como abaixo. Não perca tempo tentando automatizar.
+
+1. **Faça login no Instagram** no navegador (na conta que tem os posts salvos).
+2. Abra o DevTools: `F12` → aba **Application** (ou **Aplicativo**).
+3. No menu esquerdo: **Storage → Cookies → `https://www.instagram.com`**.
+4. Na lista de cookies procure a linha **`sessionid`**.
+5. Clique na célula **Value** e copie o valor inteiro (algo como
+   `123456%3AabcDEFghiJKL%3A12`).
+6. No `.env` do projeto, preencha sem aspas:
+   ```bash
+   IG_SESSIONID=<valor-copiado>
+   ```
+7. Recrie o worker para carregar a env nova:
+   ```bash
+   source scripts/config.sh
+   docker compose $COMPOSE_ARGS up -d --force-recreate ig-worker
+   ```
+
+**Teste rápido** (o instagrapi valida a sessão sozinho):
+```bash
+uv run python -c "from minimax_mcp.ig_sync import make_client; c=make_client(); p=list(c.saved_posts()); print(f'sessao OK, {len(p)} posts salvos')"
+```
+Se isso falhar com checkpoint/login, o cookie expirou — refaça os passos 1–5.
+
+**Nota sobre o download:** o `ig-worker` baixa o mídia **via instagrapi autenticado**
+(usa o mesmo `IG_SESSIONID` da enumeração), então posts salvos/privados funcionam
+sem cookies extras. Só se o `IG_SESSIONID` estiver vazio (ou o download por
+instagrapi falhar) ele cai para yt-dlp — posts **públicos** funcionam anônimos;
+posts de conta **privada** exigem cookies (`IG_COOKIES_FILE` com um
+`cookies.txt` Netscape exportado do navegador logado).
+
 **Golden rule:** nunca rebuild/restart do stack (nem o container do ComfyUI)
 enquanto a fila de render estiver ocupada — confira antes com `queue_status`.
 O ig-worker compartilha a GPU com o renderer H3; um restart no meio do ingest

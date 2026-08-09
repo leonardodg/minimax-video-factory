@@ -99,11 +99,36 @@ def apply_command(state: dict, command: str) -> str:
 
 
 def _default_download(message: dict) -> dict:
+    """Download the media for a saved post.
+
+    Prefers the authenticated instagrapi client (the worker already has
+    IG_SESSIONID, and saved/private posts are unreachable by anonymous yt-dlp),
+    falling back to yt-dlp (public posts, or when IG_SESSIONID is unset).
+    """
+    url = message.get("url", "")
+    pk = message.get("ig_pk", "")
+    if pk:
+        try:
+            IG_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+            from minimax_mcp import ig_sync
+
+            client = ig_sync.make_client()
+            client.delay_range = [0.5, 1.0]
+            info = client.media_info(pk)
+            if getattr(info, "media_type", None) == 1:
+                out = client.photo_download(pk, folder=str(IG_DOWNLOADS_DIR))
+            else:
+                out = client.clip_download(pk, folder=str(IG_DOWNLOADS_DIR))
+            if out and Path(out).exists():
+                return {"ok": True, "filepath": str(Path(out))}
+        except Exception as e:
+            logger.warning("instagrapi download failed for %s: %s", pk, e)
+
     from minimax_mcp.downloader import VideoDownloader
 
     IG_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
     downloader = VideoDownloader(output_dir=IG_DOWNLOADS_DIR, browser="chrome")
-    return downloader.download(message.get("url", ""))
+    return downloader.download(url)
 
 
 def _default_transcribe(filepath: str) -> dict:

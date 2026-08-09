@@ -25,8 +25,20 @@ class VideoDownloader:
         self.browser = browser
         self.format_spec = format_spec
 
+    @property
+    def cookies_file(self) -> str | None:
+        """Path to a Netscape cookies.txt, from IG_COOKIES_FILE or COOKIES_FILE.
+
+        Preferred over browser cookies when set: inside the Docker container
+        there is no Chrome profile, and Chrome 127+ app-bound encryption makes
+        `cookiesfrombrowser` unable to read the sessionid anyway. A cookies.txt
+        exported from the logged-in browser is the reliable source for private
+        Instagram content.
+        """
+        return os.environ.get("IG_COOKIES_FILE") or os.environ.get("COOKIES_FILE") or None
+
     def _build_ydl_opts(self, use_cookies: bool = True) -> dict[str, Any]:
-        """Build yt-dlp options, optionally with browser cookie support."""
+        """Build yt-dlp options, optionally with cookie support."""
         opts: dict[str, Any] = {
             "outtmpl": str(self.output_dir / "%(title)s.%(ext)s"),
             "format": self.format_spec,
@@ -38,16 +50,21 @@ class VideoDownloader:
             "format_sort": ["ext:mp4", "res:1080", "res:720", "res:480"],
         }
         if use_cookies:
-            opts["cookiesfrombrowser"] = (self.browser,)
+            cf = self.cookies_file
+            if cf:
+                opts["cookiefile"] = cf
+            else:
+                opts["cookiesfrombrowser"] = (self.browser,)
         return opts
 
     def download(self, url: str) -> dict[str, Any]:
         """
         Download a video from the given URL.
 
-        Tries browser cookies first, then falls back to an anonymous download when
-        the cookie DB is unavailable (e.g. container without the browser profile,
-        browser running/locked, or no keyring to decrypt the cookies).
+        Tries browser cookies (or cookies.txt if IG_COOKIES_FILE is set) first,
+        then falls back to an anonymous download when the cookie source is
+        unavailable (e.g. container without the browser profile, browser
+        running/locked, or no keyring to decrypt the cookies).
 
         Args:
             url: Video URL (Instagram Reel, YouTube, etc.)
