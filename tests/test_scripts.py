@@ -91,6 +91,12 @@ def test_unit_ig_worker():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.unit
+def test_unit_transcriber():
+    result = _run_script("unit_transcriber.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.integration_db
 def test_container_deps():
     """The image the README tells users to configure must be able to import

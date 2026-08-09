@@ -1,6 +1,7 @@
 """Audio transcriber using faster-whisper (local, GPU-accelerated)."""
 from __future__ import annotations
 
+import gc
 import logging
 from pathlib import Path
 from typing import Any, ClassVar
@@ -143,20 +144,22 @@ class AudioTranscriber:
         the load; but a loaded whisper keeps its weights resident on the GPU,
         which can starve Ollama (lfm2:24b needs ~6 GB) on the same 12 GB card.
         Call this between the Whisper step and the LLM step in a long pipeline.
+
+        Dropping the cache entry is what actually frees the memory. The model
+        is a CTranslate2 object that owns its CUDA allocation and releases it
+        from its destructor, so the VRAM comes back when the last reference
+        goes away; `gc.collect()` covers the case where a reference cycle keeps
+        it alive past the `del`.
+
+        Deliberately no `torch.cuda.empty_cache()` here. faster-whisper does
+        not allocate through PyTorch, so that call frees nothing it holds --
+        and torch is imported nowhere else in this project, so importing it
+        just to make the call would initialise a CUDA context worth a few
+        hundred MB on the very card this method exists to free.
         """
         cache_key = f"{self.model_size}-{self.device}-{self.compute_type}"
-        if cache_key in self._model_cache:
-            try:
-                del self._model_cache[cache_key]
-            except Exception:
-                pass
-        try:
-            import torch
-
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        self._model_cache.pop(cache_key, None)
+        gc.collect()
 
 
 def transcribe_video(
