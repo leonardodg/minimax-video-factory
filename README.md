@@ -196,43 +196,79 @@ The answer comes only from your own knowledge base, with the sources cited.
 
 ## ✍️ What actually improves a clip
 
-Measured, not guessed. Four renders of the same photograph with the same seed,
-changing one thing at a time:
+Measured, not guessed — and the first conclusion turned out to be too broad.
+
+### Subject tolerance is the real lever
+
+<img width="400" alt="Sea at dawn, 512x320, text only" src="docs/assets/demo-sea.gif">
+
+*512×320, 5 s, text prompt only, no reference image, ~4 min. Better than clips
+rendered at twice the resolution.*
+
+That clip is the smallest, cheapest thing this repo produced, and it beats the
+aerial city rendered at 1024×576 with a photograph to work from. The model did
+not get better. **The subject got easier to represent.**
+
+| Forgiving — works even at 512×320 | Unforgiving — struggles at any resolution here |
+|---|---|
+| Water, waves, surf | Faces in close-up |
+| Clouds, mist, smoke | Legible text of any size |
+| Light, glow, reflections | Detailed architecture |
+| Wide landscape, horizon | Crowds of people |
+| Slow organic motion | Hundreds of small objects (a city from above) |
+
+Everything on the left is a continuous texture with no small object that must
+come out *right*. Everything on the right asks diffusion for precision it does
+not have — and no prompt, resolution or step count fixes that.
+
+### Resolution matters, but only for the right subject
 
 | | Resolution | Prompt style | Time | Result |
 |---|---|---|---|---|
-| A | 512×320, 15 s | loose prose | 14 min | fine detail dissolves into noise |
-| B | 1024×576, 5 s | loose prose | **3 min** | buildings, bridge and hills all legible |
-| C | 1024×576, 5 s | HuggingFace structured format | 16 min | no visible gain over B |
+| A | 512×320, 15 s | loose prose | 14 min | city dissolves into noise |
+| B | 1024×576, 5 s | loose prose | **3 min** | buildings and bridge legible |
+| C | 1024×576, 5 s | model-card format | 16 min | no visible gain over B |
 | D | 1024×576, 5 s | ComfyUI template format | 20 min | no visible gain over B |
 
-**Resolution is the lever.** A → B is a large, unambiguous jump: a city that was
-a grey smear at 512 px becomes a street grid at 1024 px. It was never "detail
-dissolving in the diffusion" — the detail did not fit in 512 pixels.
+A → B is a real jump, but only because the subject was a *city*: thousands of
+buildings that cannot fit in 512 pixels. For the sea, the extra pixels would
+have bought nothing.
 
-**Prompt format is not.** Three formats that disagree with each other — loose
-prose, the model card's `integrated_multimodal_description:` fields, and the
-ComfyUI template's `<Picture 1>` / `SHOT 1:` convention — produced the same
-clip. Write clearly and stop optimising.
+### Prompt format is not a lever
 
-**A `first_frame` is the other lever.** Give the model a picture and it keeps
-the composition and animates it; ask it to invent one from text and it will,
-badly. Compare the hero clip above with what the same idea produced from text
-alone: an unrecognisable cyan smear.
+Three mutually contradictory formats — loose prose, the model card's
+`integrated_multimodal_description:` fields, and the ComfyUI template's
+`<Picture 1>` / `SHOT 1:` convention — produced the same clip. Write clearly and
+stop optimising.
+
+### Steps are not a lever either
+
+| Steps | Time | Result |
+|---|---|---|
+| 20 | **3 min** | baseline |
+| 30 | 24 min | no visible gain |
+| 40 | 32 min | no visible gain, some vertical artefacts |
+
+Eight times the wall-clock for nothing. 20 is where this model saturates here.
 
 ### So, in order
 
-1. **Render at 1024×576**, not lower. On 12 GB that is the ceiling; a 5 s clip
-   there beats a 15 s clip at 512×320 on both quality *and* wall-clock time.
-2. **Start from an image** whenever the look matters.
-3. **Describe plainly** — subject, what moves, the light, and an audio cue.
-   H3 generates sound, and a prompt with no audio wastes half the model.
-4. **Need something longer?** Render several clips and join them with
+1. **Pick a forgiving subject.** This decides more than every other setting
+   combined.
+2. **Start from an image** (`first_frame`) when the composition matters — the
+   model keeps it and animates it, instead of inventing one badly.
+3. **Render at 1024×576** if the subject has fine detail. If it does not,
+   512×320 in 4 minutes is the better trade.
+4. **Describe plainly** — subject, what moves, the light, and an audio cue. H3
+   generates sound, and a prompt with no audio wastes half the model.
+5. **Need something longer?** Render several clips and join them with
    `compose_final`. One long low-res take is the worst of both.
 
-**Video models do not write legible text.** Draw it into the base image and let
-H3 light it. The hero clip above is a title card drawn with ffmpeg's `drawtext`,
-handed to H3 as a `first_frame`.
+### Text does not survive
+
+Video models do not write. Draw text into the base image and let H3 light it —
+the title card at the top of this README is exactly that, `drawtext` handed to
+H3 as a `first_frame`.
 
 Even then, **small text degrades**. In that render the 17 px caption came back
 reading `local CPU · 22 GB VRAM` instead of `local GPU · 12 GB VRAM` — the model
