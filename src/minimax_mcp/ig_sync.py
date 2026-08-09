@@ -85,9 +85,13 @@ def saved_posts(client: Any, max_per_collection: int = 200) -> list[dict]:
         cols = list(client.collections())
         for col in cols:
             if getattr(col, "type", "") == "ALL_MEDIA_AUTO_COLLECTION":
-                name = "Todos os posts"
+                # The catch-all holds every saved post, so its name carries no
+                # information -- but it was being written as a tag on almost
+                # every document, diluting tag search for nothing. None means
+                # "no collection", and the worker then adds no tag.
+                name = None
             else:
-                name = getattr(col, "name", "") or "sem coleção"
+                name = getattr(col, "name", "") or None
             try:
                 medias = list(client.collection_medias(col.id, amount=max_per_collection))
             except Exception as exc:
@@ -118,7 +122,11 @@ def to_messages(items: list[dict]) -> list[dict]:
         if not pk or not media_type:
             continue
         caption = (getattr(m, "caption_text", "") or "").strip()
-        title = caption.splitlines()[0][:80] if caption else "sem título"
+        # None, not "sem título": knowledge.ingest_text already derives a title
+        # from the generated summary when none is given, and a placeholder here
+        # is truthy enough to block it -- which is how a document ended up
+        # literally titled "sem título".
+        title = caption.splitlines()[0][:80] if caption else None
         user = getattr(m, "user", None)
         messages.append({
             "ig_pk": str(pk),
@@ -132,11 +140,40 @@ def to_messages(items: list[dict]) -> list[dict]:
     return messages
 
 
+def dedupe_by_pk(messages: list[dict]) -> list[dict]:
+    """One message per ig_pk, preferring the one that names a collection.
+
+    `saved_posts` yields one entry per (post, collection) pair, so a post saved
+    in three collections becomes three messages. They all carry the same media
+    and the worker acks the extras via `document_exists` -- but whichever one
+    happens to be consumed FIRST decides the document's collection tag, and the
+    catch-all (collection_name=None) is as likely to win as the real one. That
+    is how a post filed under "Dev" could land with no collection at all.
+
+    Order is preserved so the priority ordering a caller applies still holds.
+    """
+    best: dict[str, dict] = {}
+    order: list[str] = []
+    for msg in messages:
+        pk = msg["ig_pk"]
+        if pk not in best:
+            best[pk] = msg
+            order.append(pk)
+        elif not best[pk].get("collection_name") and msg.get("collection_name"):
+            best[pk] = msg
+    return [best[pk] for pk in order]
+
+
 def split_new(messages: list[dict], existing_pks: set[str]) -> tuple[list[dict], int]:
-    """Partition messages into not-yet-ingested vs already-known ig_pks."""
+    """Partition messages into not-yet-ingested vs already-known ig_pks.
+
+    Deduplicates within the batch first: `existing_pks` only knows what is
+    already in the database, so without this a post saved in three collections
+    is published three times on the very first sync.
+    """
     new: list[dict] = []
     skipped = 0
-    for msg in messages:
+    for msg in dedupe_by_pk(messages):
         if msg["ig_pk"] in existing_pks:
             skipped += 1
         else:

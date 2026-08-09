@@ -273,6 +273,57 @@ if res["status"] == "done" and res["kind"] == "image":
 else:
     bad(f"legacy describe process = {res!r}")
 
+print("== unit_ig_worker: a tag de coleção é namespeada ==")
+
+captured = {}
+
+
+def _ingest_capture(text, **kw):
+    captured.update(kw)
+    return {"ok": True, "document_id": 71}
+
+
+def _describe_plain(path):
+    return {"ok": True, "text": "x", "tipo": "dica",
+            "categoria": "outros", "conteudo_principal": "x"}
+
+
+ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel", "collection_name": "Dev"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/a.jpg", "filepaths": ["/tmp/a.jpg"]},
+    transcribe=None, describe=_describe_plain, ingest=_ingest_capture,
+)
+tags = captured.get("extra_tags") or []
+
+if "colecao:Dev" in tags:
+    ok("the collection lands as colecao:<name>")
+else:
+    bad(f"expected colecao:Dev, got {tags!r}")
+
+# A bare name is indistinguishable from a tag the LLM produced, which is how
+# "Todos os posts" ended up on 11 of 12 documents as if it meant something.
+if "Dev" not in tags:
+    ok("the bare collection name is not written as a tag")
+else:
+    bad(f"bare collection name still present: {tags!r}")
+
+# categoria == "outros" carries no information and must stay out.
+if not any(t.startswith("categoria:") for t in tags):
+    ok("categoria 'outros' is not tagged")
+else:
+    bad(f"'outros' was tagged: {tags!r}")
+
+captured.clear()
+ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel", "collection_name": None},
+    download=lambda m: {"ok": True, "filepath": "/tmp/a.jpg", "filepaths": ["/tmp/a.jpg"]},
+    transcribe=None, describe=_describe_plain, ingest=_ingest_capture,
+)
+if not (captured.get("extra_tags") or []):
+    ok("no collection means no tag at all")
+else:
+    bad(f"tags appeared without a collection: {captured.get('extra_tags')!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
