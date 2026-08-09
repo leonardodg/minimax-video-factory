@@ -99,28 +99,28 @@ def apply_command(state: dict, command: str) -> str:
     return "unknown"
 
 
-def _pick_download_target(client: Any, pk: str) -> tuple[str, str]:
-    """Choose the download method + media pk for a saved post.
+def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
+    """All (method, target_pk) download pairs for a post.
 
-    Returns ("photo_download"|"clip_download", target_pk). Carousels
-    (media_type 8) have no clip of their own — the pk is an album container and
-    clip_download raises "Must been video". Instead, pick the first video
-    resource (or the first image when the album has no video) and download that
-    individual resource. Single media fall through to the pk itself.
+    Carousels (media_type 8) have no clip of their own — the pk is an album
+    container and clip_download raises "Must been video". Return one pair per
+    resource: clip_download for video resources, photo_download for photo
+    resources, so the whole album is captured. Single media returns the pk.
     """
     info = client.media_info(pk)
     mtype = int(getattr(info, "media_type", 0) or 0)
     if mtype == 8:
         resources = list(getattr(info, "resources", None) or [])
+        if not resources:
+            return [("photo_download", pk)]
+        pairs: list[tuple[str, str]] = []
         for r in resources:
-            if int(getattr(r, "media_type", 0) or 0) == 2:
-                return "clip_download", str(r.pk)
-        if resources:
-            return "photo_download", str(resources[0].pk)
-        return "photo_download", pk
+            rm = int(getattr(r, "media_type", 0) or 0)
+            pairs.append(("clip_download" if rm == 2 else "photo_download", str(r.pk)))
+        return pairs
     if mtype == 1:
-        return "photo_download", pk
-    return "clip_download", pk
+        return [("photo_download", pk)]
+    return [("clip_download", pk)]
 
 
 def _default_download(message: dict) -> dict:
@@ -129,6 +129,8 @@ def _default_download(message: dict) -> dict:
     Prefers the authenticated instagrapi client (the worker already has
     IG_SESSIONID, and saved/private posts are unreachable by anonymous yt-dlp),
     falling back to yt-dlp (public posts, or when IG_SESSIONID is unset).
+    Carousels download every resource; the result exposes both `filepath`
+    (first item) and `filepaths` (all items) for back-compat.
     """
     url = message.get("url", "")
     pk = message.get("ig_pk", "")
@@ -139,10 +141,13 @@ def _default_download(message: dict) -> dict:
 
             client = ig_sync.make_client()
             client.delay_range = [0.5, 1.0]
-            method, target = _pick_download_target(client, pk)
-            out = getattr(client, method)(target, folder=str(IG_DOWNLOADS_DIR))
-            if out and Path(out).exists():
-                return {"ok": True, "filepath": str(Path(out))}
+            filepaths: list[str] = []
+            for method, target in _download_targets(client, pk):
+                out = getattr(client, method)(target, folder=str(IG_DOWNLOADS_DIR))
+                if out and Path(out).exists():
+                    filepaths.append(str(Path(out)))
+            if filepaths:
+                return {"ok": True, "filepath": filepaths[0], "filepaths": filepaths}
         except Exception as e:
             logger.warning("instagrapi download failed for %s: %s", pk, e)
 
@@ -150,7 +155,10 @@ def _default_download(message: dict) -> dict:
 
     IG_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
     downloader = VideoDownloader(output_dir=IG_DOWNLOADS_DIR, browser="chrome")
-    return downloader.download(url)
+    dl = downloader.download(url)
+    if dl.get("ok") and dl.get("filepath"):
+        dl["filepaths"] = [dl["filepath"]]
+    return dl
 
 
 def _default_transcribe(filepath: str) -> dict:
