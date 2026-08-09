@@ -40,10 +40,29 @@ Três coisas que esta rodada descobriu e que mudam o projeto:
 render só (736 frames) é 2× fora de especificação — cabe na VRAM (84,4 M a
 448×256) mas provavelmente degenera. É o probe P5.
 
-Sondagem em curso — log em `~/bkp/minimax-night/rodada3-probes.log`, saídas em
-`output/rodada3/`: P1 diálogo PT · P2 os 103,2 M nunca medidos · P3 os 15 s a
-704×384 · P5 os 30 s fora da faixa. Os drivers da rodada vão para `scripts/`
-junto com o `unify_audio.py`, no mesmo worktree que liga o `last_frame`.
+### A sondagem — 5/5, concluída 15:37, nenhum OOM
+
+| | config | Mpf | tempo | resultado |
+|---|---|---|---|---|
+| P1 | 1024×576 · 5,17 s | 73,1 | 871 s | ✅ diálogo PT transcrito **palavra por palavra**, 2 turnos |
+| P2 | 1024×576 · 7,29 s | **103,2** | 1313 s | ✅ **passou** — a faixa não medida era boa |
+| P3 | 704×384 · 15,08 s | 97,9 | 1242 s | ✅ **limpo**, 4 falas espalhadas pelos 15 s |
+| P5 | 448×256 · 30,67 s | 84,4 | 1094 s | ⚠️ renderiza e **degenera** (cor + tempo do áudio) |
+| P4 | 512×320 · 5,17 s | 20,3 | 264 s | ✅ `last_frame` obedecido, SSIM 0,877 vs 0,503 |
+
+**Os três números que mudaram o projeto:**
+
+1. **O teto subiu.** 103,2 M passaram. Não é mais "101 M passou, 128 M estourou" —
+   é **entre 103,2 M e 128 M**. Um clipe de 7,3 s a 1024×576 cabe.
+2. **15 s a 704×384 saem limpos num render só.** 30 s = dois clipes, **uma emenda**.
+   É a variante A, e o P3 mostrou que ela não é um consolo: é a melhor imagem da
+   sondagem depois do P1.
+3. **362 frames é um limite real, não de VRAM.** Ver a seção nova do `CLAUDE.md`:
+   fora da faixa treinada a cor apodrece e o áudio se comprime no início.
+
+Log em `~/bkp/minimax-night/rodada3-probes.log`, saídas em `output/rodada3/`.
+Produção de H1 nas três variantes disparada às 15:38 (`rodada3.py H1_raposa:ACB`,
+log em `rodada3.log`). Os drivers vão para `scripts/` quando a rodada fechar.
 
 ---
 

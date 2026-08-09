@@ -37,12 +37,29 @@ ComfyUI + MiniMax H3 (FL2VA, INT8) exposto por um servidor MCP.
 |---|---|---|
 | 59 M | 512×320 · 15 s | ✅ 710 s |
 | 73 M | 1024×576 · 5 s | ✅ 886 s |
-| 98 M | 704×384 · 15 s | ← 30 s em **duas** emendas |
-| **101 M** | **1216×672 · 5 s** | ✅ 1262 s — **o maior que passou** |
+| 84 M | 448×256 · 30,7 s | ✅ 1094 s — mas **fora da faixa treinada**, ver abaixo |
+| 98 M | 704×384 · 15 s | ✅ 1242 s — **limpo**; é como se fazem 30 s com UMA emenda |
+| 101 M | 1216×672 · 5 s | ✅ 1262 s |
+| **103 M** | **1024×576 · 7,3 s** | ✅ 1313 s — **o maior que passou** |
 | **128 M** | **1344×768 · 5 s** | ❌ OOM |
 | 213 M | 1024×576 · 15 s | ❌ OOM (três vezes) |
 
-**Tempo: 12 s por megapixel-frame**, linear, medido em 4 resoluções e 2 durações.
+**Tempo: 12 s por megapixel-frame** (medido entre 12,0 e 13,0 em 6 resoluções),
+linear, sem termo quadrático.
+
+### A faixa treinada acaba em 362 frames (15,08 s), e isso é um limite à parte
+
+O nó aceita `length` até 3600 e a VRAM aguenta 736 frames a 448×256 (84 M). O
+modelo **renderiza** — e degrada de dois jeitos independentes, medidos em
+2026-08-09 com um clipe de 30,7 s:
+
+- **A cor.** Manchas magenta/verde que crescem ao longo do clipe; aos 20 s um
+  corvo preto ficou verde. A composição e a narrativa continuam de pé.
+- **O tempo do áudio.** As seis falas escritas para 30 s couberam nos primeiros
+  17 s; depois vieram 13 s de silêncio e um fragmento solto no último segundo.
+
+**Não é uma questão de VRAM.** Passar de 362 frames é fora de especificação.
+Para durar mais, é composição.
 **Steps não são alavanca** — 30 steps custam 1,51× e não melhoram nada. 20 basta.
 
 ## O que decide a qualidade de um clipe
@@ -56,10 +73,22 @@ card e a convenção do template do ComfyUI deram o mesmo clipe. **Mas o áudio 
 sintaxe:** diálogo é `(personagem, descrição da voz (S1)) says: <d>[Portuguese] fala</d>`,
 dentro de `integrated_multimodal_description` / `overall_soundscape` / `non_diegetic_music`.
 
+**Diálogo em português funciona** (medido 2026-08-09): Whisper large-v3 devolveu as
+falas escritas **palavra por palavra**, com `(S1)` e `(S2)` virando dois turnos
+separados. Densidade que coube com folga: **2 falas em 5 s, 4 falas em 15 s**,
+distribuídas ao longo do clipe. Descrever o timbre junto do personagem
+(*"hoarse mocking voice"*) faz parte da sintaxe, não é enfeite.
+
 ## Durações longas: encadeamento de frame
 
 O modelo é **FL2VA** — First-**Last** frame to Video+Audio. O nó
-`MiniMaxH3ImageToVideo` aceita `first_frame` **e** `last_frame`.
+`MiniMaxH3ImageToVideo` aceita `first_frame` **e** `last_frame`, e desde
+2026-08-09 as tools `submit_scene` e `generate_video` expõem os dois.
+
+**O modelo obedece ao `last_frame`**, medido: com âncoras de cenas diferentes nas
+duas pontas, SSIM do quadro final contra o alvo = **0,877**, contra a âncora de
+partida = **0,503**. É o segundo número que prova — sem ele, dois quadros do mesmo
+desenho já se pareceriam.
 
 1. Último quadro do clipe N →
    `ffmpeg -nostdin -sseof -1 -i clip.mp4 -update 1 -q:v 2 -y frame.png`
