@@ -363,6 +363,49 @@ if "imagem/post do Instagram" in llm.build_summary_prompt("x", is_image=True):
 else:
     bad("is_image=True did not add the image context line")
 
+print("== unit_knowledge: coerce_categoria fecha o vocabulário ==")
+
+VOC = ["toolsDev", "Dev", "Receitas", "Inglês", "Tecnologia", "ciências"]
+
+# The case that forced this into code: asked for one of 26 categories,
+# lfm2:24b answered "Saúde" -- which is not one of them -- and did it across
+# separate runs. A value outside the list neither filters nor groups, and never
+# shows up in the list the user thinks they are choosing from.
+if llm.coerce_categoria("Saúde", VOC) == "outros":
+    ok("a category outside the vocabulary collapses to 'outros'")
+else:
+    bad(f"invented category survived: {llm.coerce_categoria('Saúde', VOC)!r}")
+
+if llm.coerce_categoria("Receitas", VOC) == "Receitas":
+    ok("a valid category passes through")
+else:
+    bad("a valid category was rejected")
+
+# Case and accents must not split one category into several tags.
+for variant in ("ingles", "INGLÊS", "  Inglês  ", "inglês"):
+    if llm.coerce_categoria(variant, VOC) != "Inglês":
+        bad(f"{variant!r} did not resolve to the canonical 'Inglês'")
+        break
+else:
+    ok("case, accents and padding all resolve to the canonical spelling")
+
+if llm.coerce_categoria("CIENCIAS", VOC) == "ciências":
+    ok("the vocabulary's own spelling is what comes back, not the model's")
+else:
+    bad(f"got {llm.coerce_categoria('CIENCIAS', VOC)!r} instead of 'ciências'")
+
+if llm.coerce_categoria("", VOC) == "outros" and llm.coerce_categoria(None, VOC) == "outros":
+    ok("empty and None become 'outros'")
+else:
+    bad("empty/None not handled")
+
+# With no vocabulary there is nothing to validate against, so the value is
+# whatever the caller got -- the old behaviour, unchanged.
+if llm.coerce_categoria("qualquer", None) == "qualquer":
+    ok("without a vocabulary the value passes through untouched")
+else:
+    bad("coerce_categoria altered a value with no vocabulary to check against")
+
 print("== unit_knowledge: categoria no caminho do resumo (vídeo) ==")
 
 CATS = ["Dev", "Receitas", "Inglês"]
