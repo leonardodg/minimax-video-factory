@@ -153,15 +153,10 @@ def _default_download(message: dict) -> dict:
     return downloader.download(url)
 
 
-_active_transcriber = None
-
-
 def _default_transcribe(filepath: str) -> dict:
     from minimax_mcp.transcriber import AudioTranscriber
 
-    global _active_transcriber
     transcriber = AudioTranscriber(model_size=WHISPER_MODEL, device=WHISPER_DEVICE)
-    _active_transcriber = transcriber
     try:
         return transcriber.transcribe(filepath)
     finally:
@@ -169,8 +164,15 @@ def _default_transcribe(filepath: str) -> dict:
         # step: lfm2:24b needs ~6 GB and the worker runs on the same 12 GB GPU
         # as ComfyUI. Otherwise the next knowledge call 500s with cudaMalloc
         # out-of-memory until a retry happens to run after the cache cleared.
-        transcriber.free()
-        _active_transcriber = None
+        #
+        # Guarded because this runs in a `finally`: an exception raised here
+        # would replace the transcription we just spent minutes producing, and
+        # the message would be nacked and redone. Failing to free is worth a
+        # warning, never worth discarding the work.
+        try:
+            transcriber.free()
+        except Exception:
+            logger.warning("could not release Whisper VRAM", exc_info=True)
 
 
 def _safe_ack(ch, method) -> None:
