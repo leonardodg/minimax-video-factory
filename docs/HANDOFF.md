@@ -1,0 +1,425 @@
+# minimax-video-factory — handoff, atualizado 2026-08-09 14:20
+
+**Este arquivo agora vive no repositório.** Antes ele estava em
+`~/bkp/minimax-night/HANDOFF.md`, fora do git — e por isso toda sessão nova
+começava sem memória nenhuma. As regras permanentes foram para o
+[`CLAUDE.md`](../CLAUDE.md) da raiz, que o Claude Code carrega sozinho em toda
+sessão; aqui fica o **estado**: o que está rodando, o que já foi medido, o que
+está pendente. **Atualizar aqui**, não num arquivo solto no home.
+
+A noite de 07/08 → 08/08 rodou inteira e mediu o que precisava ser medido. As
+regras antigas deste arquivo eram do INT4 e **metade caiu**. O que está abaixo
+é o estado atual, com os números que substituíram os chutes.
+
+---
+
+## 👉 A TAREFA DE AGORA: rodada 3 — desenho de 30 s **com falas**
+
+Plano aprovado em 2026-08-09 14:10. Três formas de montar 30 s de desenho,
+comparadas no mesmo roteiro, mais diálogo em português — que as rodadas 1 e 2
+não tinham (os quatro arcos da rodada 2 eram **mudos**).
+
+| Variante | Montagem | Emendas | Custo |
+|---|---|---|---|
+| **A** | 2 × 15,08 s @704×384 (97,9 M) | **1** | ~40 min/história |
+| **B** | 4 × 7,29 s @1024×576 (103,2 M) com `first_frame`+`last_frame` | 3 | ~1 h 45 (inclui pré-viz a 512×320) |
+| **C** | o roteiro inteiro num render só | 0 | ~20 min |
+
+Três coisas que esta rodada descobriu e que mudam o projeto:
+
+1. **`last_frame` existe e nunca foi ligado.** O nó `MiniMaxH3ImageToVideo`
+   expõe `first_frame` **e** `last_frame` (confirmado em `/object_info`);
+   `core.py` só ligava o primeiro. É o input que força um capítulo a *chegar*
+   num quadro conhecido em vez de derivar até onde der.
+2. **15 s cabem num render só a 704×384** (97,9 M, abaixo dos 101 M que
+   passaram). 30 s deixam de ser seis clipes e viram dois.
+3. **Diálogo tem sintaxe:** `(personagem, voz (S1)) says: <d>[Portuguese] fala</d>`,
+   dentro dos três campos do model card. Suporte estável a 11 idiomas.
+
+⚠️ **Limite duro:** a faixa treinada acaba em **362 frames = 15,08 s**. 30 s num
+render só (736 frames) é 2× fora de especificação — cabe na VRAM (84,4 M a
+448×256) mas provavelmente degenera. É o probe P5.
+
+Sondagem em curso — log em `~/bkp/minimax-night/rodada3-probes.log`, saídas em
+`output/rodada3/`: P1 diálogo PT · P2 os 103,2 M nunca medidos · P3 os 15 s a
+704×384 · P5 os 30 s fora da faixa. Os drivers da rodada vão para `scripts/`
+junto com o `unify_audio.py`, no mesmo worktree que liga o `last_frame`.
+
+---
+
+## Encerrado: validar os 12 documentos de IG
+
+O usuário vai **ler os 12 documentos já ingeridos** e decidir se o pipeline está
+bom o bastante para rodar nos 2145 restantes. Nada roda até essa validação.
+
+```sql
+-- docs 118 a 129, todos de Instagram
+SELECT id, type, title, tags, summary FROM documents
+WHERE ig_pk IS NOT NULL ORDER BY id;
+```
+```bash
+cd ~/tools-local/minimax-video-factory
+KB_DATABASE_URL="postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge" \
+  ./.venv/bin/python -c "..."   # ou use a tool kb-buscar pelo MCP
+```
+
+**O que já foi medido e NÃO adianta reabrir** (custou ~1 h de GPU):
+
+- Ajustar o prompt de categoria: **não muda nada** (variantes A e B idênticas)
+- Reduzir o vocabulário de 26 para 10 curadas: **piorou** (3/4 contra 4/4)
+- Trocar para `qwen2.5:32b`: funciona (10 categorias contra 4), mas custa
+  **3,5 min por documento** — ~5 dias para os 2157. Inviável.
+- **Decisão tomada: aceitar categoria grossa.** O usuário reestrutura as
+  próprias coleções depois. Detalhes na seção "Classificação de categoria".
+
+**O que sabidamente funciona** e não deve ser mexido sem motivo: `colecao:` e
+`categoria:` separadas, timestamps fora dos embeddings, título derivado do
+resumo quando não há legenda, dedupe por `ig_pk`.
+
+Se a validação apontar ajuste, ele é de **conteúdo** (prompt de resumo, o que
+entra no documento), não de classificação.
+
+---
+
+## Depois da validação: o sync completo
+
+```
+posts salvos no Instagram   2157   (medido)
+já ingeridos                  12
+faltam                     2145
+custo medido                50 s por post  ->  ~30 h de GPU
+```
+
+**A fila já é o mecanismo de lote.** `ig_sync.sync_saved_posts` lista **uma vez**
+e publica todos os novos no RabbitMQ — persistente, status por mensagem, DLQ com
+retry. Publique tudo de uma vez e controle o ritmo pelo **consumo**
+(`/ig-worker` e `/ig-worker-stop`).
+
+⚠️ **O limite real é o Instagram, não a GPU.** Em 2026-08-09, duas varreduras
+completas em uma hora já geraram 429 e derrubaram coleções inteiras da listagem
+(a segunda viu 202 posts em vez de 2157). Cada post ainda faz `media_info` +
+download. Ritmo sugerido: lotes de 50–100 posts espaçados por horas.
+
+⚠️ **Não use `ig_reingest.py` para isso.** É um script descartável de teste que
+relista as 46 coleções a cada execução — exatamente o que dispara o 429. O
+caminho de produção é `sync_saved_posts` / a tool `ig-sync`.
+
+Disco: a mídia é apagada depois de processada, **inclusive quando falha**
+(`534ae25`). Não acumula.
+
+---
+
+## O que está rodando agora
+
+| Processo | O que faz | Log |
+|---|---|---|
+| `ig_worker` (nohup) | consome `ig.saved`; **ocioso**, fila vazia | `~/bkp/minimax-night/ig_worker.log` |
+
+**Renders: nada rodando.** As duas rodadas fecharam:
+
+- **Noite (18 renders)** — `[00:00] fila da noite concluída`, `[01:14] fase 2 concluída`
+- **Rodada 2 (20 renders)** — `[06:55] rodada 2 concluída`
+
+**Não relançar nada** — conferir sempre antes:
+
+```bash
+pgrep -af "round2|night_phase2|tmp/overnight|ig_worker"    # vazio = acabou
+grep -v RuntimeWarning ~/bkp/minimax-night/round2.log
+```
+
+⚠️ **`pgrep` vazio não significa "terminou".** Às 03:07 o `round2.py` morreu com
+pgrep vazio e log sem a linha final: uma exceção na composição matou o processo
+e 15 renders nunca rodaram. **Distinguir sempre:** log com
+`[HH:MM] rodada 2 concluída` = terminou; pgrep vazio sem essa linha = crashou,
+ler o traceback. O `round2.py` é retomável (`already_rendered`), então relançar
+não re-renderiza nada pronto.
+
+**O `ig-worker` roda no host e usa a mesma GPU** (Whisper + `lfm2:24b` ~6 GB).
+O usuário está desenvolvendo em cima dele. Foi subido em 2026-08-09 07:35 **a
+pedido dele**, para a Task 6; fora isso, não parar e não reiniciar por conta
+própria.
+
+**Se a VRAM parecer ocupada sem ninguém usando:** o ComfyUI mantém os modelos
+residentes depois de um render (10,6 GB com 0% de uso, visto após o
+`gpu-validation` do CI). Com a fila vazia, `curl -X POST
+http://127.0.0.1:8188/free -d '{"unload_models":true,"free_memory":true}'`
+devolve tudo (11162 → 890 MiB). Os modelos recarregam no próximo render.
+
+---
+
+## Entregas da rodada 2 — 4 histórias de 30 s
+
+```
+output/round2_final/C1_cartoon_30s_audio.mp4   5,9 MB
+output/round2_final/C2_liquid_30s_audio.mp4    3,1 MB
+output/round2_final/C3_action_30s_audio.mp4    9,3 MB
+output/round2_final/C4_scifi_30s_audio.mp4     4,1 MB
+```
+
+**Usar os `_audio`** — os `_30s.mp4` sem sufixo são os originais, com o áudio
+desigual, guardados só para comparação.
+
+**20 clipes encadeados, todos entre 903 e 907 s.** 4 s de desvio em 5 h.
+
+### O áudio precisou de um passo à parte
+
+O encadeamento resolve a imagem, **não o som**: não existe `first_audio`, o
+modelo não aceita condicionamento de áudio, então cada capítulo inventa a
+trilha do zero. Medido, por capítulo: C2 variou **31,7 dB** (−43,6 a −11,9) e
+C4 **29,7 dB** — os primeiros capítulos praticamente inaudíveis, depois
+estourando.
+
+`unify_audio.py` corrige por **ganho estático** (mede LUFS, aplica a diferença
+até −21), limitador, e fades de 80 ms nas emendas. Deliberadamente **não** usa
+`acrossfade`: ele sobrepõe os trechos, encurta o total e dessincroniza áudio e
+vídeo. Vídeo copiado bit a bit — verificado por hash, sai idêntico ao render.
+
+**Parte do degrau foi autorada, não é defeito do modelo:** os prompts do C2
+pediam silêncio nos primeiros capítulos (*"single drops, then quiet"*). Em
+rodadas futuras, a direção de áudio precisa de nível constante entre capítulos.
+
+---
+
+## Os números medidos — não remedir
+
+### O teto de VRAM é um orçamento único
+
+Não são dois limites (resolução e duração), é **um produto**:
+`largura × altura × frames`. Sete pontos, uma conta só:
+
+| pixel-frames | configuração | |
+|---|---|---|
+| 59 M | 512×320 · 15 s | ✅ 710 s |
+| 73 M | 1024×576 · 5 s | ✅ 886 s |
+| 91 M | 1152×640 · 5 s | ✅ 1101 s |
+| **101 M** | **1216×672 · 5 s** | ✅ 1262 s — **maior que passou** |
+| **128 M** | **1344×768 · 5 s** | ❌ OOM |
+| 142 M | 1024×576 · 10 s | ❌ OOM |
+| 213 M | 1024×576 · 15 s | ❌ OOM (três vezes: E2, G1, G2) |
+
+> **Teto entre 101 M e 128 M.** Resolução e duração pesam igual — gasta-se o
+> orçamento em uma **ou** na outra, nunca nas duas.
+
+Máximo por clipe: **~5 s a 1024×576** (7 s bate no teto, nunca testado) e
+**~5 s a 1216×672** (já *é* o teto). Passar disso é composição.
+
+### Tempo: 12 s por megapixel-frame
+
+Linear, sem termo quadrático, em 4 resoluções e 2 durações (12,0 / 12,0 / 12,1 /
+12,5). **Os "175 s por segundo de vídeo" do handoff antigo só valem a 1024×576.**
+O 512×320 de 5 s dá 13,7 — é o carregamento do modelo diluído num render curto.
+
+### Steps são proporcionais e não compensam
+
+F1 a 30 steps: **1341 s** contra 886 s a 20 = **1,514×** para 1,5× de steps.
+Custo integral. Com INT4 não houve ganho de qualidade; com INT8 ninguém avaliou
+a diferença ainda.
+
+### O teto de resolução subiu 39% com o INT8
+
+Era 1024×576, medido com INT4 (11 GB). O INT8 (21 GB, com `--lowvram` fazendo
+streaming da RAM) aguenta **1216×672**.
+
+### Rosto e texto não quebram mais
+
+A regra antiga — *"água e nuvens aguentam; rosto, texto, cidade e multidão
+quebram"* — era do INT4. `B1_face_text` (1024×576, 901 s) saiu **"excelente"**
+na avaliação do usuário. `B2_crowd` e `B3_glass` também renderizaram.
+
+### 512×320 é 3,3× mais barato
+
+279 s contra 886 s. E foi o **único** que entregou 15 s num render só.
+
+---
+
+## O encadeamento de frame — a peça nova
+
+O modelo é **FL2VA** (First-Last frame to Video+Audio). Para durações longas:
+
+1. Extrai o último frame do clipe N:
+   `ffmpeg -nostdin -sseof -1 -i clip.mp4 -update 1 -q:v 2 -y frame.png`
+   (`-sseof -1` decodifica o último segundo e `-update 1` reescreve o mesmo
+   arquivo a cada frame — o que sobra é literalmente o último. Pedir
+   `-frames:v 1` junto pegaria o **primeiro** frame do trecho.)
+2. Passa como `first_frame` do clipe N+1.
+3. `compose_final` junta tudo no fim.
+
+**Duas coisas que não são óbvias:**
+
+- **Prompt novo por capítulo, não o mesmo repetido.** O frame dá continuidade
+  visual; o prompt faz a cena avançar. Repetir o prompt original dá o mesmo
+  plano seis vezes.
+- **Cada prompt tem de recarregar as âncoras de estilo** (traço, luz, paleta,
+  lente). O modelo só enxerga **um frame** do passado, não os clipes anteriores
+  — sem reancorar, o visual deriva ao longo da cadeia.
+
+Implementado em `round2.py`. Não existe no repo ainda — `compose_final` é só
+concat do ffmpeg, não há extração de frame em `src/`. **Vale portar para uma
+tool MCP**: é o caminho do projeto para durações longas.
+
+O bloco G da noite existia para testar isto e nem chegou lá: pediu as duas
+metades a 15 s × 1024×576 = 213 M, o dobro do teto. **O experimento estava mal
+desenhado, não a máquina.**
+
+---
+
+## Estado do repositório
+
+- `~/tools-local/minimax-video-factory`, branch `main` em `2a3187f`.
+- **24 tools** MCP (a merge do IG somou 5 às 19 antigas).
+- **13 testes unitários** passando.
+- `uv run ruff check .` acusa **~25 erros pré-existentes** na `main`, drift da
+  merge do IG. Não são dos slash commands nem do fix de VRAM.
+- `.env` em INT8. INT4 guardado em `.env.bak-int4` — trocar exige rebuild do
+  container e fila vazia.
+
+### Feito nesta sessão
+
+| | |
+|---|---|
+| **Slash commands do Claude Code** | `8bf4e55` → merge `306e8d0`. 24 comandos em `.claude/commands/` gerados pelo mesmo gerador do OpenCode; `.mcp.json` versionado (docker + remote); `minimax-video-factory-uv` e `minimax-knowledge-base` no escopo local via `claude mcp add-json`. `kb-*` roteado para o servidor **host** — o container não alcança o Postgres. `compress`/`search-sessions` **não** portados: o Claude Code já tem skills globais com esses nomes. |
+| **Fix de VRAM no `free()`** | `709887d` → merge `2a3187f`. Ver abaixo. |
+| **Arquivos soltos na raiz** | `base_*.png` → `input/base/`; `kb_test_note.md` → `tests/fixtures/`. `overnight.py` e `night_phase2.py` atualizados para o caminho novo. |
+
+### O bug do `free()`, para não reintroduzir
+
+`transcriber.free()` chamava `torch.cuda.empty_cache()` para devolver a VRAM do
+Whisper. **Três problemas:** faster-whisper aloca via CTranslate2, não PyTorch,
+então `empty_cache()` não libera nada dele (quem libera é o `del` do cache);
+`torch` não é importado em nenhum outro lugar do projeto, então `import torch`
+criava um contexto CUDA de centenas de MB **na placa que o método existia para
+liberar**; e reimportar torch pode **levantar exceção**
+(`Only a single TORCH_LIBRARY...`) — dentro de um `finally`, o que descartava
+uma transcrição de minutos e renegava a mensagem.
+
+Agora: `gc.collect()` no lugar do torch, e a chamada no `finally` é guardada.
+`tests/unit_transcriber.py` fixa os 6 casos. **Verificado que os testes falham
+contra a versão anterior: 2 BAD, exit 1, um por bug.**
+
+---
+
+## Regras que valem sempre nesta máquina
+
+1. **Não dar `git push`.** Dispara a CI no runner self-hosted, que renderiza e
+   rouba a GPU no meio dos testes. O job `gpu-validation` roda `diagnose.sh
+   00–07` com render E2E e tem `if: always()` — **nem falha de lint o impede**.
+   *Push feito em 2026-08-09 07:21* (`6153591..6336ea9`, 12 commits), com
+   autorização explícita e a GPU livre. **CI 4/4 verde**, incluindo o
+   `gpu-validation`. A regra volta a valer: pedir antes de empurrar.
+2. **Não publicar estes vídeos.** Várias entradas são fotos pessoais.
+3. **Nunca mexer no worktree `.worktrees/igsync`** — trabalho do usuário na
+   branch `feat/ig-saved-sync`.
+4. **Um render por vez.** Dois concorrentes estouram a VRAM.
+5. **Mostrar a fila junto com todo vídeo entregue** e avisar do que houver nela.
+6. Worktree é obrigatório para implementação; commit só de documentação, não.
+7. Nunca animar rosto de terceiro identificável. Fotos do próprio usuário, sim.
+8. **Não mexer no `ig-worker`** — o usuário está desenvolvendo nele.
+
+---
+
+## Regra de produção que saiu da noite
+
+> Orçamento de **~100 M pixel-frames** por render. Gaste em resolução (até
+> 1216×672 a 5 s) **ou** em duração (15 s a 512×320) — nunca nas duas.
+> Acima disso, é composição com encadeamento de frame.
+
+---
+
+## Pendências
+
+- **Portar o encadeamento de frame + a unificação de áudio para tools MCP.**
+  Hoje só existem em `round2.py` e `unify_audio.py`. São as duas peças que
+  faltam para durações longas, e as duas foram validadas em 4 vídeos.
+- **Task 6 do plano de IG** (`docs/superpowers/plans/2026-08-09-ig-content-focused-pipeline.md`).
+  Steps 1–3 eram no-op: a base não tinha nenhum documento de IG, o `state.json`
+  não existia e o worker estava parado. Step 4 (publicar + consumir) foi
+  disparado 2026-08-09 07:29. Falta o **Step 5**: verificar que os documentos
+  saem focados em conteúdo, não em metadados.
+- **Merge de `feat/ig-saved-sync`.** As 5 tools de IG já entraram na `main`
+  (`56db1c8`) e as guardas já esperam 24. Se surgir mais uma tool, são **quatro**
+  lugares: `catalog.COMMAND_NAMES` (o gerador se recusa a inventar nome), a
+  lista canônica de `unit_registry`, a tabela do README, e rodar
+  `scripts/generate_commands.py` — que agora escreve **dois** arquivos por tool.
+- ~~Os ~25 erros de ruff~~ **zerados** em `6f92da9`. `ruff check .` limpo, e o
+  `static-lint` do CI passa. Três dos consertos eram exceções engolidas em
+  silêncio, que agora logam.
+- **7 s a 1024×576** (≈100 M) nunca foi testado — é o maior clipe que a conta
+  diz caber. Valeria um render.
+- **`.env.bak-int4` tem um `OPENAI_API_KEY` real.** Nunca foi commitado
+  (verificado em todas as refs) e agora `.env.*` está no `.gitignore`, mas a
+  chave segue viva em disco num repo público. Vale rotacionar.
+- **`~/.cache/uv` ocupa 8,9 GB e não dá para limpar com o comando próprio.**
+  `uv cache clean` fica em timeout esperando lock exclusivo: seis processos
+  `uv run` de longa duração (os servidores MCP de `minimax-video-factory` e
+  `skysql-mcp`, mais um `mkdocs serve`) seguram lock de leitura desde 17/jul e
+  não vão soltar. Ou apaga o diretório à mão contornando o lock, ou para os
+  seis, limpa e reinicia. **Decidido em 2026-08-09: deixar quieto** — com 61 GB
+  livres não compensa derrubar infraestrutura por 1,7% da partição.
+- **Categoria: decidido aceitar classificação grossa.** Ver a seção abaixo —
+  cinco variantes medidas, nenhuma boa E barata. O usuário vai reestruturar as
+  próprias coleções depois, conforme os interesses dele. **Não refazer o
+  experimento** sem uma hipótese nova.
+
+---
+
+## Classificação de categoria — medido, decidido, encerrado
+
+Cinco variantes sobre os MESMOS 12 documentos de IG. `SPREAD` = categorias
+distintas usadas; `ÂNCORAS` = acertos em casos onde a resposta certa não é
+opinião (receita→culinária, podcast de inglês→idiomas...).
+
+| | vocabulário | modelo | spread | âncoras | tempo |
+|---|---|---|---|---|---|
+| A | 26 coleções cruas | lfm2:24b | 4/26 | 4/4 | 295 s |
+| B | 26 + "seja específico" | lfm2:24b | 4/26 | 4/4 | 166 s |
+| C | 26 + "seja específico" | qwen2.5:32b | **10/26** | 4/4 | **2548 s** |
+| D | 10 curadas | lfm2:24b | 5/10 | **3/4*** | 363 s |
+| E | 10 curadas | qwen2.5:32b | — | — | timeout em todo doc |
+
+\* nas mesmas 4 âncoras de A, para ser comparável.
+
+**As quatro conclusões, todas contra a intuição:**
+
+1. **Instrução de prompt não faz nada.** A e B são idênticas, incluindo a
+   categoria inventada. Não perca tempo reescrevendo o prompt.
+2. **A saída é instável.** Mesmo modelo, mesmo prompt, mesma entrada: um
+   documento saiu `Receitas` numa execução e `Inglês` na seguinte. Não há
+   resposta a corrigir, há uma distribuição.
+3. **Modelo maior resolve, e custa caro demais.** O `qwen2.5:32b` usou 10
+   categorias contra 4 e escolheu as específicas (`security`, `Governo`,
+   `Energia`) onde o `lfm2` dizia `Tecnologia`. Mas a **3,5 min por documento**:
+   sincronizar os 2157 posts levaria ~5 dias só classificando.
+4. **Vocabulário "limpo" piorou.** A taxonomia curada de 10 (sem sobreposição,
+   granularidade uniforme) fez o `lfm2` errar um caso que ele acertava com as
+   26 coleções bagunçadas. Conjectura não testada: nomes concretos e familiares
+   (`Receitas`, `Inglês`) ancoram melhor que abstratos (`culinaria`, `idiomas`).
+
+**Decisão de 2026-08-09: aceitar categoria grossa.** Fica o `lfm2:24b` com as
+coleções do usuário como vocabulário — que é o que `_category_vocabulary()` já
+faz. A `coerce_categoria` (`70cd069`) impede categoria inventada; a
+concentração e a instabilidade ficam como custo aceito.
+
+Modelos ainda não testados, se alguém quiser retomar: `gemma4:26b` e
+`gpt-oss:20b`, ambos em disco. A pergunta em aberto é se existe um
+intermediário com a discriminação do 32B e o custo do 24B.
+
+---
+
+## Scripts guardados aqui
+
+| Arquivo | Para quê |
+|---|---|
+| `round2.py` | 30 s por encadeamento de frame — **concluído**, e retomável |
+| `unify_audio.py` | casa o nível dos capítulos e sela as emendas — **concluído** |
+| `ig_reingest.py` | Task 6 step 4: publica o lote de re-ingestão |
+| `cat_experiment.py`, `cat_experiment2.py` | as 5 variantes de classificação; os resultados estão na seção acima |
+| `backfill_categoria.py` | acrescenta `categoria:` aos docs já ingeridos, sem tocar no Instagram |
+| `ig_docs_before_wipe.json` | retrato dos 12 documentos antes do refazer |
+| `ig_chain.sh` | espera a publicação e só então sobe o worker (evita OOM) |
+| `night_phase2.py` | fase 2 da noite (blocos D/E/F/G) — concluída |
+| `overnight.py` | fase 1 da noite (blocos A/B/C) — concluída |
+| `*.log` | os resultados. `round2-crash-0307.log` é o crash da composição |
+| `frames/` | últimos frames extraídos, um por elo da cadeia |
+| `audio_work/` | capítulos normalizados, intermediários da unificação |
+| `HANDOFF-int4-2026-08-07.md` | o handoff da era INT4, como linha de base |
+| `coverage.py`, `coverage2.py`, `finish_tests.sh` | exercitam as tools pelo MCP |
