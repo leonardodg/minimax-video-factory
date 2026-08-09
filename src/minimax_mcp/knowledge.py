@@ -92,7 +92,7 @@ def ingest_text(
     if not text or not text.strip():
         return {"ok": False, "error": "empty text"}
 
-    gen = llm.generate_structured(text)
+    gen = llm.generate_structured(text, is_image=(doc_type == "image"))
     if not gen.get("ok"):
         return {"ok": False, "stage": "llm", "error": gen.get("error")}
 

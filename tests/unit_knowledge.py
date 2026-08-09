@@ -351,6 +351,23 @@ if pv["tipo"] == "outros" and pv["categoria"] == "outros":
 else:
     bad(f"parse_vision_reply(defaults) = {pv!r}")
 
+print("== unit_knowledge: summary premise (main content) ==")
+premise = "material de apoio"
+if premise in llm.build_summary_prompt("qualquer coisa"):
+    ok("summary prompt states transcription is only supporting material")
+else:
+    bad("summary prompt missing the supporting-material premise")
+
+if "imagem/post do Instagram" in llm.build_summary_prompt("x", is_image=True):
+    ok("is_image=True adds the Instagram-image context line")
+else:
+    bad("is_image=True did not add the image context line")
+
+if "imagem/post do Instagram" not in llm.build_summary_prompt("x", is_image=False):
+    ok("is_image=False omits the image context line")
+else:
+    bad("is_image=False wrongly added the image context line")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

@@ -32,7 +32,10 @@ Você é um assistente que documenta conteúdo para uma base de conhecimento pes
 
 Dada a transcrição abaixo, responda APENAS com um JSON válido (sem markdown, sem texto \
 fora do JSON) com estas chaves:
-- "resumo": um resumo conciso (3-5 frases) do conteúdo.
+- "resumo": um resumo conciso (3-5 frases) do CONTEÚDO PRINCIPAL — a dica, a
+  receita, o passo a passo, o que foi ensinado. NÃO descreva o vídeo/imagem em
+  si e não repita a transcrição. A transcrição/descrição abaixo é apenas
+  material de apoio.
 - "tutorial": um tutorial detalhado, passo a passo, do que foi ensinado/demonstrado, em markdown.
 - "objetivos": uma lista de objetivos/aprendizados principais (array de strings).
 - "tags": uma lista de 3 a 8 tags curtas relevantes (array de strings).
@@ -49,13 +52,22 @@ Formato exato (resposta deve ser SOMENTE este JSON):
   "tags": ["tag1", "tag2"]
 }}
 
+{image_note}
 Conteúdo a documentar:
 {transcription}
 """
 
 
-def build_summary_prompt(transcription: str) -> str:
-    return SUMMARY_PROMPT_TEMPLATE.format(transcription=transcription.strip())
+def build_summary_prompt(transcription: str, *, is_image: bool = False) -> str:
+    image_note = (
+        "\nA entrada é a descrição estruturada de uma imagem/post do Instagram. "
+        "Extraia dela o conteúdo principal (dica, lista, receita)."
+        if is_image
+        else ""
+    )
+    return SUMMARY_PROMPT_TEMPLATE.format(
+        transcription=transcription.strip(), image_note=image_note
+    )
 
 
 def parse_llm_json(raw: str) -> dict[str, Any]:
@@ -146,12 +158,16 @@ def _openai_compatible_generate(prompt: str, model: str, *, force_json: bool) ->
 
 
 def generate_structured(
-    transcription: str, *, provider: str | None = None, model: str | None = None
+    transcription: str,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    is_image: bool = False,
 ) -> dict[str, Any]:
     """Ask the configured LLM for {resumo, tutorial, objetivos, tags} as JSON."""
     provider = provider or LLM_PROVIDER
     model = model or LLM_MODEL
-    prompt = build_summary_prompt(transcription)
+    prompt = build_summary_prompt(transcription, is_image=is_image)
     try:
         if provider == "ollama":
             raw = _ollama_generate(prompt, model, force_json=True)
