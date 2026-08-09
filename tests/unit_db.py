@@ -113,6 +113,44 @@ if "ig_pk" in cols:
 else:
     bad("Document model is missing ig_pk")
 
+print("== unit_db: strip_timestamps keeps text out of the embeddings ==")
+
+TRANSCRIPT = (
+    "[0.00s - 2.72s] Onde você guarda o token JWT no seu front?\n"
+    "[2.72s - 4.72s] No local storage ou no cookie?\n"
+    "[4.72s - 8.72s] Eu fiz esse post há dois dias atrás."
+)
+clean = db.strip_timestamps(TRANSCRIPT)
+
+if "[" not in clean and "s -" not in clean:
+    ok("timestamp markers are removed")
+else:
+    bad(f"markers survived: {clean[:80]!r}")
+
+for phrase in ("token JWT", "local storage", "dois dias atrás"):
+    if phrase not in clean:
+        bad(f"stripping ate real text: {phrase!r} is gone")
+        break
+else:
+    ok("every word of the speech survives")
+
+# 62 of 426 chunks carried these markers into pgvector before this existed.
+if db.strip_timestamps(None) is None and db.strip_timestamps("") == "":
+    ok("None and empty pass through untouched")
+else:
+    bad("strip_timestamps mangles None/empty")
+
+if db.strip_timestamps("sem marcador nenhum") == "sem marcador nenhum":
+    ok("text without markers is returned unchanged")
+else:
+    bad("strip_timestamps altered text that had no markers")
+
+# A marker glued to the next word must not swallow it.
+if db.strip_timestamps("[1.00s - 2.00s]palavra") == "palavra":
+    ok("a marker with no trailing space still leaves the word")
+else:
+    bad(f"glued marker mishandled: {db.strip_timestamps('[1.00s - 2.00s]palavra')!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

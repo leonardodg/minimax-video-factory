@@ -88,7 +88,10 @@ def process_message(
         lang = "pt"
         doc_type = "image"
 
-    extra_tags = [message["collection_name"]] if message.get("collection_name") else None
+    # Namespaced like `categoria:`: a bare collection name is indistinguishable
+    # from a semantic tag the LLM produced, and it was landing on nearly every
+    # document, so tag search could not tell "about Dev" from "filed under Dev".
+    extra_tags = [f"colecao:{message['collection_name']}"] if message.get("collection_name") else None
     if categoria and categoria != "outros":
         extra_tags = (extra_tags or []) + [f"categoria:{categoria}"]
     ing = ingest(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from datetime import datetime
 from typing import Any
@@ -107,6 +108,22 @@ def get_session() -> Session:
     return _SessionLocal()
 
 
+_TIMESTAMP_RE = re.compile(r"\[\s*\d+(?:\.\d+)?s\s*-\s*\d+(?:\.\d+)?s\s*\]\s*")
+
+
+def strip_timestamps(text: str | None) -> str | None:
+    """Drop `[12.34s - 56.78s]` markers from a Whisper transcription.
+
+    The stored `transcription_text` keeps them -- they are how a claim is traced
+    back to a moment in the video. But the chunks are what gets embedded, and
+    there the markers are pure noise: they carry no meaning, they compete for
+    room inside the 700-char budget, and they end up matching numeric queries.
+    """
+    if not text:
+        return text
+    return _TIMESTAMP_RE.sub("", text).strip()
+
+
 def chunk_text(text: str, max_chars: int = 700, overlap: int = 100) -> list[str]:
     """Split text into overlapping chunks for embedding/search.
 
@@ -161,7 +178,9 @@ def save_document(
     session.add(doc)
     session.flush()  # assigns doc.id
 
-    text_for_chunks = "\n\n".join(filter(None, [summary, tutorial, transcription_text]))
+    text_for_chunks = "\n\n".join(
+        filter(None, [summary, tutorial, strip_timestamps(transcription_text)])
+    )
     for idx, piece in enumerate(chunk_text(text_for_chunks)):
         chunk = Chunk(document_id=doc.id, chunk_text=piece, chunk_index=idx)
         session.add(chunk)

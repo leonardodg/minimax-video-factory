@@ -111,8 +111,11 @@ if len(collected) == 3:
 else:
     bad(f"saved_posts returned {len(collected)} entries")
 names = {e["collection_name"] for e in collected}
-if names == {"Todos os posts", "Receitas"}:
-    ok("collection names map correctly (All posts -> Todos os posts)")
+# The catch-all maps to None, not to a name. It holds every saved post, so its
+# name says nothing about the post -- and as a tag it was landing on nearly
+# every document and drowning the ones that mean something.
+if names == {None, "Receitas"}:
+    ok("the catch-all yields no collection name; real ones are kept")
 else:
     bad(f"collection names = {names}")
 
@@ -175,6 +178,68 @@ if ig_sync.list_categories(None) == ig_sync.FALLBACK_CATEGORIES:
     ok("list_categories(None) -> fallback")
 else:
     bad(f"list_categories(None) = {ig_sync.list_categories(None)!r}")
+
+print("== unit_ig_sync: título ausente não vira placeholder ==")
+
+
+class _NoCaption:
+    pk = "9001"
+    media_type = 2
+    caption_text = ""
+    user = None
+
+
+t = ig_sync.to_messages([{"media": _NoCaption(), "collection_name": None}])[0]["title"]
+if t is None:
+    ok("a post with no caption yields title=None")
+else:
+    bad(
+        f"title = {t!r}. A placeholder is truthy, so knowledge.ingest_text never "
+        "reaches its own fallback and the document is literally titled that."
+    )
+
+print("== unit_ig_sync: dedupe_by_pk prefere a coleção nomeada ==")
+
+DUPES = [
+    {"ig_pk": "1", "collection_name": None, "title": "a"},
+    {"ig_pk": "1", "collection_name": "Dev", "title": "a"},
+    {"ig_pk": "2", "collection_name": "Receitas", "title": "b"},
+    {"ig_pk": "1", "collection_name": None, "title": "a"},
+]
+d = ig_sync.dedupe_by_pk(DUPES)
+
+if len(d) == 2:
+    ok("three messages for one post collapse into one")
+else:
+    bad(f"dedupe_by_pk returned {len(d)} messages, expected 2")
+
+if d[0]["collection_name"] == "Dev":
+    ok("the named collection wins over the catch-all, whatever the order")
+else:
+    bad(
+        f"kept collection_name={d[0]['collection_name']!r}. Whichever copy is "
+        "consumed first decides the tag, so the catch-all must never win."
+    )
+
+if [m["ig_pk"] for m in d] == ["1", "2"]:
+    ok("input order is preserved, so a caller's priority ordering survives")
+else:
+    bad(f"order changed: {[m['ig_pk'] for m in d]}")
+
+new, skipped = ig_sync.split_new(DUPES, set())
+if len(new) == 2:
+    ok("split_new dedupes within the batch, not just against the database")
+else:
+    bad(f"split_new published {len(new)} messages for 2 distinct posts")
+
+print("== unit_ig_sync: a coleção guarda-chuva não vira tag ==")
+
+if ig_sync.to_messages([{"media": Media("2002", 2), "collection_name": None}])[0][
+    "collection_name"
+] is None:
+    ok("collection_name=None survives to the message")
+else:
+    bad("None collection_name was replaced by something")
 
 print()
 if FAIL:
