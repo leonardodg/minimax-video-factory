@@ -111,6 +111,15 @@ Character voices, identical in every shot and never changing:
 capítulo mistura os dois e acusa salto onde só houve distribuição desigual das
 falas — quase virou conclusão errada em 2026-08-09.
 
+⚠️ **A ficha reduz a deriva, não a elimina.** Numa segunda história (a mesma ficha,
+roteiro que não foi usado para calibrá-la) a voz aguda ficou em 3,4 semitons de
+dispersão, mas a grave foi a 7,7 — contra 17 semitons sem ficha. E o medidor **não
+separa deriva de atuação**: a fala mais desviada era *"Isso não vai dar certo"*,
+dita no instante em que o trenó dispara, onde o roteiro pede susto. O limite de
+~4 semitons é heurística, não medida. **Teste que decide, ainda não feito:** uma
+fala deliberadamente CALMA logo depois de uma emenda — se subir do mesmo jeito é
+deriva, se ficar no registro era interpretação.
+
 ## Durações longas: encadeamento de frame
 
 O modelo é **FL2VA** — First-**Last** frame to Video+Audio. O nó
