@@ -132,9 +132,16 @@ Disco: a mídia é apagada depois de processada, **inclusive quando falha**
 
 | Processo | O que faz | Log |
 |---|---|---|
-| `ig_worker` (nohup) | consome `ig.saved`; **ocioso**, fila vazia | `~/bkp/minimax-night/ig_worker.log` |
+| `rodada3.py` | H1 nas três variantes, desde 2026-08-09 15:38 | `~/bkp/minimax-night/rodada3.log` |
 
-**Renders: nada rodando.** As duas rodadas fecharam:
+**O `ig_worker` está PARADO.** Foi encerrado em 2026-08-09 15:44 **a pedido
+explícito do usuário**, para não disputar a GPU com os renders da rodada 3.
+Encerrou limpo (SIGTERM, `ig.saved` com `ready=0` e `consumers=0`, nada
+pendurado sem ack); o último trabalho real dele tinha sido às 08:40, documento
+129. **A regra 8 continua valendo:** religar é decisão do usuário, não iniciativa
+de sessão nova.
+
+**Rodadas anteriores, fechadas:**
 
 - **Noite (18 renders)** — `[00:00] fila da noite concluída`, `[01:14] fase 2 concluída`
 - **Rodada 2 (20 renders)** — `[06:55] rodada 2 concluída`
