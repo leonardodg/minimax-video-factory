@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -138,21 +139,39 @@ def _default_transcribe(filepath: str) -> dict:
     return transcriber.transcribe(filepath)
 
 
+def _safe_ack(ch, method) -> None:
+    """Ack a delivery, swallowing channel/connection errors (e.g. the broker
+    closed the transport while a long LLM/Whisper step was running). If the
+    connection died the message is left unacked and RabbitMQ redelivers it once
+    the worker reconnects."""
+    try:
+        ch.basic_ack(method.delivery_tag)
+    except Exception as exc:  # noqa: BLE001 - connection-level errors
+        logger.warning("ack failed for delivery_tag=%s (%s); will redeliver", method.delivery_tag, exc)
+
+
 def run() -> None:
-    """Daemon main: connect, declare, consume ig.saved + control queue."""
+    """Daemon main: connect, declare, consume ig.saved + control queue.
+
+    The connection can drop (heartbeat timeout, broker restart) while a long
+    Whisper/LLM step is running; the old code crashed the whole daemon with
+    StreamLostError on the post-processing ack, orphaning queued messages.
+    This loop reconnects with backoff and keeps the item-paused state across
+    connections.
+    """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    connection = ig_queue.connect()
-    channel = connection.channel()
-    ig_queue.declare(channel)
     state = {"paused": False}
 
     def on_work(ch, method, properties, body):
         parsed = ig_queue.parse_message(body)
         if not parsed["ok"]:
             logger.warning("corrupted message -> DLQ: %s", parsed["error"])
-            ig_queue.dead_letter(ch, properties, body)
-            ch.basic_ack(method.delivery_tag)
+            try:
+                ig_queue.dead_letter(ch, properties, body)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("dead_letter failed: %s", exc)
+            _safe_ack(ch, method)
             return
 
         message = parsed["message"]
@@ -163,7 +182,7 @@ def run() -> None:
             session.close()
         if already:
             logger.info("duplicate ig_pk=%s -> ack without processing", message["ig_pk"])
-            ch.basic_ack(method.delivery_tag)
+            _safe_ack(ch, method)
             return
 
         res = process_message(
@@ -193,11 +212,14 @@ def run() -> None:
                 _p.write_text(_json.dumps(_existing[-500:], ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception:
                 pass
-            ch.basic_ack(method.delivery_tag)
+            _safe_ack(ch, method)
         else:
             logger.warning("processing failed ig_pk=%s: %s", message["ig_pk"], res["error"])
-            ig_queue.handle_failure(ch, properties, body)
-            ch.basic_ack(method.delivery_tag)
+            try:
+                ig_queue.handle_failure(ch, properties, body)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("handle_failure failed: %s", exc)
+            _safe_ack(ch, method)
 
     def on_control(ch, method, properties, body):
         import json
@@ -207,18 +229,35 @@ def run() -> None:
         except (ValueError, TypeError):
             command = ""
         logger.info("control command: %s", apply_command(state, command))
-        ch.basic_ack(method.delivery_tag)
+        _safe_ack(ch, method)
 
-    channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue=ig_queue.QUEUE, on_message_callback=on_work)
-    channel.basic_consume(queue=ig_queue.CONTROL_QUEUE, on_message_callback=on_control)
-    logger.info("ig-worker consuming %s (paused=%s)", ig_queue.QUEUE, state["paused"])
-    try:
-        channel.start_consuming()
-    except KeyboardInterrupt:
-        channel.stop_consuming()
-    finally:
-        ig_queue.close(connection)
+    def consume_once() -> None:
+        """Connect and consume until the connection dies; returns on error."""
+        connection = ig_queue.connect()
+        try:
+            channel = connection.channel()
+            ig_queue.declare(channel)
+            channel.basic_qos(prefetch_count=1)
+            channel.basic_consume(queue=ig_queue.QUEUE, on_message_callback=on_work)
+            channel.basic_consume(queue=ig_queue.CONTROL_QUEUE, on_message_callback=on_control)
+            logger.info("ig-worker consuming %s (paused=%s)", ig_queue.QUEUE, state["paused"])
+            channel.start_consuming()
+        except KeyboardInterrupt:
+            raise
+        except Exception as exc:  # noqa: BLE001 - connection-level errors
+            logger.warning("consumer connection dropped: %s", exc)
+        finally:
+            ig_queue.close(connection)
+
+    backoff = 1
+    while True:
+        try:
+            consume_once()
+        except KeyboardInterrupt:
+            break
+        time.sleep(backoff)
+        backoff = min(backoff * 2, 30)
+        logger.info("reconnecting in %ss...", backoff)
 
 
 if __name__ == "__main__":
