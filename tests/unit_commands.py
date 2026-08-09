@@ -325,6 +325,102 @@ if bare.startswith("---\ndescription: ") and "$ARGUMENTS" in bare:
 else:
     bad("empty override broke the renderer")
 
+print("== unit_commands: renderer, dialeto Claude Code ==")
+
+dl_claude = renderer.render_claude_command(
+    SPECS["download_video"], OVERRIDES["download_video"], "minimax-download"
+)
+
+# The whole point of a separate dialect. Claude Code exposes MCP tools as
+# `mcp__<server>__<tool>`; the OpenCode form is never a real tool name there,
+# so a command carrying it lists fine and fails on every single run.
+if "mcp__minimax-video-factory__download_video" in dl_claude:
+    ok("claude command names the tool as mcp__server__tool")
+else:
+    bad("claude command does not carry the mcp__server__tool form")
+
+if "minimax-video-factory_download_video" not in dl_claude:
+    ok("claude command never leaks the OpenCode tool-name form")
+else:
+    bad("claude command carries the OpenCode form `server_tool` — it will not resolve")
+
+if dl_claude.startswith("---\ndescription: "):
+    ok("claude command starts with the frontmatter description")
+else:
+    bad(f"claude command starts with {dl_claude[:40]!r}")
+
+claude_front = dl_claude.split("---")[1]
+if "argument-hint: <url>" in claude_front:
+    ok("usage line moves into the dedicated argument-hint field")
+else:
+    bad(f"claude frontmatter missing argument-hint: {claude_front!r}")
+
+# In the OpenCode dialect the usage line is glued onto the description; here it
+# must not be, or the hint shows up twice.
+if "Uso: /minimax-download" not in claude_front:
+    ok("claude description does not repeat the usage line")
+else:
+    bad("claude description still carries the OpenCode 'Uso:' suffix")
+
+if "$ARGUMENTS" in dl_claude:
+    ok("claude command passes $ARGUMENTS through")
+else:
+    bad("claude command is missing $ARGUMENTS")
+
+if "GERADO AUTOMATICAMENTE" in dl_claude:
+    ok("claude command carries the do-not-edit header")
+else:
+    bad("claude command is missing the generated-file header")
+
+# Routing: the knowledge_* tools only work against the host server, because
+# the container cannot reach Postgres or Ollama.
+kb_claude = renderer.render_claude_command(
+    SPECS["knowledge_search"], OVERRIDES.get("knowledge_search", _Ov()), "kb-buscar"
+)
+if "mcp__minimax-knowledge-base__knowledge_search" in kb_claude:
+    ok("kb commands are routed to the host knowledge-base server")
+else:
+    bad("kb command does not point at minimax-knowledge-base")
+
+if "minimax-video-factory" not in kb_claude:
+    ok("kb command never offers a container server as a fallback")
+else:
+    bad(
+        "kb command offers a container variant — it cannot reach Postgres, "
+        "so the retry turns a clear error into a timeout"
+    )
+
+vid_claude = renderer.render_claude_command(
+    SPECS["generate_video"], OVERRIDES["generate_video"], "minimax-gerar-video"
+)
+if "mcp__minimax-video-factory__generate_video" in vid_claude:
+    ok("video commands are routed to the container server")
+else:
+    bad("video command does not point at minimax-video-factory")
+
+if "mcp__minimax-video-factory-remote__" in vid_claude and (
+    "mcp__minimax-video-factory-uv__" in vid_claude
+):
+    ok("video command offers both connected fallback variants")
+else:
+    bad("video command is missing the server-variant fallbacks")
+
+# A zero-parameter tool has no arguments, so it must not emit an empty hint.
+health_claude = renderer.render_claude_command(
+    SPECS["health_check"], OVERRIDES["health_check"], "minimax-health"
+)
+if "argument-hint:" not in health_claude:
+    ok("a zero-parameter tool omits argument-hint entirely")
+else:
+    bad("zero-parameter tool emitted an empty argument-hint")
+
+# The two dialects must stay in sync on everything that is not client-specific:
+# same parameters, same operational steps.
+if "database locked" in dl_claude and "transcrever" in dl_claude:
+    ok("claude command keeps the same operational facts as the OpenCode one")
+else:
+    bad("claude command lost override facts that the OpenCode one keeps")
+
 print("== unit_commands: catalog page ==")
 
 entries = sorted(
@@ -396,6 +492,48 @@ if catalog.NON_TOOL_COMMANDS <= on_disk:
     ok("allow-listed non-tool commands are still present and untouched")
 else:
     bad(f"allow-listed commands went missing: {sorted(catalog.NON_TOOL_COMMANDS - on_disk)}")
+
+CLAUDE_DIR = ROOT / ".claude" / "commands"
+claude_on_disk = {p.stem for p in CLAUDE_DIR.glob("*.md")}
+
+claude_missing = sorted(expected - claude_on_disk)
+if not claude_missing:
+    ok("every tool has a Claude Code command file on disk")
+else:
+    bad(
+        f"tools with no Claude Code command file: {claude_missing}. "
+        "Run: uv run python scripts/generate_commands.py"
+    )
+
+claude_extra = sorted(claude_on_disk - expected)
+if not claude_extra:
+    ok("no orphan Claude Code command files")
+else:
+    bad(f"Claude Code command files with no matching tool: {claude_extra}")
+
+# compress/search-sessions ship as global Claude Code skills. A project
+# command of the same name shadows the skill, so the port stops at the
+# tool-backed commands on purpose.
+shadowed = sorted(catalog.NON_TOOL_COMMANDS & claude_on_disk)
+if not shadowed:
+    ok("non-tool commands were not ported — they would shadow global skills")
+else:
+    bad(f"these would shadow a global Claude Code skill: {shadowed}")
+
+# The commands name MCP servers; if none is registered, all 24 list fine and
+# fail on every run. That was the actual state before this change.
+import json as _json
+
+mcp_json = ROOT / ".mcp.json"
+if mcp_json.exists():
+    ok(".mcp.json exists, so the servers the commands name are registered")
+    declared = set(_json.loads(mcp_json.read_text(encoding="utf-8"))["mcpServers"])
+    if "minimax-video-factory" in declared:
+        ok(".mcp.json declares the container server the video commands need")
+    else:
+        bad(f".mcp.json does not declare minimax-video-factory: {sorted(declared)}")
+else:
+    bad(".mcp.json is missing — the Claude Code commands have no server to call")
 
 # Generated content matches what the generator would produce right now.
 sys.path.insert(0, str(ROOT / "scripts"))

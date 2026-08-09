@@ -3,7 +3,9 @@
 <!-- GERADO AUTOMATICAMENTE por scripts/generate_commands.py -->
 <!-- Não edite à mão: rode `uv run python scripts/generate_commands.py`. -->
 
-Um comando do OpenCode para cada ferramenta MCP. Esta página descreve o uso humano; a referência de programação das tools está em [MCP Tools Reference](MCP_TOOLS.md).
+Um comando para cada ferramenta MCP, gerado para os dois clientes: OpenCode (`.opencode/command/`) e Claude Code (`.claude/commands/`). Esta página descreve o uso humano; a referência de programação das tools está em [MCP Tools Reference](MCP_TOOLS.md).
+
+Os comandos `kb-*` só funcionam contra o servidor **host** (`minimax-knowledge-base`): as tools `knowledge_*` falam direto com Postgres e Ollama, que o container não alcança. Os demais rodam no container.
 
 | Comando | Tool | O que faz |
 |---|---|---|

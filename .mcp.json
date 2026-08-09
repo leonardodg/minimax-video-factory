@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "minimax-video-factory": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "minimax-comfyui",
+        "bash",
+        "/workspace/scripts/mcp_runner.sh"
+      ]
+    },
+    "minimax-video-factory-remote": {
+      "type": "http",
+      "url": "http://127.0.0.1:8848/mcp"
+    }
+  }
+}
