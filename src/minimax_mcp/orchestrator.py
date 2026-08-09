@@ -88,6 +88,7 @@ class AudiovisualStudio:
         height: int = 576,
         seed: int | None = None,
         first_frame: str | None = None,
+        last_frame: str | None = None,
         filename_prefix: str = "studio/",
         steps: int | None = None,
         # 900, not the 240 first guessed: a 512x320 clip measured 270-278s
@@ -117,6 +118,7 @@ class AudiovisualStudio:
                 seed=seed,
                 filename_prefix=filename_prefix,
                 first_frame=first_frame,
+                last_frame=last_frame,
                 steps=steps,
             )
             if not result.get("ok"):
