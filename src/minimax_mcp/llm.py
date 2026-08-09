@@ -196,15 +196,52 @@ def chat(prompt: str, *, provider: str | None = None, model: str | None = None) 
 VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
 
 
-def build_vision_prompt() -> str:
+def build_vision_prompt(categories: list[str] | None = None) -> str:
+    cats = ", ".join(categories) if categories else (
+        "receita, dica, tutorial, tech, curso, estudo, inglês, viagem, house, "
+        "bitcoin, treino, car, dog, livro, notícia, outros"
+    )
     return (
-        "Descreva esta imagem em português, com detalhes: o que aparece, "
-        "cores, composição, texto visível e o contexto. Descreva apenas o "
-        "que está na imagem; não invente informações."
+        "Você analisa uma imagem de um post do Instagram para uma base de "
+        "conhecimento pessoal. Responda APENAS com um JSON válido (sem markdown, "
+        "sem texto fora do JSON) com estas chaves:\n"
+        '- "tipo": o tipo de conteúdo — "receita", "dica", "infografico", '
+        '"tutorial", "noticia", "meme" ou "outros".\n'
+        f'- "categoria": uma destas categorias — {cats}. Se nenhuma combinar, '
+        'use "outros".\n'
+        '- "conteudo_principal": o conteúdo em si — a dica, a receita, a lista, '
+        "o que o post ensina. Leia o texto visível (títulos, listas, ingredientes, "
+        "passos) e inclua-o aqui.\n"
+        "IMPORTANTE: extraia o CONTEÚDO PRINCIPAL (o que o post ensina/informa). "
+        "Ignore aparência física de pessoas, roupas, cenário e objetos de fundo. "
+        "Não invente informações; se não houver texto legível, descreva o que a "
+        "cena comunica.\n"
+        "Formato exato (resposta deve ser SOMENTE este JSON):\n"
+        '{"tipo": "...", "categoria": "...", "conteudo_principal": "..."}'
     )
 
 
-def describe_image(image_path: str, *, model: str | None = None) -> dict:
+def parse_vision_reply(raw: str) -> dict:
+    """Parse the vision model's reply into {tipo, categoria, conteudo_principal}.
+
+    Tolerates ```json fences (via parse_llm_json). If it is not JSON at all,
+    the whole raw text becomes conteudo_principal. Never raises.
+    """
+    try:
+        parsed = parse_llm_json(raw)
+    except (ValueError, TypeError):
+        parsed = {}
+    if not isinstance(parsed, dict) or "conteudo_principal" not in parsed:
+        parsed = {"conteudo_principal": raw}
+    parsed.setdefault("tipo", "outros")
+    parsed.setdefault("categoria", "outros")
+    parsed["conteudo_principal"] = str(parsed["conteudo_principal"]).strip()
+    return parsed
+
+
+def describe_image(
+    image_path: str, *, model: str | None = None, categories: list[str] | None = None
+) -> dict:
     """Describe an image with a local vision LLM via Ollama /api/generate."""
     model = model or VISION_MODEL
     try:
@@ -214,7 +251,7 @@ def describe_image(image_path: str, *, model: str | None = None) -> dict:
 
     payload = {
         "model": model,
-        "prompt": build_vision_prompt(),
+        "prompt": build_vision_prompt(categories),
         "images": [b64],
         "stream": False,
         "options": {"num_predict": 512, "temperature": 0.2},
@@ -224,9 +261,17 @@ def describe_image(image_path: str, *, model: str | None = None) -> dict:
             f"{OLLAMA_URL}/api/generate", json=payload, timeout=LLM_TIMEOUT
         )
         resp.raise_for_status()
-        text = (resp.json().get("response") or "").strip()
+        raw = (resp.json().get("response") or "").strip()
     except Exception as e:
         return {"ok": False, "error": f"vision failed: {e}"}
-    if not text:
+    if not raw:
         return {"ok": False, "error": "vision returned empty text"}
-    return {"ok": True, "text": text}
+    parsed = parse_vision_reply(raw)
+    text = parsed["conteudo_principal"]
+    return {
+        "ok": True,
+        "text": text,
+        "tipo": parsed.get("tipo"),
+        "categoria": parsed.get("categoria"),
+        "conteudo_principal": text,
+    }

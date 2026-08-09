@@ -318,12 +318,38 @@ if "keep_alive" in _payload:
 else:
     bad(f"payload keys: {sorted(_payload)}")
 
-print("== unit_knowledge: llm.build_vision_prompt ==")
-prompt = llm.build_vision_prompt()
-if "portugu" in prompt and "imagem" in prompt:
-    ok("build_vision_prompt asks for a PT-BR image description")
+print("== unit_knowledge: llm.build_vision_prompt / parse_vision_reply ==")
+prompt = llm.build_vision_prompt(["Receitas", "Python", "Inglês"])
+if ("conteudo_principal" in prompt and "categoria" in prompt
+        and "Receitas" in prompt and "Python" in prompt and "Inglês" in prompt):
+    ok("build_vision_prompt asks for structured JSON and lists the categories")
 else:
-    bad(f"build_vision_prompt = {prompt[:120]!r}")
+    bad(f"build_vision_prompt = {prompt[:200]!r}")
+
+clean_v = '{"tipo": "lista", "categoria": "courses", "conteudo_principal": "6 cursos gratuitos"}'
+pv = llm.parse_vision_reply(clean_v)
+if pv["conteudo_principal"] == "6 cursos gratuitos" and pv["categoria"] == "courses":
+    ok("parse_vision_reply parses a clean vision JSON")
+else:
+    bad(f"parse_vision_reply(clean) = {pv!r}")
+
+pv = llm.parse_vision_reply("apenas texto solto")
+if pv["conteudo_principal"] == "apenas texto solto" and pv["categoria"] == "outros":
+    ok("parse_vision_reply falls back to raw text on non-JSON")
+else:
+    bad(f"parse_vision_reply(text) = {pv!r}")
+
+fenced_v = "```json\n" + clean_v + "\n```"
+if llm.parse_vision_reply(fenced_v)["conteudo_principal"] == "6 cursos gratuitos":
+    ok("parse_vision_reply strips ```json fences")
+else:
+    bad(f"parse_vision_reply(fenced) = {llm.parse_vision_reply(fenced_v)!r}")
+
+pv = llm.parse_vision_reply('{"conteudo_principal": "x"}')
+if pv["tipo"] == "outros" and pv["categoria"] == "outros":
+    ok("parse_vision_reply defaults tipo/categoria when missing")
+else:
+    bad(f"parse_vision_reply(defaults) = {pv!r}")
 
 print()
 if FAIL:
