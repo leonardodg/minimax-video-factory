@@ -34,7 +34,7 @@ _CTA_PATTERNS = (
     r"link na bio",
     r"curte e compartilha",
     r"ativa o sininho",
-    r"coment(?:a|e).*que eu te mando",
+    r"coment(?:a|e)[^.!?]*que eu te mando",
 )
 _CTA_SENTENCE_RE = re.compile(
     r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*[.!?]",

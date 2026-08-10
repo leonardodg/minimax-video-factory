@@ -476,6 +476,23 @@ if strip_cta(already) == already:
 else:
     bad(f"strip_cta(bare já) = {strip_cta(already)!r}")
 
+# The 'comenta...que eu te mando' CTA fully inside one sentence is removed.
+same = strip_cta("A receita é boa. Comenta que eu te mando a receita. Asse por 15 min.")
+if "Comenta que eu te mando" not in same and "A receita é boa" in same and "Asse por 15 min" in same:
+    ok("strip_cta removes a single sentence fully containing 'comenta...que eu te mando'")
+else:
+    bad(f"strip_cta(same-sentence) = {same!r}")
+
+# The CTA split across two sentences is NOT removed: the regex must not cross
+# the period. (The user's 'Comenta e ativa o sininho. Depois que eu te mando
+# a receita.' example is shadowed by the earlier 'ativa o sininho' alternative,
+# so use a first sentence whose only pattern is 'comenta'.)
+split = strip_cta("Comenta a receita agora. Depois que eu te mando o passo a passo. Asse por 15 min.")
+if "Depois que eu te mando o passo a passo" in split and "Asse por 15 min" in split:
+    ok("strip_cta does not cross the sentence boundary of 'comenta...que eu te mando'")
+else:
+    bad(f"strip_cta(split-sentence) = {split!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
