@@ -13,6 +13,37 @@ não perde tempo, perde **acesso**.
 
 ---
 
+## ⚠️ Terceiro bloqueante, descoberto em 2026-08-09 23:53
+
+**O Instagram fechou a porta depois de pouquíssimas requisições.** Ao consumir a
+fila de 12 posts: uma listagem de coleções, **um** post ingerido com sucesso
+(doc 154), e o seguinte já voltou **HTML em vez de JSON** — a parede de login.
+Depois disso o `instagrapi` tentou a cada ~5 s, o que só piora a situação; o
+worker foi parado na hora.
+
+```
+public_request ERROR Status 200: JSONDecodeError (url=https://www.instagram.com/)
+>>> <!DOCTYPE html> ... <title>Instagram</title>
+```
+
+**Isso não foi ritmo.** Foram duas ou três chamadas. As hipóteses, em ordem:
+
+1. **Sessão expirada.** Com o `IG_SESSIONID` inválido, o `instagrapi` cai para
+   requisição **pública**, e a Meta responde a essas com a página de login. O
+   sintoma bate exatamente: erro em `public_request`, não em `private_request`.
+   Note que a listagem de coleções, feita por `private_request`, **funcionou**
+   (`leo.dg [200]`) — o que sugere sessão válida para uma coisa e não para outra,
+   ou expirando no meio.
+2. **Conta penalizada** pelas varreduras anteriores.
+
+> **Antes de qualquer coisa: renovar o `IG_SESSIONID` e validar com UM post.**
+> Rodar 2145 com a sessão nesse estado gastaria 54 h para encher a DLQ.
+
+O lado bom: a fila é durável e nada se perdeu — 11 mensagens voltaram intactas,
+`unacked=0`, DLQ vazia. O trabalho retoma exatamente de onde parou.
+
+---
+
 ## Pré-requisitos, os dois bloqueantes
 
 ### 1. Fazer merge de `feat/cta-export-markdown` antes de qualquer coisa
