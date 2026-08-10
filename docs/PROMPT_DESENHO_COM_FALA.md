@@ -193,11 +193,24 @@ comprime e faz bombear), limitador, fades de 80 ms, vídeo copiado bit a bit.
 Renderizar a história a 512×320 para extrair os quadros de emenda, ampliar para
 1024×576 e prender os capítulos finais a eles com `first_frame`+`last_frame`.
 
-**O mecanismo é sadio — a fonte é que estava errada.** Provado em 2026-08-09
-(rodada 3.1): com os dois âncoras vindos de um render BOM em resolução nativa, o
-clipe saiu de uma encosta vazia, criou a entrada dos dois personagens, deu uma
-troca de falas e aterrissou no âncora de chegada — com a nitidez do melhor
-material da rodada.
+**A resolução do âncora resolve a nitidez.** Testado em 2026-08-09 (rodada 3.1):
+com os dois âncoras vindos de um render BOM em resolução nativa, os personagens
+saíram nítidos — veredito humano: *"a resolução e nitidez do corvo e da raposa
+estão boas"*. O borrão da variante B era mesmo do âncora esticado.
+
+⚠️ **Mas o teste tinha um defeito, e ele ensinou outra coisa.** Os dois âncoras
+escolhidos estavam a 15 s de distância e tinham **terrenos diferentes** — uma
+encosta lisa e vazia contra um banco de neve com dois personagens. O modelo
+interpolou a **paisagem**, e o resultado foi o chão deslizando debaixo dos
+personagens. Veredito humano: *"o problema são os chãos se movendo"*.
+
+> **Os dois âncoras têm de compartilhar o mesmo fundo e a mesma posição de
+> câmera.** Só a pose do personagem deve mudar entre eles. Cenário diferente nas
+> duas pontas = paisagem interpolada = chão que desliza.
+
+**Continua não provado** se ancorar as duas pontas permite AÇÃO de verdade. O
+teste limpo — dois âncoras de mesmo fundo, diferindo só na pose — ainda não foi
+feito.
 
 Com a pré-viz barata, a mesma técnica falha **duas vezes ao mesmo tempo**:
 
@@ -270,13 +283,30 @@ gaivota "fica grande do nada".
 Todas as batidas de um mesmo clipe devem compartilhar o tamanho de plano.
 Mudança de enquadramento pertence à fronteira entre renders.
 
-## Movimento compete com nitidez
+## Movimento compete com nitidez — e isto dá para medir
 
 O usuário notou sem ser perguntado: o capítulo com pouca movimentação saiu bom, o
-com muita coisa se mexendo ao mesmo tempo saiu pior. Parece ser o **número de
-elementos independentes em movimento**, não a velocidade — um trenó descendo
-rápido com um só assunto ficou nítido, enquanto raposa andando + corvo voando +
-câmera acompanhando degradou.
+com muita coisa se mexendo saiu pior. **Não é a velocidade, é quantas coisas se
+movem ao mesmo tempo** — um trenó descendo rápido com um só assunto ficou nítido.
+
+Diferente de nitidez, isto **é** mensurável (`~/bkp/minimax-night/motion.py`).
+Duas medidas, porque uma sozinha confunde "parado" com "tremendo":
+
+- **movimento** — mediana da diferença absoluta entre quadros consecutivos.
+- **concentração** — quanto dessa diferença vem dos 10% de pixels que mais mudam.
+  Um assunto andando concentra; um clipe fervilhando espalha.
+
+| clipe | movimento | concentração | veredito humano |
+|---|---|---|---|
+| `H1_raposa_D_p2` | **0,61** | **54%** | "qualidade piorou, muitas coisas em movimento" |
+| `H4_treno_D_p1` | 0,07 | 94% | "gostei bastante" |
+| `H1_raposa_B_p2` | **0,03** | 92% | "qualidade ruim" (a que congelou) |
+
+Concentração baixa com movimento alto é o assinatura do "muitas coisas se
+mexendo". Movimento perto de 0,03 é clipe travado.
+
+⚠️ O que esta medida **não** pega: o "fica tremendo" dos 512×320. Mais um
+julgamento que fica com o olho.
 
 ## Como verificar sem depender de ouvir tudo
 
@@ -336,12 +366,19 @@ com emenda.
 > Trocar a seed e refazer aquele clipe é o conserto. Mais engenharia de prompt não
 > resolve o que é variação de amostragem.
 
+## 512×320 não serve para entrega
+
+Só para sondagem. O veredito humano sobre os clipes dessa resolução é constante
+— *"qualidade pior"*, *"fica tremendo"* — mesmo quando a sincronia das falas está
+boa. O tremor é cintilação temporal que nenhuma das métricas testadas detecta.
+
 ## Em aberto
 
+- **Ancorar as duas pontas permite AÇÃO?** O teste limpo — dois âncoras com o
+  MESMO fundo e a mesma câmera, diferindo só na pose do personagem — não foi
+  feito. O primeiro teste usou fundos diferentes e o chão derreteu.
+- **1024×576 com âncora nativo** nunca foi testado. Se a moleza da variante B era
+  só do âncora esticado, essa combinação deveria ser a melhor de todas.
 - **Corte seco, cruzado ou dissolve** — julgamento humano, não medida. Existem
   seis tratamentos da mesma história em `output/rodada3_final/H1_raposa_*`.
-- **Os ~2 em 15 de voz errada** têm remédio melhor que re-rolar a seed? Não
-  investigado.
-- **1024×576 com âncora nativa** — a variante B nunca foi testada com âncora bom
-  *na resolução dela*. O V2 provou o mecanismo a 704×384; se a moleza era só do
-  âncora ampliado, 1024×576 com âncora nativo deveria ser o melhor de todos.
+- **Os ~2 em 15 de voz errada** têm remédio melhor que re-rolar a seed?
