@@ -470,6 +470,128 @@ if seen.get("categories") == VOCAB:
 else:
     bad(f"'outros' blocked the second attempt: categories={seen.get('categories')!r}")
 
+print("== unit_ig_worker: strip_cta ==")
+from minimax_mcp.ig_worker import strip_cta
+
+# A sentence containing a CTA is removed entirely.
+cleaned = strip_cta(
+    "Misture a batata doce amassada com o azeite. "
+    "Já me segue aqui para não perder uma receita. "
+    "Asse na Air Fryer a 170°C por 15 minutos."
+)
+if "Já me segue aqui" not in cleaned and "Asse na Air Fryer" in cleaned and "Misture a batata" in cleaned:
+    ok("strip_cta removes the CTA sentence, keeps surrounding content")
+else:
+    bad(f"strip_cta = {cleaned!r}")
+
+# No CTA -> text unchanged.
+plain = "Asse na Air Fryer a 170°C por 15 minutos e sirva."
+if strip_cta(plain) == plain:
+    ok("strip_cta leaves CTA-free text intact")
+else:
+    bad(f"strip_cta(plain) = {strip_cta(plain)!r}")
+
+# Empty / whitespace input never raises.
+try:
+    if strip_cta("") == "" and strip_cta("   ").strip() == "":
+        ok("strip_cta handles empty/whitespace input")
+    else:
+        bad("strip_cta empty input result wrong")
+except Exception as e:
+    bad(f"strip_cta('') raised {e!r}")
+
+# 'link na bio' as its own sentence.
+if "link na bio" not in strip_cta("Curte e compartilha. Link na bio. O conteúdo principal.").lower():
+    ok("strip_cta removes 'link na bio' sentence")
+else:
+    bad("strip_cta did not remove 'link na bio'")
+
+# Standalone accented 'Já me segue' (no following 'para perder') is stripped.
+accented = strip_cta("A receita é boa. Já me segue. Asse por 15 min.")
+if "Já me segue" not in accented and "A receita é boa" in accented and "Asse por 15 min" in accented:
+    ok("strip_cta strips standalone accented 'Já me segue'")
+else:
+    bad(f"strip_cta(accented) = {accented!r}")
+
+# A legit sentence containing the bare word 'já' survives (no over-match).
+already = "Já assei por 15 minutos. O resto é fácil."
+if strip_cta(already) == already:
+    ok("strip_cta leaves a sentence with bare 'já' intact")
+else:
+    bad(f"strip_cta(bare já) = {strip_cta(already)!r}")
+
+# The 'comenta...que eu te mando' CTA fully inside one sentence is removed.
+same = strip_cta("A receita é boa. Comenta que eu te mando a receita. Asse por 15 min.")
+if "Comenta que eu te mando" not in same and "A receita é boa" in same and "Asse por 15 min" in same:
+    ok("strip_cta removes a single sentence fully containing 'comenta...que eu te mando'")
+else:
+    bad(f"strip_cta(same-sentence) = {same!r}")
+
+# The CTA split across two sentences is NOT removed: the regex must not cross
+# the period. (The user's 'Comenta e ativa o sininho. Depois que eu te mando
+# a receita.' example is shadowed by the earlier 'ativa o sininho' alternative,
+# so use a first sentence whose only pattern is 'comenta'.)
+split = strip_cta("Comenta a receita agora. Depois que eu te mando o passo a passo. Asse por 15 min.")
+if "Depois que eu te mando o passo a passo" in split and "Asse por 15 min" in split:
+    ok("strip_cta does not cross the sentence boundary of 'comenta...que eu te mando'")
+else:
+    bad(f"strip_cta(split-sentence) = {split!r}")
+
+print("== unit_ig_worker: process_message strips CTA before ingest ==")
+def dl_vid(msg):
+    return {"ok": True, "filepath": "/tmp/y.mp4"}
+
+def tr_cta(path):
+    return {"ok": True, "text": "A dica é boa. Segue pra não perder. Asse por 15 min.", "language": "pt"}
+
+seen_text = {}
+def ingest_record(text, **kw):
+    seen_text["text"] = text
+    return {"ok": True, "document_id": 45}
+
+ig_worker.process_message(
+    MESSAGE, download=dl_vid, transcribe=tr_cta, describe=None, ingest=ingest_record
+)
+if "Segue pra não perder" not in seen_text.get("text", "") and "A dica é boa" in seen_text.get("text", ""):
+    ok("process_message passes CTA-stripped text to ingest")
+else:
+    bad(f"ingest received uncleaned text: {seen_text.get('text')!r}")
+
+print("== unit_ig_worker: clean_title ==")
+from minimax_mcp.ig_worker import clean_title
+
+# Os quatro casos vêm dos doze títulos REAIS já ingeridos, não de exemplos
+# inventados: a primeira tentativa (reusar strip_cta no título) passou nos meus
+# exemplos e falhou nos títulos de verdade, de dois jeitos diferentes.
+CASES = [
+    # CTA sem pontuação final: o strip_cta sozinho devolvia isto INTACTO, porque
+    # a expressão de sentença exige `.`, `!` ou `?` para fechar.
+    ("Siga para mais 👉 @nikolassfaria", None),
+    # CTA + hashtags: o strip_cta sozinho devolvia "#code #c" -- pior que o
+    # original, porque vira o título e o nome do arquivo exportado.
+    ("Comenta “PROCESSO” que eu te mando o passo a passo completo no privado! #code #c", None),
+    # CTA no fim de conteúdo real: o conteúdo fica, a chamada sai.
+    ("Estude comigo na Fluency. Link na Bio.", "Estude comigo na Fluency."),
+    # Sem CTA: intacto, PONTUAÇÃO INCLUÍDA. Cortar o ponto final mudaria títulos
+    # bons e encheria qualquer comparação de ruído.
+    ("Uma receita simples, natural e muito poderosa.", "Uma receita simples, natural e muito poderosa."),
+    ("A energia do Sol cada vez mais próxima!", "A energia do Sol cada vez mais próxima!"),
+    (None, None),
+    ("", None),
+]
+for raw, expected in CASES:
+    got = clean_title(raw)
+    if got == expected:
+        ok(f"clean_title({raw!r:.42}) -> {got!r:.42}")
+    else:
+        bad(f"clean_title({raw!r:.42}) = {got!r}, esperado {expected!r}")
+
+# Um título que sobra com uma palavra só não é título -- deixa o resumo assumir.
+if clean_title("Link na bio! #dev") is None:
+    ok("clean_title devolve None quando sobra menos de duas palavras")
+else:
+    bad(f"clean_title de resto curto = {clean_title('Link na bio! #dev')!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

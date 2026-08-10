@@ -6,10 +6,12 @@ uses a fake deterministic embedding function.
 Run: uv run --directory . python tests/integration_knowledge_db.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from dotenv import load_dotenv
 
@@ -28,7 +30,7 @@ def bad(label: str) -> None:
     print(f"  [BAD]  {label}")
 
 
-from minimax_mcp import db
+from minimax_mcp import db, knowledge
 
 
 def fake_embed(text: str) -> list[float]:
@@ -39,6 +41,7 @@ def fake_embed(text: str) -> list[float]:
 
 
 doc = None
+export_doc_id = None
 print("== integration_knowledge_db: cleanup previous test runs ==")
 session = db.get_session()
 try:
@@ -142,6 +145,261 @@ try:
         bad(f"list_ig_pks = {pks!r}")
 finally:
     session.close()
+
+print("== integration_knowledge_db: export round-trip ==")
+session = db.get_session()
+try:
+    export_doc = db.save_document(
+        session,
+        type="text",
+        source_url="https://example.com/export-test",
+        platform="manual",
+        title="Export test doc",
+        language="pt",
+        transcription_text="Receita: bata 2 ovos com açúcar. Finalize com canela.",
+        summary="Resumo de export test.",
+        tutorial="## Passo 1\nBata ovos.",
+        objectives="Objetivo 1\nObjetivo 2",
+        tags=["test", "export"],
+        raw_file_path=None,
+        llm_provider="ollama",
+        llm_model="lfm2:24b",
+        embed_fn=fake_embed,
+        embedding_model="fake-embed-test",
+    )
+    export_doc_id = export_doc.id
+    if export_doc_id is not None:
+        ok(f"save_document created export-test document id={export_doc_id}")
+    else:
+        bad("save_document did not assign an id to the export-test document")
+except Exception as e:
+    bad(f"export round-trip: save_document raised: {e}")
+finally:
+    session.close()
+
+try:
+    if export_doc_id is None:
+        bad("export round-trip: skipping exercises because save_document failed")
+    else:
+        try:
+            listed = knowledge.export_search(ids=[export_doc_id])
+            if (
+                listed.get("ok")
+                and listed.get("total") == 1
+                and listed["documents"][0]["id"] == export_doc_id
+            ):
+                ok("export_search(ids=[doc_id]) lists exactly the saved document")
+            else:
+                bad(f"export_search returned unexpected result: {listed!r}")
+        except Exception as e:
+            bad(f"export_search raised: {e}")
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                exported = knowledge.export_documents([export_doc_id], output_dir=tmp)
+                f0 = exported["files"][0]
+                if (
+                    exported.get("ok")
+                    and f0.get("ok")
+                    and Path(f0["path"]).exists()
+                ):
+                    ok(f"export_documents wrote markdown file: {f0['path']}")
+                else:
+                    bad(f"export_documents returned unexpected result: {exported!r}")
+        except Exception as e:
+            bad(f"export_documents raised: {e}")
+
+        try:
+            missing = knowledge.export_documents([99999999])
+            if missing.get("ok") and missing["files"][0]["ok"] is False:
+                ok("export_documents tolerates a missing id (files[0].ok is False)")
+            else:
+                bad(f"export_documents missing-id result unexpected: {missing!r}")
+        except Exception as e:
+            bad(f"export_documents(missing id) raised: {e}")
+finally:
+    session = db.get_session()
+    try:
+        removed = db.delete_documents(session, source_url="https://example.com/export-test")
+        if removed >= 1:
+            ok(f"export round-trip cleanup removed {removed} document(s)")
+        else:
+            bad("export round-trip cleanup removed 0 documents")
+    except Exception as e:
+        bad(f"export round-trip cleanup raised: {e}")
+    finally:
+        session.close()
+
+print("== integration_knowledge_db: export skipped -> files[0].ok False ==")
+try:
+    session = db.get_session()
+    try:
+        skip_doc = db.save_document(
+            session,
+            type="text",
+            source_url="https://example.com/export-skip-test",
+            platform="manual",
+            title="Export skip test doc",
+            language="pt",
+            transcription_text="Texto do skip test.",
+            summary="Resumo do skip test.",
+            tutorial=None,
+            objectives=None,
+            tags=["test"],
+            raw_file_path=None,
+            llm_provider="ollama",
+            llm_model="lfm2:24b",
+            embed_fn=fake_embed,
+            embedding_model="fake-embed-test",
+        )
+    finally:
+        session.close()
+
+    # empty output_dir is falsy -> vault.write_markdown_copy returns
+    # {ok: True, skipped: True}; the per-file ok must reflect "written",
+    # i.e. False, while the overall export stays ok=True.
+    res = knowledge.export_documents([skip_doc.id], output_dir="")
+    f0 = res["files"][0]
+    if (
+        res.get("ok") is True
+        and f0.get("ok") is False
+        and f0.get("skipped") is True
+    ):
+        ok("export_documents with empty output_dir: files[0].ok False, skipped True, overall ok True")
+    else:
+        bad(f"export_documents empty output_dir unexpected: {res!r}")
+except Exception as e:
+    bad(f"export skip test raised: {e}")
+finally:
+    session = db.get_session()
+    try:
+        removed = db.delete_documents(session, source_url="https://example.com/export-skip-test")
+        if removed >= 1:
+            ok(f"export skip test cleanup removed {removed} document(s)")
+        else:
+            bad("export skip test cleanup removed 0 documents")
+    except Exception as e:
+        bad(f"export skip test cleanup raised: {e}")
+    finally:
+        session.close()
+
+print("== integration_knowledge_db: backfill snapshot/restore round-trip ==")
+import backfill_cta as backfill
+
+restore_doc_id = None
+restore_md_path = None
+restore_json_path = None
+try:
+    session = db.get_session()
+    try:
+        restore_doc = db.save_document(
+            session,
+            type="text",
+            source_url="https://example.com/export-restore-test",
+            platform="manual",
+            title="Restore test doc",
+            language="pt",
+            transcription_text="Transcrição original do restore test.",
+            summary="Resumo original.",
+            tutorial="Tutorial original.",
+            objectives="Objetivo original.",
+            tags=["restore"],
+            raw_file_path=None,
+            llm_provider="ollama",
+            llm_model="lfm2:24b",
+            embed_fn=fake_embed,
+            embedding_model="fake-embed-test",
+            ig_pk="999",
+        )
+        restore_doc_id = restore_doc.id
+        original_summary = restore_doc.summary
+    finally:
+        session.close()
+    if restore_doc_id is None:
+        bad("restore round-trip: save_document failed")
+    else:
+        restore_md_path = backfill._snapshot_path(restore_doc_id, "999")
+        restore_json_path = backfill._snapshot_json_path(restore_doc_id, "999")
+
+        session = db.get_session()
+        try:
+            doc_for_snap = session.get(db.Document, restore_doc_id)
+        finally:
+            session.close()
+        try:
+            backfill.snapshot_doc(doc_for_snap)
+            if restore_md_path.exists() and restore_json_path.exists():
+                ok(f"snapshot_doc wrote .md + .json for doc {restore_doc_id}")
+            else:
+                bad(
+                    f"snapshot_doc missing files: "
+                    f"md={restore_md_path.exists()} json={restore_json_path.exists()}"
+                )
+        except Exception as e:
+            bad(f"snapshot_doc raised: {e}")
+
+        session = db.get_session()
+        try:
+            row = session.get(db.Document, restore_doc_id)
+            row.summary = "Resumo MUTADO."
+            session.commit()
+        finally:
+            session.close()
+
+        res = backfill.restore_doc(restore_doc_id, "999")
+        if res.get("ok") and res["fields"].get("summary") == original_summary:
+            ok("restore_doc reads the .json snapshot with the original summary")
+        else:
+            bad(f"restore_doc unexpected: {res!r}")
+
+        session = db.get_session()
+        try:
+            row = session.get(db.Document, restore_doc_id)
+            fields = res["fields"]
+            row.transcription_text = fields.get("transcription_text")
+            row.summary = fields.get("summary")
+            row.tutorial = fields.get("tutorial")
+            row.objectives = fields.get("objectives")
+            row.tags = fields.get("tags")
+            row.language = fields.get("language")
+            row.title = fields.get("title")
+            if "llm_provider" in fields:
+                row.llm_provider = fields.get("llm_provider")
+            if "llm_model" in fields:
+                row.llm_model = fields.get("llm_model")
+            session.commit()
+        finally:
+            session.close()
+
+        session = db.get_session()
+        try:
+            re_read = session.get(db.Document, restore_doc_id)
+            if re_read.summary == original_summary:
+                ok("row summary restored to the original after applying restore")
+            else:
+                bad(f"row summary after restore = {re_read.summary!r}, expected {original_summary!r}")
+        finally:
+            session.close()
+except Exception as e:
+    bad(f"restore round-trip raised: {e}")
+finally:
+    for p in (restore_md_path, restore_json_path):
+        if p is not None and p.exists():
+            try:
+                p.unlink()
+            except Exception as e:
+                bad(f"restore cleanup unlink failed for {p}: {e}")
+    session = db.get_session()
+    try:
+        removed = db.delete_documents(session, source_url="https://example.com/export-restore-test")
+        if removed >= 1:
+            ok(f"restore round-trip cleanup removed {removed} document(s)")
+        else:
+            bad("restore round-trip cleanup removed 0 documents")
+    except Exception as e:
+        bad(f"restore round-trip cleanup raised: {e}")
+    finally:
+        session.close()
 
 print()
 if FAIL:

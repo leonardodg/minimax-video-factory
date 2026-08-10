@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,6 +23,74 @@ from typing import Any
 from minimax_mcp import db, ig_queue, knowledge, llm
 
 logger = logging.getLogger(__name__)
+
+_CTA_PATTERNS = (
+    r"segue(?:-me| me)?(?: aqui)? (?:para|pra)(?: não| nao)? perder",
+    r"j[aá] me segue",
+    r"siga para mais",
+    r"salva(?: esse| este| o) vídeo",
+    r"salv(e|a) para fazer depois",
+    r"compartilh(a|e) com (?:seus|teus|os) amigos",
+    r"link na bio",
+    r"curte e compartilha",
+    r"ativa o sininho",
+    r"coment(?:a|e)[^.!?]*que eu te mando",
+)
+_CTA_SENTENCE_RE = re.compile(
+    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*[.!?]",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_cta(text: str) -> str:
+    """Remove sentences containing Instagram call-to-action phrases.
+
+    A sentence is delimited by `.`, `!` or `?`. Only the sentence that contains
+    the CTA is removed; surrounding content is preserved. Never raises and
+    returns input unchanged when no CTA pattern matches.
+    """
+    if not text:
+        return text
+    return _CTA_SENTENCE_RE.sub("", text).strip()
+
+
+# O mesmo vocabulário, mas casando até o fim da string em vez de exigir `.!?`.
+# Título de legenda frequentemente não tem pontuação nenhuma -- "Siga para mais
+# 👉 @fulano" atravessava o strip_cta intacto porque a sentença nunca terminava.
+_CTA_TAIL_RE = re.compile(
+    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_HASHTAG_RE = re.compile(r"#\S+")
+_WORD_RE = re.compile(r"\w{2,}", re.UNICODE)
+
+
+def clean_title(raw: str | None) -> str | None:
+    """Limpa o título vindo da legenda do Instagram, ou devolve None.
+
+    O `strip_cta` sozinho não serve aqui, e os doze documentos reais mostraram
+    os dois motivos:
+
+      "Siga para mais 👉 @fulano"          passava intacto -- sem `.!?`, a
+                                            expressão de sentença nunca casa
+      "Comenta 'PROCESSO' ... no privado!"  virava "#code #c" -- o CTA saía e
+                                            sobrava a salada de hashtag
+
+    Então: remove CTA com e sem pontuação final, tira hashtags (que não são
+    título de coisa nenhuma) e limpa a pontuação órfã. Se o que sobrar tiver
+    menos de duas palavras, não é título -- devolve None, e o `ingest` cai no
+    fallback que já existe (`title or resumo[:80]`), deixando a primeira linha
+    do resumo assumir.
+    """
+    if not raw:
+        return None
+    t = _CTA_TAIL_RE.sub("", strip_cta(raw))
+    t = _HASHTAG_RE.sub("", t)
+    # Corta só espaço e separador órfão. Ponto final e exclamação FICAM: tirá-los
+    # mudaria títulos perfeitamente bons ("Uma receita simples." -> "Uma receita
+    # simples") e encheria a comparação de diferenças que não são limpeza de CTA.
+    t = re.sub(r"\s+", " ", t).strip(" -–—|·•,;:")
+    return t if len(_WORD_RE.findall(t)) >= 2 else None
 
 IG_DOWNLOADS_DIR = Path(os.environ.get("IG_DOWNLOADS_DIR", "downloads/ig"))
 IG_DELETE_AFTER_INGEST = os.environ.get("IG_DELETE_AFTER_INGEST", "true").lower() in (
@@ -99,10 +168,21 @@ def process_message(
     classified = bool(categoria) and categoria != "outros"
     if classified:
         extra_tags = (extra_tags or []) + [f"categoria:{categoria}"]
+    text = strip_cta(text)
+    # O título também. Ele vem da primeira linha da legenda do Instagram, e é o
+    # campo MAIS visível -- aparece na listagem e vira o nome do arquivo
+    # exportado. Limpar só a transcrição deixava passar exatamente a superfície
+    # que mais incomoda: "Comenta 'PROCESSO' que eu te mando o passo a passo",
+    # "Siga para mais @fulano" e "Estude comigo na Fluency. Link na Bio." eram
+    # três dos doze títulos ingeridos.
+    #
+    # `clean_title` e não `strip_cta`: o título não é prosa, e os dois casos que
+    # o strip_cta sozinho errava estão documentados lá.
+    title = clean_title(message.get("title"))
     ing = ingest(
         text,
         source_url=message.get("url"),
-        title=message.get("title"),
+        title=title,
         platform="instagram",
         doc_type=doc_type,
         language=lang,
