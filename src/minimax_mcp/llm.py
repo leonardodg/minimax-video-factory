@@ -212,7 +212,7 @@ def _openai_compatible_generate(prompt: str, model: str, *, force_json: bool) ->
     return resp.json()["choices"][0]["message"]["content"]
 
 
-_BLOCO_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_BLOCO_RE = re.compile(r"```([^\n]*)\n(.*?)```", re.DOTALL)
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 NAO_MOSTRADO = "(não mostrado no material)"
 
@@ -313,9 +313,21 @@ def ancorar_codigo(tutorial: str, fonte: str, *, limiar: float = 0.5) -> tuple[s
 
     def bloco(m: re.Match) -> str:
         nonlocal removidos
-        # SÓ as linhas de código contam. Um bloco de prosa embrulhado em cerca
-        # não é objeto desta verificação -- ver `_linha_parece_codigo`.
-        linhas = [ln for ln in m.group(1).splitlines() if _linha_parece_codigo(ln)]
+        # A LINGUAGEM NA CERCA é o modelo declarando "isto é código". Quando ela
+        # está lá (```bash, ```css, ```python), toda linha conta -- inclusive
+        # comando puro, que não tem símbolo nenhum e escapava da classificação
+        # por símbolo. Foi como `sudo apt update` e `sudo apt install nmap`
+        # atravessaram a régua no post 3704821969073991262 depois de eu já ter
+        # consertado o mesmo buraco nos spans inline.
+        #
+        # Sem linguagem, decide-se linha a linha: o modelo embrulha prosa em
+        # ``` puro com frequência, e ali a régua não deve valer.
+        linguagem = (m.group(1) or "").strip()
+        corpo = m.group(2)
+        if linguagem:
+            linhas = [ln for ln in corpo.splitlines() if len(ln.strip()) >= 4]
+        else:
+            linhas = [ln for ln in corpo.splitlines() if _linha_parece_codigo(ln)]
         if not linhas:
             return m.group(0)
         ancoradas = sum(1 for ln in linhas if _norm(ln) in alvo)
