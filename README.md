@@ -426,7 +426,7 @@ which the container cannot reach. Everything else runs in the container.
 | `knowledge_ask` | `/kb-perguntar` | Answer from your own base only, citing the sources |
 | `knowledge_reindex` | `/kb-reindex` | Recompute chunks and embeddings for everything |
 | `kb_export_search` | `/kb-export-search` | List documents to export — by ids, query, or latest first |
-| `kb_export` | `/kb-export` | Write the selected documents as readable `.md` files |
+| `kb_export` | `/kb-export` | Write the selected documents as readable `.md` files (land under `<output_dir>/Knowledge/`, e.g. `output/kb-export/Knowledge/`) |
 
 ### Instagram sync
 

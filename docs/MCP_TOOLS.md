@@ -95,7 +95,7 @@ Exporta documentos selecionados como arquivos .md legíveis.
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `ids` | array | yes | IDs dos documentos a exportar (confirme antes com kb-export-search) |
-| `output_dir` | string | no | Diretório de destino dos .md |
+| `output_dir` | string | no | Diretório de destino dos .md (os arquivos caem em <output_dir>/Knowledge/) |
 
 ## `kb_export_search`
 

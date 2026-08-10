@@ -20,7 +20,7 @@ the actual source in `src/minimax_mcp/` and the generated tool reference in
 
 ```
 src/minimax_mcp/
-├── server.py            # FastMCP app + all tool registrations (18 tools)
+├── server.py            # FastMCP app + all tool registrations (26 tools)
 ├── comfyui_client.py    # ComfyUIClient: submit/history/websocket/download
 ├── core.py              # shared ComfyUI helpers (workflow, paths, durations)
 ├── downloader.py        # yt-dlp wrapper with browser cookies

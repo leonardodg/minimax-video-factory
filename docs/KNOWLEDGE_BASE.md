@@ -178,7 +178,9 @@ latest first.
 ### `kb_export`
 
 Writes one **readable `.md` file per selected document** to
-`output/kb-export/` (via the same vault writer used for Obsidian copies). Each
+`<output_dir>/Knowledge/` (the vault writer always appends `/Knowledge`, so with
+the default `output_dir` the files land in `output/kb-export/Knowledge/`; the
+same writer is used for Obsidian copies). Each
 file has YAML frontmatter (`source_url`, `platform`, `type`, `ig_pk`,
 `llm_model`, `created_at`) and sections `# title`, tags, `## Resumo`,
 `## Tutorial`, `## Objetivos`, `## Transcrição completa`, and a `## Prompt de
@@ -187,7 +189,7 @@ geração de vídeo` placeholder (filled when the prompt schema exists).
 | Parameter | Required | Default | Best option |
 |---|---|---|---|
 | `ids` | ✅ | — | document ids to export; confirm first with `kb_export_search` |
-| `output_dir` | ❌ | `output/kb-export/` | where the `.md` files land |
+| `output_dir` | ❌ | `output/kb-export/` | where the `.md` files land (under `<output_dir>/Knowledge/`) |
 
 Missing ids are reported per-file without aborting the rest.
 

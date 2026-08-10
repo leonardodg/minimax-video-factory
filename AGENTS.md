@@ -497,14 +497,16 @@ reference lives in `docs/MCP_TOOLS.md`.
 
 **Markdown export:** `kb_export_search(query?, ids?, limit?)` lists docs without
 writing; `kb_export(ids, output_dir?)` writes one readable `.md` per selected
-doc to `output/kb-export/` (frontmatter + resumo + tutorial + objetivos +
-transcrição + video-prompt placeholder).
+doc under `<output_dir>/Knowledge/` (default `output/kb-export/Knowledge/`;
+frontmatter + resumo + tutorial + objetivos + transcrição + video-prompt
+placeholder).
 
 **CTA cleanup:** the IG worker runs `strip_cta()` (in `ig_worker.py`) to remove
 Instagram call-to-action sentences from transcriptions before ingest, and the
 summary prompt omits CTAs from generated fields. `scripts/backfill_cta.py`
-re-applies this to already-ingested IG docs (snapshots to `output/kb-backup/`,
-`--dry-run`, `--restore <id>`).
+re-applies this to already-ingested IG docs (snapshots `.md`+`.json` to
+`output/kb-backup/`, `--dry-run`, `--restore <id>` writes the snapshot fields
+back to Postgres).
 
 ### 10.1 Tutorial: pedir via chat (OpenCode)
 

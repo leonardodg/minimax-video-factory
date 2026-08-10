@@ -507,7 +507,7 @@ def kb_export_search(
 @mcp.tool()
 def kb_export(
     ids: list[int] = Field(description="IDs dos documentos a exportar (confirme antes com kb-export-search)"),
-    output_dir: str = Field(default="output/kb-export/", description="Diretório de destino dos .md"),
+    output_dir: str = Field(default="output/kb-export/", description="Diretório de destino dos .md (os arquivos caem em <output_dir>/Knowledge/)"),
 ) -> dict[str, Any]:
     """Exporta documentos selecionados como arquivos .md legíveis."""
     from minimax_mcp import knowledge

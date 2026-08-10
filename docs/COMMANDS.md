@@ -15,7 +15,7 @@ Os comandos `kb-*` só funcionam contra o servidor **host** (`minimax-knowledge-
 | `/ig-worker` | `ig_worker_start` | Envia o comando 'start' ao daemon ig-worker (retoma o consumo da fila) |
 | `/ig-worker-stop` | `ig_worker_stop` | Envia o comando 'stop' ao daemon ig-worker (pausa o consumo da fila) |
 | `/kb-buscar` | `knowledge_search` | Busca na base de conhecimento (palavra-chave + semântica) |
-| `/kb-export` | `kb_export` | Exporta os documentos selecionados como .md em output/kb-export/ |
+| `/kb-export` | `kb_export` | Exporta os documentos selecionados como .md (os arquivos caem em <output_dir>/Knowledge/) |
 | `/kb-export-search` | `kb_export_search` | Lista documentos para exportar — por IDs, por busca ou os mais recentes. Nao grava nada; use a lista para confirmar e depois chamar kb-export |
 | `/kb-ingest-audio` | `knowledge_ingest_audio` | Transcreve e documenta um áudio/podcast na base de conhecimento |
 | `/kb-ingest-markdown` | `knowledge_ingest_markdown` | Importa arquivos markdown (ex.: Obsidian) para a base de conhecimento |
@@ -280,7 +280,7 @@ Busca na base de conhecimento (palavra-chave + semântica).
 
 ### `/kb-export`
 
-Exporta os documentos selecionados como .md em output/kb-export/.
+Exporta os documentos selecionados como .md (os arquivos caem em <output_dir>/Knowledge/).
 
 ```
 /kb-export <ids> [output_dir=output/kb-export/]
@@ -289,7 +289,7 @@ Exporta os documentos selecionados como .md em output/kb-export/.
 | Parâmetro | Obrigatório | Default | Descrição |
 |---|---|---|---|
 | `ids` | sim | — | IDs confirmados na busca (kb-export-search) |
-| `output_dir` | não | `output/kb-export/` | diretório de destino (default output/kb-export/) |
+| `output_dir` | não | `output/kb-export/` | diretório de destino (os .md caem em <output_dir>/Knowledge/; default output/kb-export/) |
 
 ### `/kb-export-search`
 

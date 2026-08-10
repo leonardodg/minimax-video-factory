@@ -292,7 +292,7 @@ desenhado, não a máquina.**
 ## Estado do repositório
 
 - `~/tools-local/minimax-video-factory`, branch `main` em `2a3187f`.
-- **24 tools** MCP (a merge do IG somou 5 às 19 antigas).
+- **26 tools** MCP (a merge do IG somou 5 às 19 antigas).
 - **13 testes unitários** passando.
 - `uv run ruff check .` acusa **~25 erros pré-existentes** na `main`, drift da
   merge do IG. Não são dos slash commands nem do fix de VRAM.

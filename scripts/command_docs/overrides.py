@@ -296,10 +296,10 @@ OVERRIDES: dict[str, Override] = {
         },
     ),
     "kb_export": Override(
-        resumo="Exporta os documentos selecionados como .md em output/kb-export/",
+        resumo="Exporta os documentos selecionados como .md (os arquivos caem em <output_dir>/Knowledge/)",
         param_notas={
             "ids": "IDs confirmados na busca (kb-export-search)",
-            "output_dir": "diretório de destino (default output/kb-export/)",
+            "output_dir": "diretório de destino (os .md caem em <output_dir>/Knowledge/; default output/kb-export/)",
         },
     ),
 }

@@ -537,8 +537,11 @@ def export_documents(
 ) -> dict[str, Any]:
     """Write the selected documents as readable .md files.
 
-    Uses vault.write_markdown_copy (which appends /Knowledge to the path and
-    never raises). Missing ids are reported per-file without aborting the rest.
+    Uses vault.write_markdown_copy, which always appends `/Knowledge` to the
+    path — files land under `<output_dir>/Knowledge/` — and never raises. A
+    per-file `ok` is True only when the file was actually written; when the
+    vault skips (empty output_dir, write error) `ok` is False and `skipped` is
+    True. Missing ids are reported per-file without aborting the rest.
     """
     if (unavailable := _kb_unavailable()):
         return unavailable
@@ -560,8 +563,9 @@ def export_documents(
             files.append({"id": doc_id, "ok": False, "error": "not found"})
             continue
         result = vault.write_markdown_copy(_document_to_dict(doc), output_dir)
+        written = bool(result.get("ok")) and not result.get("skipped")
         files.append(
-            {"id": doc_id, "ok": result.get("ok", False),
+            {"id": doc_id, "ok": written,
              "skipped": result.get("skipped", False), "path": result.get("path"),
              "error": result.get("reason")}
         )

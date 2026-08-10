@@ -2,20 +2,23 @@
 """Backfill: re-apply CTA cleanup to already-ingested Instagram documents.
 
 For each document with an ig_pk, it:
-  1. snapshots the current state as .md in output/kb-backup/<id>-<ig_pk>.md
+  1. snapshots the current state as .md + .json in output/kb-backup/
   2. strips CTA from transcription_text
   3. regenerates summary/tutorial/objectives/tags via the LLM (new prompt)
   4. writes the UPDATE, preserving id/ig_pk/source_url/platform/created_at
 
 Modes:
   --dry-run            show what would change, write nothing
-  --restore <id>       restore <id> from its snapshot (rollback)
+  --restore <id>       truly restores <id>'s fields from its .json snapshot
+                       (rollback): writes transcription_text/summary/tutorial/
+                       objectives/tags/language/title/llm_* back to Postgres.
 
 Run from the worktree: uv run --directory . python scripts/backfill_cta.py
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -25,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from dotenv import load_dotenv
 from sqlalchemy import select
 
-from minimax_mcp import db, llm, vault
+from minimax_mcp import db, knowledge, llm, vault
 from minimax_mcp.db import Document
 from minimax_mcp.ig_worker import strip_cta
 
@@ -38,24 +41,49 @@ def _snapshot_path(doc_id: int, ig_pk: str) -> Path:
     return BACKUP_DIR / f"{doc_id}-{ig_pk}.md"
 
 
+def _snapshot_json_path(doc_id: int, ig_pk: str) -> Path:
+    return BACKUP_DIR / f"{doc_id}-{ig_pk}.json"
+
+
 def snapshot_doc(doc) -> Path:
-    """Serialize `doc` through the shared vault writer, then park it at the
-    deterministic snapshot path so restore_doc can always find it.
+    """Snapshot `doc` to disk: a machine-readable .json (authoritative for
+    restore) plus a human-readable .md (comparison artifact).
 
     `vault.write_markdown_copy` never returns ok=False (it swallows errors and
     returns `{"skipped": True}`), so the presence of a `path` in its result is
-    the only reliable success signal.
+    the only reliable success signal. The .json is written directly and is the
+    source of truth for restore_doc.
     """
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    d = {
-        "id": doc.id, "title": doc.title, "summary": doc.summary,
-        "tutorial": doc.tutorial, "objectives": doc.objectives,
-        "tags": doc.tags or [], "source_url": doc.source_url,
-        "platform": doc.platform, "type": doc.type,
-        "transcription_text": doc.transcription_text,
-        "ig_pk": doc.ig_pk, "llm_model": doc.llm_model,
-    }
-    res = vault.write_markdown_copy(d, str(BACKUP_DIR))
+
+    json_path = _snapshot_json_path(doc.id, doc.ig_pk)
+    json_path.write_text(
+        json.dumps(
+            {
+                "id": doc.id,
+                "type": doc.type,
+                "source_url": doc.source_url,
+                "platform": doc.platform,
+                "title": doc.title,
+                "language": doc.language,
+                "transcription_text": doc.transcription_text,
+                "summary": doc.summary,
+                "tutorial": doc.tutorial,
+                "objectives": doc.objectives,
+                "tags": doc.tags or [],
+                "raw_file_path": doc.raw_file_path,
+                "llm_provider": doc.llm_provider,
+                "llm_model": doc.llm_model,
+                "ig_pk": doc.ig_pk,
+                "created_at": doc.created_at,
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+
+    res = vault.write_markdown_copy(knowledge._document_to_dict(doc), str(BACKUP_DIR))
     if not res.get("path"):
         raise RuntimeError(
             f"snapshot write failed for doc {doc.id}: {res.get('reason')}"
@@ -66,12 +94,18 @@ def snapshot_doc(doc) -> Path:
 
 
 def restore_doc(doc_id: int, ig_pk: str) -> dict:
-    """Read a snapshot back into a document dict (best-effort parse)."""
-    p = _snapshot_path(doc_id, ig_pk)
+    """Read the .json snapshot back into a field dict for Postgres restore.
+
+    The .json is authoritative; the .md is only a human-readable fallback.
+    """
+    p = _snapshot_json_path(doc_id, ig_pk)
     if not p.exists():
         return {"ok": False, "error": f"no snapshot at {p}"}
-    text = p.read_text(encoding="utf-8")
-    return {"ok": True, "path": str(p), "text": text}
+    try:
+        fields = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {"ok": False, "error": f"unparseable snapshot {p}: {e!r}"}
+    return {"ok": True, "fields": fields, "path": str(p)}
 
 
 def main() -> int:
@@ -98,8 +132,35 @@ def main() -> int:
             print(f"document {args.restore} not found")
             return 1
         res = restore_doc(doc.id, doc.ig_pk)
-        print(res)
-        print("restore is best-effort: open the .md and re-ingest its contents if needed")
+        if not res.get("ok"):
+            print(res.get("error", "restore failed"))
+            return 1
+        fields = res["fields"]
+        s2 = db.get_session()
+        try:
+            row = s2.get(Document, doc.id)
+            if row is None:
+                print(f"document {doc.id} not found in database")
+                return 1
+            row.transcription_text = fields.get("transcription_text")
+            row.summary = fields.get("summary")
+            row.tutorial = fields.get("tutorial")
+            row.objectives = fields.get("objectives")
+            row.tags = fields.get("tags")
+            row.language = fields.get("language")
+            row.title = fields.get("title")
+            if "llm_provider" in fields:
+                row.llm_provider = fields.get("llm_provider")
+            if "llm_model" in fields:
+                row.llm_model = fields.get("llm_model")
+            s2.commit()
+        except Exception as e:
+            s2.rollback()
+            print(f"restore failed for {doc.id}: {e!r}")
+            return 1
+        finally:
+            s2.close()
+        print(f"restored document {doc.id} from snapshot")
         return 0
 
     for doc in docs:
@@ -108,6 +169,13 @@ def main() -> int:
         print(f"[{doc.id}] cta_changed={changed}")
         if args.dry_run:
             print(f"    transcription {len(doc.transcription_text or '')} -> {len(cleaned)} chars")
+            continue
+
+        if _snapshot_path(doc.id, doc.ig_pk).exists() or _snapshot_json_path(doc.id, doc.ig_pk).exists():
+            print(
+                f"    snapshot exists at {_snapshot_path(doc.id, doc.ig_pk)} "
+                f"— already backfilled; skipping (use --restore {doc.id} to roll back)"
+            )
             continue
 
         snap = snapshot_doc(doc)
