@@ -119,6 +119,91 @@ porque as 3111 já publicadas carregam a URL velha. **Backfill feito: 55 de 56.*
 novo — o RabbitMQ leva alguns segundos para largar a conexão morta, e subir
 antes daria dois consumidores na mesma GPU.
 
+### Ler a tela: o áudio não diz o que importa
+
+O usuário apontou, e a medição confirmou com folga: *"pesquise esse projeto
+aqui"*, *"olha esse código"* — o nome e o código estão **na tela**, e o áudio
+não os pronuncia. O pipeline não deixava a lacuna vazia: **preenchia com
+invenção**.
+
+| post | antes | depois |
+|---|---|---|
+| `3818562307589048738` | `pip install toastnotifications` (pacote inexistente) | `from win10toast import ToastNotifier` |
+| `3839009985007901571` | "aula de português" a partir de um áudio de meme | *Kubernetes in 60 seconds* — o assunto real |
+
+**O desenho é do usuário e é o que faz caber:** a leitura roda **no mesmo
+worker, em sequência**, dentro da folga que já existia. Não é paralelismo —
+paralelo não cabe, e isso foi medido: o pico do worker é **10,8 GB dos 12,3 GB**
+da placa, sobrando 1,4 GB, e o modelo de visão pede ~6 GB.
+
+| | processamento | teto |
+|---|---|---|
+| antes (109 mensagens) | **29,0 s** | 90 s |
+| com leitura de tela (7) | **58,1 s** | 90 s |
+
+Como `pace_sleep_seconds` conta do **início** da mensagem, a leitura encolhe a
+pausa em vez de esticar a corrida: **custo de cronograma zero**. `keep_alive=0`
+na chamada de visão não é performance, é o que evita OOM.
+
+### ⚠️ Pedir ao modelo não segura invenção. Verificar, sim.
+
+A regra "não invente código" no prompt (`5190c3a`) **falhou onde deveria valer**:
+no post do Kubernetes, cuja tela não tem comando nenhum, o tutorial saiu com
+`kubectl create pod`, `kubectl expose pod` e `kubectl scale deployment`, todos
+inventados. Funcionou só onde o código **existia** na tela — ou seja, onde não
+era necessária.
+
+`llm.ancorar_codigo` (`ecd720a`) troca o pedido por **verificação**: todo bloco
+cercado e todo span que pareça comando precisa aparecer no material
+(transcrição + tela); o que não aparece vira `(não mostrado no material)`. Bloco
+cai por **maioria**, não unanimidade — o modelo reformata indentação, e derrubar
+bloco correto seria trocar um defeito por outro.
+
+### Disco: respondido por série, não por ponto
+
+| | |
+|---|---|
+| mídia | **4,0 MB/post** |
+| fora da mídia (Postgres, log, capa) | **0,7 MB/post** |
+| **total** | **4,7 MB/post** → ~13,6 GB para o que falta |
+| livre | 47,3 GB |
+
+⚠️ Um relatório mediu "2,1 GB/h fora da mídia" e **isso era ruído da máquina, não
+a corrida** — a série de `output/ig-sync-2026-08-10/disco.csv` mostrou 37 MB/h.
+O instrumento antigo só media a pasta que ele mesmo enchia; um ponto isolado não
+distingue tendência de ruído.
+
+### O worker tem de viver fora da sessão
+
+`nohup` **não** basta: ele protege de SIGHUP, não de SIGTERM, e o worker morreu
+duas vezes junto com o comando que o lançou. `setsid` também não bastou. O que
+resolveu:
+
+```bash
+systemd-run --user --unit=ig-worker --collect \
+  --working-directory=/home/leodg/tools-local/minimax-video-factory \
+  /bin/bash -c 'set -a; . ./.env; set +a; exec ./.venv/bin/python -m minimax_mcp.ig_worker >> <log> 2>&1'
+```
+
+`systemctl --user restart ig-worker.service` troca o código. Ao parar, o
+`unacked` volta para `ready` (visto: 3067 → 3068) — nada se perde. **Esperar
+`consumers=0` antes de subir o novo**, senão são dois na mesma GPU.
+
+### Lista de pendências (não fazer agora)
+
+- **Logger em todo o projeto + nível configurável** (`debug=true` ou
+  `info/warn/error`). Pedido do usuário em 2026-08-10: "quando tiver uma folga".
+  O `llm.py` não tinha `logger` nenhum até `ecd720a` — o defeito é geral.
+- **Reprocessar os documentos antigos**: ~148 nasceram sem leitura de tela, sem
+  capa e com tutorial possivelmente fabricado. **Não custa Instagram** (mídia no
+  disco) e **não precisa da pausa de 90 s** (ela espaça requisições que não
+  haverá): ~68 s cada. Falta um caminho de **atualizar** documento — só existem
+  `save_document` e `delete_documents`, então é apagar e recriar, com snapshot
+  em JSON antes.
+- **Os ~495 posts da catch-all**, ver acima.
+- **Visão às vezes lê errado**: um quadro deu `ToastNotification` e outro
+  `ToastNotifier`; como nenhuma contém a outra, as duas ficaram no documento.
+
 ### Disco é o recurso apertado
 
 `/home` tinha 51 GB livres (já a 90%) quando o piloto começou. A projeção é
