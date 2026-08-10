@@ -188,19 +188,31 @@ comprime e faz bombear), limitador, fades de 80 ms, vídeo copiado bit a bit.
 
 ## O que NÃO funcionou
 
-### Keyframes vindos de um passe barato
+### Keyframes vindos de um passe barato — o erro mais caro da rodada
 
-Renderizar a história a 512×320 para extrair os quadros de emenda e depois
-prender os capítulos finais a eles com `first_frame`+`last_frame`.
+Renderizar a história a 512×320 para extrair os quadros de emenda, ampliar para
+1024×576 e prender os capítulos finais a eles com `first_frame`+`last_frame`.
 
-**O mecanismo funciona** — as três emendas saíram perfeitamente contínuas. **A
-fonte é que estava errada:** a pré-viz deriva do roteiro, e os capítulos finais
-são então *obrigados* a aterrissar onde ela derivou. Em 29 s a raposa não saiu do
-lugar, não subiu a encosta, não viu o sol nascer. **A pré-viz vira a autora**, e
-paga-se preço de 1024×576 para reproduzir os erros de um passe barato.
+**O mecanismo é sadio — a fonte é que estava errada.** Provado em 2026-08-09
+(rodada 3.1): com os dois âncoras vindos de um render BOM em resolução nativa, o
+clipe saiu de uma encosta vazia, criou a entrada dos dois personagens, deu uma
+troca de falas e aterrissou no âncora de chegada — com a nitidez do melhor
+material da rodada.
+
+Com a pré-viz barata, a mesma técnica falha **duas vezes ao mesmo tempo**:
+
+- **Congela a ação.** Os capítulos finais são obrigados a aterrissar onde a
+  pré-viz derivou, não onde o roteiro manda. Em 29 s a raposa não saiu do lugar,
+  não subiu a encosta e não viu o sol nascer. **A pré-viz vira a autora.**
+- **Borra a imagem.** Um alvo esticado de 512 para 1024 não tem detalhe para o
+  modelo interpolar em direção, e a moleza contamina o clipe inteiro. Foi a única
+  variante da rodada a 1024×576 e levou a **pior nota humana** nos quatro
+  capítulos — resolução alta não salva âncora ruim.
 
 Custou 116 min contra 42 min do corte de cena, e entregou menos.
-**Hipótese não testada:** âncora vindo de um quadro *autorado* em vez de barato.
+
+> **Regra:** âncora de `last_frame` vem de um quadro em **resolução nativa**, de um
+> render que já ficou bom. Nunca de passe barato, nunca ampliado.
 
 ### O roteiro inteiro num render só (736 frames)
 
@@ -326,10 +338,10 @@ com emenda.
 
 ## Em aberto
 
-- **Keyframe autorado** faria a variante B funcionar, ou ancorar as duas pontas
-  mata a ação de qualquer jeito? Em teste.
-- **A ampliação do âncora borra o clipe inteiro?** A variante B foi a única a
-  1024×576 e levou "qualidade ruim" nos quatro capítulos — e foi a única ancorada
-  num quadro de 512×320 esticado para 1024. Se confirmado, nunca ancorar com
-  imagem ampliada.
-- **Corte seco, cruzado ou dissolve** — julgamento humano, não medida.
+- **Corte seco, cruzado ou dissolve** — julgamento humano, não medida. Existem
+  seis tratamentos da mesma história em `output/rodada3_final/H1_raposa_*`.
+- **Os ~2 em 15 de voz errada** têm remédio melhor que re-rolar a seed? Não
+  investigado.
+- **1024×576 com âncora nativa** — a variante B nunca foi testada com âncora bom
+  *na resolução dela*. O V2 provou o mecanismo a 704×384; se a moleza era só do
+  âncora ampliado, 1024×576 com âncora nativo deveria ser o melhor de todos.
