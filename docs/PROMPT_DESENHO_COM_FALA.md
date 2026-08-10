@@ -62,7 +62,20 @@ Character voices, identical in every shot and never changing:
 ```
 
 **Escolha vozes que não se confundem** — uma aguda e uma grave. Duas vozes
-próximas dão ao modelo a chance de trocá-las.
+próximas dão ao modelo a chance de trocá-las, e essa é a alavanca mais forte:
+
+| história | vozes | acerto de registro |
+|---|---|---|
+| robô com voz de **menino** (aguda, como a raposa) | próximas | erros esporádicos |
+| robô com voz de **homem grave** | separadas | **8 falas em 8** |
+
+Com registros bem separados os dois nunca se invadem — no melhor caso medido, o
+grave ficou entre 89 e 151 Hz e o agudo entre 229 e 296 Hz, sem um único
+cruzamento em 30 s e atravessando um corte de cena.
+
+⚠️ **O que importa não é a dispersão absoluta, é se os registros se invadem.** No
+mesmo vídeo o grave teve 9,2 semitons de dispersão — acima da heurística de 4 — e
+mesmo assim a identidade nunca ficou ambígua, porque 89 e 151 Hz são ambos grave.
 
 ⚠️ **Reduz a deriva, não elimina.** Numa história que não foi usada para
 calibrar, a voz aguda ficou em 3,4 semitons de dispersão e a grave em 7,7
@@ -272,6 +285,29 @@ Duas regras que saem daí:
    `README.md` já listava como das mais difíceis em qualquer resolução, e a
    história do faroleiro confirmou: embaçado, sem sincronia, e no fim o
    personagem "nem parece um marinheiro".
+
+## O modelo não tem física — tem o seu texto
+
+Numa cena de jardim, a raposa apareceu segurando o regador com **o bico apontado
+para cima**, mirando a flor. O prompt dizia:
+
+```
+the fox stands proudly holding the small watering can in its mouth
+```
+
+"Com orgulho" foi cumprido — o objeto subiu como um troféu. Para onde o bico
+aponta e que água cai não estavam escritos, e o modelo preencheu sem gravidade.
+
+> **Se um objeto implica direção física, escreva a direção.**
+
+```
+ruim:  holding the watering can proudly
+bom:   holding the watering can tipped forward, water falling downward from
+       the spout onto the soil
+```
+
+Mesma classe de erro da gaivota que "ficou grande do nada": onde o texto é omisso,
+o preenchimento não respeita física, escala nem continuidade.
 
 ## Enquadramento muda entre renders, nunca dentro de um
 
