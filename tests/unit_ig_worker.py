@@ -493,6 +493,26 @@ if "Depois que eu te mando o passo a passo" in split and "Asse por 15 min" in sp
 else:
     bad(f"strip_cta(split-sentence) = {split!r}")
 
+print("== unit_ig_worker: process_message strips CTA before ingest ==")
+def dl_vid(msg):
+    return {"ok": True, "filepath": "/tmp/y.mp4"}
+
+def tr_cta(path):
+    return {"ok": True, "text": "A dica é boa. Segue pra não perder. Asse por 15 min.", "language": "pt"}
+
+seen_text = {}
+def ingest_record(text, **kw):
+    seen_text["text"] = text
+    return {"ok": True, "document_id": 45}
+
+ig_worker.process_message(
+    MESSAGE, download=dl_vid, transcribe=tr_cta, describe=None, ingest=ingest_record
+)
+if "Segue pra não perder" not in seen_text.get("text", "") and "A dica é boa" in seen_text.get("text", ""):
+    ok("process_message passes CTA-stripped text to ingest")
+else:
+    bad(f"ingest received uncleaned text: {seen_text.get('text')!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

@@ -129,6 +129,7 @@ def process_message(
     classified = bool(categoria) and categoria != "outros"
     if classified:
         extra_tags = (extra_tags or []) + [f"categoria:{categoria}"]
+    text = strip_cta(text)
     ing = ingest(
         text,
         source_url=message.get("url"),
