@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,6 +23,74 @@ from typing import Any
 from minimax_mcp import db, ig_queue, knowledge, llm
 
 logger = logging.getLogger(__name__)
+
+_CTA_PATTERNS = (
+    r"segue(?:-me| me)?(?: aqui)? (?:para|pra)(?: não| nao)? perder",
+    r"j[aá] me segue",
+    r"siga para mais",
+    r"salva(?: esse| este| o) vídeo",
+    r"salv(e|a) para fazer depois",
+    r"compartilh(a|e) com (?:seus|teus|os) amigos",
+    r"link na bio",
+    r"curte e compartilha",
+    r"ativa o sininho",
+    r"coment(?:a|e)[^.!?]*que eu te mando",
+)
+_CTA_SENTENCE_RE = re.compile(
+    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*[.!?]",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_cta(text: str) -> str:
+    """Remove sentences containing Instagram call-to-action phrases.
+
+    A sentence is delimited by `.`, `!` or `?`. Only the sentence that contains
+    the CTA is removed; surrounding content is preserved. Never raises and
+    returns input unchanged when no CTA pattern matches.
+    """
+    if not text:
+        return text
+    return _CTA_SENTENCE_RE.sub("", text).strip()
+
+
+# O mesmo vocabulário, mas casando até o fim da string em vez de exigir `.!?`.
+# Título de legenda frequentemente não tem pontuação nenhuma -- "Siga para mais
+# 👉 @fulano" atravessava o strip_cta intacto porque a sentença nunca terminava.
+_CTA_TAIL_RE = re.compile(
+    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*$",
+    re.IGNORECASE | re.DOTALL,
+)
+_HASHTAG_RE = re.compile(r"#\S+")
+_WORD_RE = re.compile(r"\w{2,}", re.UNICODE)
+
+
+def clean_title(raw: str | None) -> str | None:
+    """Limpa o título vindo da legenda do Instagram, ou devolve None.
+
+    O `strip_cta` sozinho não serve aqui, e os doze documentos reais mostraram
+    os dois motivos:
+
+      "Siga para mais 👉 @fulano"          passava intacto -- sem `.!?`, a
+                                            expressão de sentença nunca casa
+      "Comenta 'PROCESSO' ... no privado!"  virava "#code #c" -- o CTA saía e
+                                            sobrava a salada de hashtag
+
+    Então: remove CTA com e sem pontuação final, tira hashtags (que não são
+    título de coisa nenhuma) e limpa a pontuação órfã. Se o que sobrar tiver
+    menos de duas palavras, não é título -- devolve None, e o `ingest` cai no
+    fallback que já existe (`title or resumo[:80]`), deixando a primeira linha
+    do resumo assumir.
+    """
+    if not raw:
+        return None
+    t = _CTA_TAIL_RE.sub("", strip_cta(raw))
+    t = _HASHTAG_RE.sub("", t)
+    # Corta só espaço e separador órfão. Ponto final e exclamação FICAM: tirá-los
+    # mudaria títulos perfeitamente bons ("Uma receita simples." -> "Uma receita
+    # simples") e encheria a comparação de diferenças que não são limpeza de CTA.
+    t = re.sub(r"\s+", " ", t).strip(" -–—|·•,;:")
+    return t if len(_WORD_RE.findall(t)) >= 2 else None
 
 IG_DOWNLOADS_DIR = Path(os.environ.get("IG_DOWNLOADS_DIR", "downloads/ig"))
 IG_DELETE_AFTER_INGEST = os.environ.get("IG_DELETE_AFTER_INGEST", "true").lower() in (
@@ -99,10 +168,21 @@ def process_message(
     classified = bool(categoria) and categoria != "outros"
     if classified:
         extra_tags = (extra_tags or []) + [f"categoria:{categoria}"]
+    text = strip_cta(text)
+    # O título também. Ele vem da primeira linha da legenda do Instagram, e é o
+    # campo MAIS visível -- aparece na listagem e vira o nome do arquivo
+    # exportado. Limpar só a transcrição deixava passar exatamente a superfície
+    # que mais incomoda: "Comenta 'PROCESSO' que eu te mando o passo a passo",
+    # "Siga para mais @fulano" e "Estude comigo na Fluency. Link na Bio." eram
+    # três dos doze títulos ingeridos.
+    #
+    # `clean_title` e não `strip_cta`: o título não é prosa, e os dois casos que
+    # o strip_cta sozinho errava estão documentados lá.
+    title = clean_title(message.get("title"))
     ing = ingest(
         text,
         source_url=message.get("url"),
-        title=message.get("title"),
+        title=title,
         platform="instagram",
         doc_type=doc_type,
         language=lang,
@@ -138,12 +218,30 @@ def apply_command(state: dict, command: str) -> str:
 
 
 def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
-    """All (method, target_pk) download pairs for a post.
+    """All (method, argument) download pairs for a post.
 
     Carousels (media_type 8) have no clip of their own — the pk is an album
-    container and clip_download raises "Must been video". Return one pair per
-    resource: clip_download for video resources, photo_download for photo
-    resources, so the whole album is captured. Single media returns the pk.
+    container and clip_download raises "Must been video" — so one pair comes back
+    per resource and the whole album is captured. Single media returns the pk.
+
+    **Os recursos de carrossel são baixados por URL, não por pk, e isso não é
+    detalhe de estilo.** Um recurso de álbum não existe como mídia autônoma na
+    API privada: `clip_download(resource_pk)` faz o instagrapi chamar
+    `media_info(resource_pk)` por dentro, não achar, e cair no GraphQL
+    **público** — que é anônimo, leva 401 e devolve a página de login. Medido em
+    2026-08-10: três chamadas privadas 200 seguidas e, no primeiro carrossel, um
+    laço de requisições públicas a cada 5 s. Vídeo simples passava; carrossel
+    nunca.
+
+    O `media_info` do álbum, buscado aqui pela via autenticada, já traz
+    `video_url` e `thumbnail_url` de cada recurso — URLs **assinadas** do CDN.
+    `*_download_by_url` faz um `requests.get` simples nelas.
+
+    Note o que muda de verdade: o download nunca foi o problema, e essas funções
+    nem carregam a sessão. O que some é a **re-resolução** do recurso — nenhum
+    `media_info(resource_pk)`, logo nenhuma queda para o GraphQL público, logo
+    nenhum 401. A autenticação continua acontecendo uma vez só, na consulta do
+    álbum, que é onde ela sempre funcionou.
     """
     info = client.media_info(pk)
     mtype = int(getattr(info, "media_type", 0) or 0)
@@ -154,6 +252,20 @@ def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
         pairs: list[tuple[str, str]] = []
         for r in resources:
             rm = int(getattr(r, "media_type", 0) or 0)
+            url = getattr(r, "video_url", None) if rm == 2 else getattr(r, "thumbnail_url", None)
+            if url:
+                pairs.append((
+                    "video_download_by_url" if rm == 2 else "photo_download_by_url",
+                    str(url),
+                ))
+                continue
+            # Sem URL no recurso, resta o caminho antigo. Ele pode cair na API
+            # pública, mas é melhor que descartar o recurso em silêncio -- e a
+            # falha fica visível no log em vez de virar um álbum incompleto.
+            logger.warning(
+                "carousel %s: resource %s has no url, falling back to pk download",
+                pk, getattr(r, "pk", "?"),
+            )
             pairs.append(("clip_download" if rm == 2 else "photo_download", str(r.pk)))
         return pairs
     if mtype == 1:
@@ -169,6 +281,10 @@ def _default_download(message: dict) -> dict:
     falling back to yt-dlp (public posts, or when IG_SESSIONID is unset).
     Carousels download every resource; the result exposes both `filepath`
     (first item) and `filepaths` (all items) for back-compat.
+
+    Os pares vindos de `_download_targets` são `(método, argumento)`, e o
+    argumento é um **pk ou uma URL** conforme o método — os três aceitam o
+    primeiro posicional mais `folder=`, então a chamada aqui serve para ambos.
     """
     url = message.get("url", "")
     pk = message.get("ig_pk", "")

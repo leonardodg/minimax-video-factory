@@ -137,9 +137,17 @@ else:
 
 print("== unit_ig_worker: _download_targets ==")
 class FakeRes:
-    def __init__(self, media_type, pk):
+    def __init__(self, media_type, pk, video_url=None, thumbnail_url=None):
         self.media_type = media_type
         self.pk = pk
+        # O instagrapi entrega estas duas em todo recurso de álbum; são elas que
+        # permitem baixar sem re-resolver o recurso na API pública.
+        self.video_url = video_url if video_url is not None else (
+            f"https://cdn/{pk}.mp4" if media_type == 2 else None
+        )
+        self.thumbnail_url = thumbnail_url if thumbnail_url is not None else (
+            f"https://cdn/{pk}.jpg" if media_type != 2 else None
+        )
 class FakeInfo:
     def __init__(self, media_type, resources=()):
         self.media_type = media_type
@@ -162,20 +170,42 @@ if r == [("clip_download", "222")]:
 else:
     bad(f"single video targets = {r!r}")
 
+# Carrossel baixa POR URL. Baixar por pk fazia o instagrapi chamar
+# media_info(resource_pk) por dentro, não achar (recurso de álbum não é mídia
+# autônoma na API privada), cair no GraphQL público, levar 401 e entrar em laço
+# na página de login. Foi o que bloqueou o sync em 2026-08-10.
 car = FakeInfo(8, [FakeRes(1, "p1"), FakeRes(2, "v2"), FakeRes(1, "p3")])
 r = ig_worker._download_targets(FakeClient(car), "888")
-if r == [("photo_download", "p1"), ("clip_download", "v2"), ("photo_download", "p3")]:
-    ok("carousel -> one pair per resource, video->clip, photo->photo")
+if r == [
+    ("photo_download_by_url", "https://cdn/p1.jpg"),
+    ("video_download_by_url", "https://cdn/v2.mp4"),
+    ("photo_download_by_url", "https://cdn/p3.jpg"),
+]:
+    ok("carousel -> download by URL, one pair per resource, video vs photo")
 else:
     bad(f"carousel targets = {r!r}")
 
+if not any(m in ("clip_download", "photo_download") for m, _ in r):
+    ok("carousel never uses the pk methods that fall back to the public API")
+else:
+    bad(f"carousel still routes through a pk download: {r!r}")
+
 car_img = FakeInfo(8, [FakeRes(1, "p1"), FakeRes(1, "p2")])
 if ig_worker._download_targets(FakeClient(car_img), "888") == [
-    ("photo_download", "p1"), ("photo_download", "p2"),
+    ("photo_download_by_url", "https://cdn/p1.jpg"),
+    ("photo_download_by_url", "https://cdn/p2.jpg"),
 ]:
-    ok("carousel with only images -> photo_download per photo")
+    ok("carousel with only images -> photo_download_by_url per photo")
 else:
     bad(f"carousel img targets = {ig_worker._download_targets(FakeClient(car_img), '888')!r}")
+
+# Recurso sem URL: cai no caminho antigo em vez de sumir do álbum. Pode bater na
+# API pública, mas um álbum incompleto em silêncio é pior.
+car_nourl = FakeInfo(8, [FakeRes(2, "v9", video_url="", thumbnail_url="")])
+if ig_worker._download_targets(FakeClient(car_nourl), "888") == [("clip_download", "v9")]:
+    ok("resource without url falls back to the pk method instead of vanishing")
+else:
+    bad(f"no-url resource = {ig_worker._download_targets(FakeClient(car_nourl), '888')!r}")
 
 if ig_worker._download_targets(FakeClient(FakeInfo(8, [])), "888") == [("photo_download", "888")]:
     ok("empty carousel -> [photo_download(pk)]")
@@ -199,6 +229,20 @@ class FakeClientDownload(FakeClient):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"x")
         return str(p)
+    # As duas rotas por URL, que é como carrossel passa a ser baixado. O nome do
+    # arquivo sai da URL, como o instagrapi faz quando `filename` vem vazio.
+    def photo_download_by_url(self, url, filename="", folder=""):
+        self.calls.append(("photo_download_by_url", url))
+        p = Path(folder) / f"fake_{Path(url).name}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return str(p)
+    def video_download_by_url(self, url, filename="", folder=""):
+        self.calls.append(("video_download_by_url", url))
+        p = Path(folder) / f"fake_{Path(url).name}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return str(p)
 
 from minimax_mcp import ig_sync
 
@@ -209,7 +253,7 @@ try:
 finally:
     ig_sync.make_client = _orig_make_client
 fps = res.get("filepaths") or []
-if res.get("ok") and len(fps) == 2 and any(fps[0].endswith("fake_p1.jpg") for f in fps) and any(fps[1].endswith("fake_v2.mp4") for f in fps):
+if res.get("ok") and len(fps) == 2 and fps[0].endswith("fake_p1.jpg") and fps[1].endswith("fake_v2.mp4"):
     ok("carousel download returns all filepaths (p1.jpg + v2.mp4)")
 else:
     bad(f"carousel download = {res!r}")
@@ -425,6 +469,128 @@ if seen.get("categories") == VOCAB:
     ok("'outros' from vision is not a judgement — the summary model gets a turn")
 else:
     bad(f"'outros' blocked the second attempt: categories={seen.get('categories')!r}")
+
+print("== unit_ig_worker: strip_cta ==")
+from minimax_mcp.ig_worker import strip_cta
+
+# A sentence containing a CTA is removed entirely.
+cleaned = strip_cta(
+    "Misture a batata doce amassada com o azeite. "
+    "Já me segue aqui para não perder uma receita. "
+    "Asse na Air Fryer a 170°C por 15 minutos."
+)
+if "Já me segue aqui" not in cleaned and "Asse na Air Fryer" in cleaned and "Misture a batata" in cleaned:
+    ok("strip_cta removes the CTA sentence, keeps surrounding content")
+else:
+    bad(f"strip_cta = {cleaned!r}")
+
+# No CTA -> text unchanged.
+plain = "Asse na Air Fryer a 170°C por 15 minutos e sirva."
+if strip_cta(plain) == plain:
+    ok("strip_cta leaves CTA-free text intact")
+else:
+    bad(f"strip_cta(plain) = {strip_cta(plain)!r}")
+
+# Empty / whitespace input never raises.
+try:
+    if strip_cta("") == "" and strip_cta("   ").strip() == "":
+        ok("strip_cta handles empty/whitespace input")
+    else:
+        bad("strip_cta empty input result wrong")
+except Exception as e:
+    bad(f"strip_cta('') raised {e!r}")
+
+# 'link na bio' as its own sentence.
+if "link na bio" not in strip_cta("Curte e compartilha. Link na bio. O conteúdo principal.").lower():
+    ok("strip_cta removes 'link na bio' sentence")
+else:
+    bad("strip_cta did not remove 'link na bio'")
+
+# Standalone accented 'Já me segue' (no following 'para perder') is stripped.
+accented = strip_cta("A receita é boa. Já me segue. Asse por 15 min.")
+if "Já me segue" not in accented and "A receita é boa" in accented and "Asse por 15 min" in accented:
+    ok("strip_cta strips standalone accented 'Já me segue'")
+else:
+    bad(f"strip_cta(accented) = {accented!r}")
+
+# A legit sentence containing the bare word 'já' survives (no over-match).
+already = "Já assei por 15 minutos. O resto é fácil."
+if strip_cta(already) == already:
+    ok("strip_cta leaves a sentence with bare 'já' intact")
+else:
+    bad(f"strip_cta(bare já) = {strip_cta(already)!r}")
+
+# The 'comenta...que eu te mando' CTA fully inside one sentence is removed.
+same = strip_cta("A receita é boa. Comenta que eu te mando a receita. Asse por 15 min.")
+if "Comenta que eu te mando" not in same and "A receita é boa" in same and "Asse por 15 min" in same:
+    ok("strip_cta removes a single sentence fully containing 'comenta...que eu te mando'")
+else:
+    bad(f"strip_cta(same-sentence) = {same!r}")
+
+# The CTA split across two sentences is NOT removed: the regex must not cross
+# the period. (The user's 'Comenta e ativa o sininho. Depois que eu te mando
+# a receita.' example is shadowed by the earlier 'ativa o sininho' alternative,
+# so use a first sentence whose only pattern is 'comenta'.)
+split = strip_cta("Comenta a receita agora. Depois que eu te mando o passo a passo. Asse por 15 min.")
+if "Depois que eu te mando o passo a passo" in split and "Asse por 15 min" in split:
+    ok("strip_cta does not cross the sentence boundary of 'comenta...que eu te mando'")
+else:
+    bad(f"strip_cta(split-sentence) = {split!r}")
+
+print("== unit_ig_worker: process_message strips CTA before ingest ==")
+def dl_vid(msg):
+    return {"ok": True, "filepath": "/tmp/y.mp4"}
+
+def tr_cta(path):
+    return {"ok": True, "text": "A dica é boa. Segue pra não perder. Asse por 15 min.", "language": "pt"}
+
+seen_text = {}
+def ingest_record(text, **kw):
+    seen_text["text"] = text
+    return {"ok": True, "document_id": 45}
+
+ig_worker.process_message(
+    MESSAGE, download=dl_vid, transcribe=tr_cta, describe=None, ingest=ingest_record
+)
+if "Segue pra não perder" not in seen_text.get("text", "") and "A dica é boa" in seen_text.get("text", ""):
+    ok("process_message passes CTA-stripped text to ingest")
+else:
+    bad(f"ingest received uncleaned text: {seen_text.get('text')!r}")
+
+print("== unit_ig_worker: clean_title ==")
+from minimax_mcp.ig_worker import clean_title
+
+# Os quatro casos vêm dos doze títulos REAIS já ingeridos, não de exemplos
+# inventados: a primeira tentativa (reusar strip_cta no título) passou nos meus
+# exemplos e falhou nos títulos de verdade, de dois jeitos diferentes.
+CASES = [
+    # CTA sem pontuação final: o strip_cta sozinho devolvia isto INTACTO, porque
+    # a expressão de sentença exige `.`, `!` ou `?` para fechar.
+    ("Siga para mais 👉 @nikolassfaria", None),
+    # CTA + hashtags: o strip_cta sozinho devolvia "#code #c" -- pior que o
+    # original, porque vira o título e o nome do arquivo exportado.
+    ("Comenta “PROCESSO” que eu te mando o passo a passo completo no privado! #code #c", None),
+    # CTA no fim de conteúdo real: o conteúdo fica, a chamada sai.
+    ("Estude comigo na Fluency. Link na Bio.", "Estude comigo na Fluency."),
+    # Sem CTA: intacto, PONTUAÇÃO INCLUÍDA. Cortar o ponto final mudaria títulos
+    # bons e encheria qualquer comparação de ruído.
+    ("Uma receita simples, natural e muito poderosa.", "Uma receita simples, natural e muito poderosa."),
+    ("A energia do Sol cada vez mais próxima!", "A energia do Sol cada vez mais próxima!"),
+    (None, None),
+    ("", None),
+]
+for raw, expected in CASES:
+    got = clean_title(raw)
+    if got == expected:
+        ok(f"clean_title({raw!r:.42}) -> {got!r:.42}")
+    else:
+        bad(f"clean_title({raw!r:.42}) = {got!r}, esperado {expected!r}")
+
+# Um título que sobra com uma palavra só não é título -- deixa o resumo assumir.
+if clean_title("Link na bio! #dev") is None:
+    ok("clean_title devolve None quando sobra menos de duas palavras")
+else:
+    bad(f"clean_title de resto curto = {clean_title('Link na bio! #dev')!r}")
 
 print()
 if FAIL:

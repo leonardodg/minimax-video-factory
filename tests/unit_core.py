@@ -62,6 +62,48 @@ else:
     else:
         bad("inject_scene mutated the original workflow")
 
+    # The model is FL2VA: First-LAST frame to Video+Audio. Both anchors are
+    # optional and independent, and supplying both is the whole point -- a
+    # chapter that must LAND on a chosen frame decelerates into the cut instead
+    # of being chopped wherever it drifted to. They need separate LoadImage
+    # nodes: one shared node would make the second anchor overwrite the first.
+    if "first_frame" not in h3 and "last_frame" not in h3:
+        ok("inject_scene wires neither anchor when neither is given")
+    else:
+        bad(f"inject_scene invented an anchor: {h3!r}")
+
+    both = core.inject_scene(
+        wf, prompt="p", duration=5.0, width=512, height=320,
+        seed=99, filename_prefix="unit/core",
+        first_frame="a.png", last_frame="b.png",
+    )
+    bh3 = both.get(core.H3_NODE_ID, {}).get("inputs", {})
+    if bh3.get("first_frame") == [core.LOAD_IMAGE_NODE_ID, 0] and \
+       bh3.get("last_frame") == [core.LOAD_LAST_IMAGE_NODE_ID, 0]:
+        ok("inject_scene wires both anchors to their own LoadImage nodes")
+    else:
+        bad(f"inject_scene anchors = {bh3.get('first_frame')!r} / {bh3.get('last_frame')!r}")
+    if core.LOAD_IMAGE_NODE_ID != core.LOAD_LAST_IMAGE_NODE_ID:
+        ok("the two anchors use distinct node ids")
+    else:
+        bad("first_frame and last_frame share a node id -- one would clobber the other")
+    imgs = (both.get(core.LOAD_IMAGE_NODE_ID, {}).get("inputs", {}).get("image"),
+            both.get(core.LOAD_LAST_IMAGE_NODE_ID, {}).get("inputs", {}).get("image"))
+    if imgs == ("a.png", "b.png"):
+        ok("each LoadImage node carries its own image name")
+    else:
+        bad(f"LoadImage images = {imgs!r}")
+
+    only_last = core.inject_scene(
+        wf, prompt="p", duration=5.0, width=512, height=320,
+        seed=99, filename_prefix="unit/core", last_frame="b.png",
+    )
+    lh3 = only_last.get(core.H3_NODE_ID, {}).get("inputs", {})
+    if lh3.get("last_frame") == [core.LOAD_LAST_IMAGE_NODE_ID, 0] and "first_frame" not in lh3:
+        ok("last_frame alone works without a first_frame (L2VA)")
+    else:
+        bad(f"last_frame alone = {lh3.get('last_frame')!r}, first_frame = {lh3.get('first_frame')!r}")
+
 print("== unit_core: submit_scene_core ==")
 with mock.patch.object(core, "ComfyUIClient") as m:
     client = m.return_value
@@ -82,6 +124,33 @@ with mock.patch.object(core, "ComfyUIClient") as m:
         ok("submit_scene_core converts ComfyUIError to {ok:False, error}")
     else:
         bad(f"submit_scene_core error result = {result!r}")
+
+with mock.patch.object(core, "ComfyUIClient") as m:
+    # Upload happens before the workflow is patched, because ComfyUI
+    # de-duplicates names: only it knows what the file ended up being called.
+    # Both anchors go through it, and the NAMES IT RETURNS are what gets wired.
+    client = m.return_value
+    client.submit.return_value = "pid-2"
+    client.upload_image.side_effect = lambda p: "uploaded_" + p
+    result = core.submit_scene_core("p", seed=2, first_frame="a.png", last_frame="b.png")
+    if result.get("first_frame") == "uploaded_a.png" and result.get("last_frame") == "uploaded_b.png":
+        ok("submit_scene_core uploads both anchors and reports the stored names")
+    else:
+        bad(f"submit_scene_core anchors = {result.get('first_frame')!r} / {result.get('last_frame')!r}")
+    wired = client.submit.call_args[0][0][core.H3_NODE_ID]["inputs"]
+    if wired.get("first_frame") and wired.get("last_frame"):
+        ok("both anchors reach the submitted workflow, not just the first")
+    else:
+        bad(f"submitted workflow anchors = {wired.get('first_frame')!r} / {wired.get('last_frame')!r}")
+
+    # An upload that fails has to say WHICH anchor failed: with two of them,
+    # "upload failed" alone leaves the caller guessing which path is wrong.
+    client.upload_image.side_effect = RuntimeError("no such file")
+    result = core.submit_scene_core("p", seed=3, last_frame="missing.png")
+    if not result.get("ok") and result.get("anchor") == "last_frame" and result.get("stage") == "upload":
+        ok("a failed upload names the anchor that failed")
+    else:
+        bad(f"upload failure result = {result!r}")
 
 print("== unit_core: wait_for_video_core ==")
 async def run_wait():

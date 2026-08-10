@@ -67,11 +67,12 @@ minimax-video-factory/
 │   ├── publish_image.sh      <- build + tag + push to Docker Hub (DOCKER_HUB_USER/REPO)
 │   ├── setup_whisper.sh      <- NEW: download Whisper models (tiny/base/small/medium/large-v3)
 │   ├── install_deps.sh       <- NEW: pip install yt-dlp, faster-whisper, requests
+│   ├── backfill_cta.py       <- re-apply CTA cleanup to ingested IG docs (snapshots to output/kb-backup/)
 │   └── ui2api.py             <- litegraph UI JSON -> API JSON converter
 ├── workflows/
 │   └── minimax_h3_t2v_api.json   <- EXPANDED T2V workflow (14 nodes), see §6
 ├── src/minimax_mcp/
-│   ├── server.py             <- FastMCP app, 11 tools; model set + prefix from env; path mapping host<->container
+│   ├── server.py             <- FastMCP app, 26 tools (H3 + studio + IG + 9 KB); model set + prefix from env; path mapping host<->container
 │   ├── comfyui_client.py     <- ComfyUIClient (submit/history/websocket/download)
 │   ├── downloader.py         <- NEW: yt-dlp wrapper with browser cookies
 │   ├── transcriber.py        <- NEW: faster-whisper wrapper (GPU, PT-BR)
@@ -79,7 +80,10 @@ minimax-video-factory/
 │   ├── orchestrator.py       <- NEW: pipeline URL → download → transcribe → prompt → video
 │   ├── orchestrator.py       <- NEW: pipeline URL → download → transcribe → prompt → video
 │   ├── core.py               <- NEW: shared ComfyUI functions (no circular imports)
-│   └── server.py             <- FastMCP app, 11 tools (original + studio tools)
+│   ├── knowledge.py          <- KB ops incl. export_search/export_documents (markdown export)
+│   ├── ig_worker.py          <- IG daemon; strip_cta() removes CTA sentences before ingest
+│   ├── vault.py              <- writes .md copy (Obsidian + kb-export/kb-backup share this)
+│   └── server.py             <- FastMCP app, 26 tools (H3 + studio + IG + 9 KB)
 ├── tests/                    <- 00..07 bash tests, each echoes [ok]/[MISS]/[BAD]
 ├── output/                   <- generated .mp4 (host side of the mount)
 ├── downloads/                <- downloaded videos (gitignored)
@@ -483,11 +487,26 @@ selective marker-based runs. `tests/integration_knowledge_db.py` is idempotent
 (cleans up its own `example.com/test` documents via `db.delete_documents`), so
 repeated runs don't accumulate stale docs that break top-result assertions.
 
-**Full tutorial & reference:** `docs/KNOWLEDGE_BASE.md` — the 6 `knowledge_*`
-tools with all parameters and best options, recommended flows, chat-prompt
+**Full tutorial & reference:** `docs/KNOWLEDGE_BASE.md` — the 9 knowledge
+tools (`knowledge_ingest_*`, `knowledge_search`, `knowledge_ask`,
+`knowledge_reindex`, plus the `kb_export_search`/`kb_export` markdown-export
+pair) with all parameters and best options, recommended flows, chat-prompt
 examples for OpenCode, the Postgres schema (`documents`/`chunks`/`embeddings`),
-`.env` knobs and troubleshooting. The complete 18-tool auto-generated reference
-lives in `docs/MCP_TOOLS.md`.
+`.env` knobs and troubleshooting. The complete **26-tool** auto-generated
+reference lives in `docs/MCP_TOOLS.md`.
+
+**Markdown export:** `kb_export_search(query?, ids?, limit?)` lists docs without
+writing; `kb_export(ids, output_dir?)` writes one readable `.md` per selected
+doc under `<output_dir>/Knowledge/` (default `output/kb-export/Knowledge/`;
+frontmatter + resumo + tutorial + objetivos + transcrição + video-prompt
+placeholder).
+
+**CTA cleanup:** the IG worker runs `strip_cta()` (in `ig_worker.py`) to remove
+Instagram call-to-action sentences from transcriptions before ingest, and the
+summary prompt omits CTAs from generated fields. `scripts/backfill_cta.py`
+re-applies this to already-ingested IG docs (snapshots `.md`+`.json` to
+`output/kb-backup/`, `--dry-run`, `--restore <id>` writes the snapshot fields
+back to Postgres).
 
 ### 10.1 Tutorial: pedir via chat (OpenCode)
 
@@ -503,6 +522,8 @@ opencode session** after config changes. Requer Postgres + Ollama de pé.
 | "Pesquise na minha base por 'Docker Ubuntu'" | `knowledge_search` |
 | "O que eu já salvei sobre Docker? Responda com base na base." | `knowledge_ask` |
 | "Troquei o modelo de embedding; reindexe tudo." | `knowledge_reindex` |
+| "Liste os docs para exportar como markdown" | `kb_export_search` |
+| "Exporte estes docs para markdown" | `kb_export` |
 
 **Melhores escolhas de parâmetros:**
 - `whisper_model`: `small` (padrão, bom equilíbrio) → `medium`/`large-v3` p/ fidelidade (mais lento, mais VRAM).

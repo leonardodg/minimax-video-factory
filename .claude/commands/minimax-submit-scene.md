@@ -1,6 +1,6 @@
 ---
 description: Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render
-argument-hint: <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [steps]
+argument-hint: <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [last_frame] [steps]
 ---
 
 <!-- GERADO AUTOMATICAMENTE por scripts/generate_commands.py -->
@@ -20,6 +20,7 @@ Instruções obrigatórias:
    - `seed`: semente aleatória (inteiro); omita para aleatório (default `None`).
    - `filename_prefix`: prefixo do arquivo de saída (default `OUTPUT_PREFIX`).
    - `first_frame`: Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) (default `None`).
+   - `last_frame`: Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só (default `None`).
    - `steps`: Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente (default `None`).
 2. Chame `mcp__minimax-video-factory__submit_scene` com esses parâmetros. Se o servidor `minimax-video-factory` não estiver conectado, use `mcp__minimax-video-factory-remote__submit_scene` ou `mcp__minimax-video-factory-uv__submit_scene`.
 3. Reporte o `prompt_id`. O render NÃO terminou: use `/minimax-wait <prompt_id>` para aguardar, ou `/minimax-status <prompt_id>` para checar sem bloquear.

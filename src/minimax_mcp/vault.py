@@ -35,18 +35,28 @@ def write_markdown_copy(document: dict[str, Any], vault_path: str | Path | None)
         tags = document.get("tags") or []
         tags_line = " ".join(f"#{t}" for t in tags)
 
+        objectives = document.get("objectives") or []
+        if isinstance(objectives, (list, tuple)):
+            objectives_md = "\n".join(f"- {o}" for o in objectives)
+        else:
+            objectives_md = str(objectives or "")
+
         content = (
             "---\n"
             f"source_url: {document.get('source_url') or ''}\n"
             f"platform: {document.get('platform') or ''}\n"
             f"type: {document.get('type') or ''}\n"
+            f"ig_pk: {document.get('ig_pk') or ''}\n"
+            f"llm_model: {document.get('llm_model') or ''}\n"
             f"created_at: {date_str}\n"
             "---\n\n"
             f"# {document.get('title') or slug}\n\n"
             f"{tags_line}\n\n"
             f"## Resumo\n\n{document.get('summary') or ''}\n\n"
             f"## Tutorial\n\n{document.get('tutorial') or ''}\n\n"
-            f"## Transcrição completa\n\n{document.get('transcription_text') or ''}\n"
+            f"## Objetivos\n\n{objectives_md}\n\n"
+            f"## Transcrição completa\n\n{document.get('transcription_text') or ''}\n\n"
+            "## Prompt de geração de vídeo\n\n(gerado quando o schema de prompts existir)\n"
         )
         filepath.write_text(content, encoding="utf-8")
         return {"ok": True, "skipped": False, "path": str(filepath)}

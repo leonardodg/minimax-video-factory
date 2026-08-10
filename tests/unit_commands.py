@@ -33,10 +33,10 @@ SPECS = {s.tool_name: s for s in parse_tools(SERVER_PY)}
 
 print("== unit_commands: parser ==")
 
-if len(SPECS) == 24:
-    ok("found all 24 @mcp.tool() functions")
+if len(SPECS) == 26:
+    ok("found all 26 @mcp.tool() functions")
 else:
-    bad(f"found {len(SPECS)} tools, expected 24: {sorted(SPECS)}")
+    bad(f"found {len(SPECS)} tools, expected 26: {sorted(SPECS)}")
 
 # Only @mcp.tool()-decorated functions, not every function in the module.
 if "main" not in SPECS and "to_host_path" not in SPECS:
@@ -146,10 +146,10 @@ else:
 wrong_prefix = [
     (tool, name)
     for tool, name in catalog.COMMAND_NAMES.items()
-    if tool.startswith("knowledge_") != name.startswith("kb-")
+    if tool.startswith(("knowledge_", "kb_")) != name.startswith("kb-")
 ]
 if not wrong_prefix:
-    ok("knowledge_* tools get kb-, everything else gets minimax-")
+    ok("knowledge_*/kb_* tools get kb-, everything else gets minimax-")
 else:
     bad(f"prefix mismatch: {wrong_prefix}")
 

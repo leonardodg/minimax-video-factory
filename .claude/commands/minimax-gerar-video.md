@@ -1,6 +1,6 @@
 ---
 description: Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
-argument-hint: <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=900.0]
+argument-hint: <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [last_frame] [steps] [wait_seconds=900.0]
 ---
 
 <!-- GERADO AUTOMATICAMENTE por scripts/generate_commands.py -->
@@ -20,6 +20,7 @@ Instruções obrigatórias:
    - `seed`: semente aleatória (inteiro); omita para aleatório (default `None`).
    - `filename_prefix`: prefixo do arquivo de saída (default `studio/`).
    - `first_frame`: Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) (default `None`).
+   - `last_frame`: Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só (default `None`).
    - `steps`: Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo (default `None`).
    - `wait_seconds`: Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente (default `900.0`).
 2. Chame `mcp__minimax-video-factory__generate_video` com esses parâmetros. Se o servidor `minimax-video-factory` não estiver conectado, use `mcp__minimax-video-factory-remote__generate_video` ou `mcp__minimax-video-factory-uv__generate_video`.

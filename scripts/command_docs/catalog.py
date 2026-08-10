@@ -29,6 +29,8 @@ COMMAND_NAMES: dict[str, str] = {
     "knowledge_search": "kb-buscar",
     "knowledge_ask": "kb-perguntar",
     "knowledge_reindex": "kb-reindex",
+    "kb_export_search": "kb-export-search",
+    "kb_export": "kb-export",
     # Instagram sync
     "ig_sync_saved": "ig-sync",
     "ig_queue_status": "ig-status",
