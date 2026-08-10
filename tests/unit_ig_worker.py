@@ -513,6 +513,41 @@ if "Segue pra não perder" not in seen_text.get("text", "") and "A dica é boa" 
 else:
     bad(f"ingest received uncleaned text: {seen_text.get('text')!r}")
 
+print("== unit_ig_worker: clean_title ==")
+from minimax_mcp.ig_worker import clean_title
+
+# Os quatro casos vêm dos doze títulos REAIS já ingeridos, não de exemplos
+# inventados: a primeira tentativa (reusar strip_cta no título) passou nos meus
+# exemplos e falhou nos títulos de verdade, de dois jeitos diferentes.
+CASES = [
+    # CTA sem pontuação final: o strip_cta sozinho devolvia isto INTACTO, porque
+    # a expressão de sentença exige `.`, `!` ou `?` para fechar.
+    ("Siga para mais 👉 @nikolassfaria", None),
+    # CTA + hashtags: o strip_cta sozinho devolvia "#code #c" -- pior que o
+    # original, porque vira o título e o nome do arquivo exportado.
+    ("Comenta “PROCESSO” que eu te mando o passo a passo completo no privado! #code #c", None),
+    # CTA no fim de conteúdo real: o conteúdo fica, a chamada sai.
+    ("Estude comigo na Fluency. Link na Bio.", "Estude comigo na Fluency."),
+    # Sem CTA: intacto, PONTUAÇÃO INCLUÍDA. Cortar o ponto final mudaria títulos
+    # bons e encheria qualquer comparação de ruído.
+    ("Uma receita simples, natural e muito poderosa.", "Uma receita simples, natural e muito poderosa."),
+    ("A energia do Sol cada vez mais próxima!", "A energia do Sol cada vez mais próxima!"),
+    (None, None),
+    ("", None),
+]
+for raw, expected in CASES:
+    got = clean_title(raw)
+    if got == expected:
+        ok(f"clean_title({raw!r:.42}) -> {got!r:.42}")
+    else:
+        bad(f"clean_title({raw!r:.42}) = {got!r}, esperado {expected!r}")
+
+# Um título que sobra com uma palavra só não é título -- deixa o resumo assumir.
+if clean_title("Link na bio! #dev") is None:
+    ok("clean_title devolve None quando sobra menos de duas palavras")
+else:
+    bad(f"clean_title de resto curto = {clean_title('Link na bio! #dev')!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
