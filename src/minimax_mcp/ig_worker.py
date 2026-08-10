@@ -218,12 +218,30 @@ def apply_command(state: dict, command: str) -> str:
 
 
 def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
-    """All (method, target_pk) download pairs for a post.
+    """All (method, argument) download pairs for a post.
 
     Carousels (media_type 8) have no clip of their own — the pk is an album
-    container and clip_download raises "Must been video". Return one pair per
-    resource: clip_download for video resources, photo_download for photo
-    resources, so the whole album is captured. Single media returns the pk.
+    container and clip_download raises "Must been video" — so one pair comes back
+    per resource and the whole album is captured. Single media returns the pk.
+
+    **Os recursos de carrossel são baixados por URL, não por pk, e isso não é
+    detalhe de estilo.** Um recurso de álbum não existe como mídia autônoma na
+    API privada: `clip_download(resource_pk)` faz o instagrapi chamar
+    `media_info(resource_pk)` por dentro, não achar, e cair no GraphQL
+    **público** — que é anônimo, leva 401 e devolve a página de login. Medido em
+    2026-08-10: três chamadas privadas 200 seguidas e, no primeiro carrossel, um
+    laço de requisições públicas a cada 5 s. Vídeo simples passava; carrossel
+    nunca.
+
+    O `media_info` do álbum, buscado aqui pela via autenticada, já traz
+    `video_url` e `thumbnail_url` de cada recurso — URLs **assinadas** do CDN.
+    `*_download_by_url` faz um `requests.get` simples nelas.
+
+    Note o que muda de verdade: o download nunca foi o problema, e essas funções
+    nem carregam a sessão. O que some é a **re-resolução** do recurso — nenhum
+    `media_info(resource_pk)`, logo nenhuma queda para o GraphQL público, logo
+    nenhum 401. A autenticação continua acontecendo uma vez só, na consulta do
+    álbum, que é onde ela sempre funcionou.
     """
     info = client.media_info(pk)
     mtype = int(getattr(info, "media_type", 0) or 0)
@@ -234,6 +252,20 @@ def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
         pairs: list[tuple[str, str]] = []
         for r in resources:
             rm = int(getattr(r, "media_type", 0) or 0)
+            url = getattr(r, "video_url", None) if rm == 2 else getattr(r, "thumbnail_url", None)
+            if url:
+                pairs.append((
+                    "video_download_by_url" if rm == 2 else "photo_download_by_url",
+                    str(url),
+                ))
+                continue
+            # Sem URL no recurso, resta o caminho antigo. Ele pode cair na API
+            # pública, mas é melhor que descartar o recurso em silêncio -- e a
+            # falha fica visível no log em vez de virar um álbum incompleto.
+            logger.warning(
+                "carousel %s: resource %s has no url, falling back to pk download",
+                pk, getattr(r, "pk", "?"),
+            )
             pairs.append(("clip_download" if rm == 2 else "photo_download", str(r.pk)))
         return pairs
     if mtype == 1:
@@ -249,6 +281,10 @@ def _default_download(message: dict) -> dict:
     falling back to yt-dlp (public posts, or when IG_SESSIONID is unset).
     Carousels download every resource; the result exposes both `filepath`
     (first item) and `filepaths` (all items) for back-compat.
+
+    Os pares vindos de `_download_targets` são `(método, argumento)`, e o
+    argumento é um **pk ou uma URL** conforme o método — os três aceitam o
+    primeiro posicional mais `folder=`, então a chamada aqui serve para ambos.
     """
     url = message.get("url", "")
     pk = message.get("ig_pk", "")
