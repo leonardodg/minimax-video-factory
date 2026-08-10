@@ -72,6 +72,20 @@ corrida fica desatendida sem martelar o Instagram.
 
 É uma mudança pequena, em `ig_worker.py`, testável sem GPU.
 
+### ⚠️ Por que o ritmo tem de ser DENTRO do processo, e não por start/stop
+
+Observado em 2026-08-09 ao subir o worker: ele chama
+`/api/v1/collections/list/` — paginando — para montar o vocabulário de categorias.
+Isso está **cacheado por processo** (`_categories_cache`, `ig_worker.py:232`),
+então acontece **uma vez por worker**, não por mensagem.
+
+A consequência é que **cada reinício do worker custa uma varredura das 46
+coleções** — exatamente a operação que dispara 429. Controlar o ritmo ligando e
+desligando o processo somaria uma listagem por ciclo; com dezenas de ciclos ao
+longo de 54 h, seria pior que não ter ritmo nenhum.
+
+> **Um worker de longa duração, com pausa interna.** Não vários ciclos curtos.
+
 ---
 
 ## Contenção de GPU

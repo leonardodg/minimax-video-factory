@@ -221,9 +221,30 @@ personagens. Veredito humano: *"o problema são os chãos se movendo"*.
 > câmera.** Só a pose do personagem deve mudar entre eles. Cenário diferente nas
 > duas pontas = paisagem interpolada = chão que desliza.
 
-**Continua não provado** se ancorar as duas pontas permite AÇÃO de verdade. O
-teste limpo — dois âncoras de mesmo fundo, diferindo só na pose — ainda não foi
-feito.
+### Provado: `last_frame` tem QUATRO exigências, e cada uma falha diferente
+
+Fechado em 2026-08-09 (rodada 3.2). Duas medições separaram o que a variante B
+misturava:
+
+| exigência | se violada | evidência |
+|---|---|---|
+| o modelo obedece ao alvo | — | P4: SSIM 0,877 contra o alvo, 0,503 contra a partida |
+| âncora em **resolução nativa** | **borra o clipe inteiro** | B a 1024×576 com âncora esticado = pior nota humana; A2 na MESMA resolução com âncora nativo = melhor imagem da rodada |
+| âncoras de **mesmo fundo** | **o chão derrete** | V2: fundos diferentes, terreno interpolado |
+| âncoras **diferentes entre si** | **o clipe congela** | A1 (SSIM 0,556) → movimento 0,10 · A2 (SSIM 0,866) → movimento **0,01** |
+
+> **O movimento do clipe é governado pela diferença entre os dois âncoras.** Se
+> as pontas forem parecidas, não há para onde ir — e nenhuma quantidade de ação
+> escrita no prompt resolve.
+
+Isso fecha o caso da variante B por completo: os âncoras dela vinham de uma
+pré-viz **encadeada**, e encadeamento produz quadros de fronteira quase idênticos
+**por construção**. Alta similaridade → congelamento. Somado ao âncora ampliado →
+borrado. Dois defeitos, duas causas, ambas na fonte.
+
+**Combinação ainda não testada:** 1024×576 + âncora nativo + âncoras bem
+diferentes. Pelos dois resultados acima, deveria ser o melhor clipe possível
+nesta máquina.
 
 Com a pré-viz barata, a mesma técnica falha **duas vezes ao mesmo tempo**:
 
