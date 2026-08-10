@@ -110,6 +110,26 @@ if len(collected) == 3:
     ok("saved_posts collects All posts + named collections")
 else:
     bad(f"saved_posts returned {len(collected)} entries")
+# A listagem tem de pedir TODAS as páginas.
+# Um teto silencioso é o pior modo de falha desta sincronização: devolve um lote
+# parcial que se parece com punição do Instagram, e as duas causas pedem reações
+# opostas. Medido em 2026-08-10: a catch-all guarda 3618 posts, e o teto antigo
+# de 200 teria entregado 200.
+asked = []
+
+
+class RecordingClient(FakeClient):
+    def collection_medias(self, cid, amount=200):
+        asked.append(amount)
+        return super().collection_medias(cid, amount)
+
+
+ig_sync.saved_posts(RecordingClient())
+if asked and all(a == 0 for a in asked):
+    ok("saved_posts pede todas as páginas (amount=0), sem teto por coleção")
+else:
+    bad(f"saved_posts pediu amount={asked} — um teto trunca o sync em silêncio")
+
 names = {e["collection_name"] for e in collected}
 # The catch-all maps to None, not to a name. It holds every saved post, so its
 # name says nothing about the post -- and as a tag it was landing on nearly

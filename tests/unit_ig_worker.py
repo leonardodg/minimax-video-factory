@@ -2,6 +2,7 @@
 """Unit tests for ig_worker.py — injected download/transcribe/describe/ingest."""
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -368,27 +369,53 @@ if not (captured.get("extra_tags") or []):
 else:
     bad(f"tags appeared without a collection: {captured.get('extra_tags')!r}")
 
-print("== unit_ig_worker: a mídia é descartada mesmo quando falha ==")
+print("== unit_ig_worker: a mídia é PRESERVADA por padrão, e descartável sob pedido ==")
 
-# Só o caminho de sucesso apagava. Um post que falhava deixava o arquivo, e o
-# retry da DLQ baixava de novo a cada tentativa -- num sync de 2000+ posts é a
-# diferença entre alguns MB de rotatividade e encher o disco.
-for label, res in [
+# Esta seção afirmava o contrário -- que a mídia é apagada sempre, inclusive no
+# caminho de erro -- e estava certa para a política antiga. A política mudou por
+# uma assimetria de custo: requisição ao Instagram é escassa e punível,
+# reprocessar na GPU é só tempo de máquina local. Apagar amarrava as duas.
+#
+# O que a política antiga protegia (disco) continua protegido, e por um caminho
+# melhor: com a mídia no disco, `_default_download` reaproveita e o retry da DLQ
+# não volta à rede -- antes, cada uma das três tentativas baixava de novo.
+CASES = [
     ("transcrição falhou", {"status": "error", "error": "x", "filepaths": ["/tmp/_t1.mp4"]}),
     ("ingestão falhou", {"status": "error", "error": "x", "filepaths": ["/tmp/_t2.mp4"]}),
     ("sucesso", {"status": "done", "document_id": 1, "filepaths": ["/tmp/_t3.mp4"]}),
     ("carrossel, vários arquivos", {"status": "error", "error": "x",
                                     "filepaths": ["/tmp/_t4a.jpg", "/tmp/_t4b.jpg"]}),
-]:
+]
+
+for label, res in CASES:
     paths = res["filepaths"]
     for p in paths:
         Path(p).write_text("x")
     ig_worker._discard_media(res)
-    left = [p for p in paths if Path(p).exists()]
-    if not left:
-        ok(f"{label}: mídia apagada")
+    survived = [p for p in paths if Path(p).exists()]
+    if survived == paths:
+        ok(f"{label}: mídia preservada")
     else:
-        bad(f"{label}: sobrou no disco {left}")
+        bad(f"{label}: mídia sumiu, some o trabalho de rede")
+    for p in paths:
+        Path(p).unlink(missing_ok=True)
+
+# Quem liga a variável continua tendo a garantia antiga, inclusive no erro.
+_orig_flag = ig_worker.IG_DELETE_AFTER_INGEST
+ig_worker.IG_DELETE_AFTER_INGEST = True
+try:
+    for label, res in CASES:
+        paths = res["filepaths"]
+        for p in paths:
+            Path(p).write_text("x")
+        ig_worker._discard_media(res)
+        left = [p for p in paths if Path(p).exists()]
+        if not left:
+            ok(f"{label}: com a variável ligada, apaga mesmo assim")
+        else:
+            bad(f"{label}: variável ligada e sobrou {left}")
+finally:
+    ig_worker.IG_DELETE_AFTER_INGEST = _orig_flag
 
 # Erro antes do download não tem o que apagar, e não pode explodir.
 try:
@@ -623,6 +650,63 @@ if clean_title("Link na bio! #dev") is None:
     ok("clean_title devolve None quando sobra menos de duas palavras")
 else:
     bad(f"clean_title de resto curto = {clean_title('Link na bio! #dev')!r}")
+
+print("== unit_ig_worker: mídia preservada e reaproveitada ==")
+import tempfile
+
+import minimax_mcp.ig_worker as _w
+
+with tempfile.TemporaryDirectory() as tmp:
+    _orig_dir = _w.IG_DOWNLOADS_DIR
+    _w.IG_DOWNLOADS_DIR = Path(tmp)
+    try:
+        # Sem nada no disco, não há o que reaproveitar.
+        if _w.existing_media("999") == []:
+            ok("existing_media devolve vazio quando o post nunca foi baixado")
+        else:
+            bad(f"existing_media de post novo = {_w.existing_media('999')!r}")
+
+        # Uma pasta por ig_pk: é o que liga os oito arquivos de um carrossel ao
+        # álbum, já que o nome do arquivo carrega o pk do RECURSO, não o do post.
+        d = _w.post_media_dir("555")
+        d.mkdir(parents=True)
+        for i, name in enumerate(["b_second.jpg", "a_first.jpg", "c_third.jpg"]):
+            p = d / name
+            p.write_bytes(b"x")
+            # mtimes distintos e crescentes na ordem de "download"
+            os.utime(p, (1_000_000 + i, 1_000_000 + i))
+
+        got = [Path(f).name for f in _w.existing_media("555")]
+        # Ordem de download, NÃO alfabética: num carrossel process_message junta
+        # a descrição de cada foto em ordem, então reordenar mudaria o texto do
+        # documento entre a primeira passada e um reprocessamento.
+        if got == ["b_second.jpg", "a_first.jpg", "c_third.jpg"]:
+            ok("existing_media preserva a ordem de download, não a alfabética")
+        else:
+            bad(f"existing_media ordenou {got}")
+
+        # O reuso tem de vir ANTES de qualquer requisição. Se _default_download
+        # tocasse a rede aqui, make_client falharia ou cobraria uma chamada --
+        # o teste roda sem sessão de propósito.
+        res = _w._default_download({"ig_pk": "555", "url": "https://example/p/x/"})
+        if res.get("ok") and res.get("reused") and len(res.get("filepaths", [])) == 3:
+            ok("_default_download reaproveita o disco sem tocar o Instagram")
+        else:
+            bad(f"_default_download não reaproveitou: {res!r}")
+
+        # E o que ele devolve tem de servir de raw_file_path.
+        if res.get("filepath") == res["filepaths"][0]:
+            ok("filepath aponta para o primeiro arquivo, que vira raw_file_path")
+        else:
+            bad(f"filepath={res.get('filepath')!r} destoa de filepaths[0]")
+    finally:
+        _w.IG_DOWNLOADS_DIR = _orig_dir
+
+# Guardar é o padrão: um .env esquecido não pode apagar trabalho de rede.
+if _w.IG_DELETE_AFTER_INGEST is False:
+    ok("IG_DELETE_AFTER_INGEST vem desligado por padrão")
+else:
+    bad("IG_DELETE_AFTER_INGEST ligado por padrão apagaria a mídia preservada")
 
 print()
 if FAIL:

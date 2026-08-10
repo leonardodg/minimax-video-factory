@@ -87,6 +87,7 @@ def ingest_text(
     ig_pk: str | None = None,
     extra_tags: list[str] | None = None,
     categories: list[str] | None = None,
+    raw_file_path: str | None = None,
 ) -> dict[str, Any]:
     """Summarize+document `text` via the LLM and store it in the knowledge base.
 
@@ -94,6 +95,10 @@ def ingest_text(
     vocabulary; the result lands as a `categoria:<name>` tag. Callers that
     already know the category -- the Instagram worker does, for images, from
     the vision model -- should leave it None instead of asking twice.
+
+    `raw_file_path` é o arquivo de onde este texto saiu, quando ele foi
+    preservado. Ficava fixo em None aqui, o que deixava a coluna sem uso; quem
+    guarda a mídia precisa dela para achar o que re-transcrever depois.
     """
     if (unavailable := _kb_unavailable()):
         return unavailable
@@ -127,7 +132,7 @@ def ingest_text(
             tutorial=gen.get("tutorial"),
             objectives="\n".join(gen.get("objetivos") or []),
             tags=tags,
-            raw_file_path=None,
+            raw_file_path=raw_file_path,
             llm_provider=gen.get("provider"),
             llm_model=gen.get("model"),
             embed_fn=llm.embed,

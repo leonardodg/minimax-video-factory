@@ -70,13 +70,25 @@ def make_client() -> Any:
     return client
 
 
-def saved_posts(client: Any, max_per_collection: int = 200) -> list[dict]:
+def saved_posts(client: Any, max_per_collection: int = 0) -> list[dict]:
     """Enumerate saved posts across the "All posts" collection + named ones.
 
     instagrapi v2 renamed saved_posts() to collections()/collection_medias();
     older versions keep saved_posts(). This prefers the modern API (which also
     carries the collection name for the message) and falls back to the legacy
     single list.
+
+    `max_per_collection=0` means "todas as páginas" -- é o padrão porque
+    qualquer teto trunca ESTA sincronização **em silêncio**, que é exatamente o
+    modo de falha que o plano manda vigiar. O padrão antigo era 200, e medido
+    em 2026-08-10 a conta que ele dava era: a catch-all "All posts" guarda
+    TODOS os posts salvos (3618) e entregaria 200; Receitas (1124), Inglês
+    (564) e Dev (287) também passam do teto. O resultado seria um lote parcial
+    indistinguível de uma punição do Instagram -- e a reação a cada um dos dois
+    é oposta (esperar horas contra mudar um parâmetro).
+
+    Vale registrar a suspeita, que não é conclusão: o incidente de 2026-08-09
+    em que uma varredura "viu 202 posts em vez de 2157" bate com 200 + 2.
 
     Returns a flat list of {"media": Media, "collection_name": str} dicts.
     """
