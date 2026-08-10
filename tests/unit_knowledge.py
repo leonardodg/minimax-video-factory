@@ -514,6 +514,12 @@ if "imagem/post do Instagram" not in llm.build_summary_prompt("x", is_image=Fals
 else:
     bad("is_image=False wrongly added the image context line")
 
+print("== unit_knowledge: CTA omission instruction in summary prompt ==")
+if "call-to-action" in llm.SUMMARY_PROMPT_TEMPLATE or "CTA" in llm.SUMMARY_PROMPT_TEMPLATE:
+    ok("summary prompt instructs the LLM to omit call-to-action phrases")
+else:
+    bad("summary prompt has no CTA omission instruction")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
