@@ -93,7 +93,23 @@ def clean_title(raw: str | None) -> str | None:
     return t if len(_WORD_RE.findall(t)) >= 2 else None
 
 IG_DOWNLOADS_DIR = Path(os.environ.get("IG_DOWNLOADS_DIR", "downloads/ig"))
-IG_DELETE_AFTER_INGEST = os.environ.get("IG_DELETE_AFTER_INGEST", "true").lower() in (
+# Guardar a mídia é o padrão, e o motivo é uma assimetria de custo, não disco
+# sobrando: uma requisição ao Instagram é escassa e punível (em 2026-08-09 duas
+# varreduras numa hora derrubaram a listagem), enquanto reprocessar na GPU é
+# lento mas local, repetível e sem consequência externa. Apagar a mídia amarra
+# as duas -- qualquer conserto no lado barato (transcrever com um Whisper
+# melhor, descrever a imagem com outro modelo) só se paga voltando ao lado caro.
+#
+# O que NÃO depende disto: refazer resumo, categoria, tags ou prompt do LLM. A
+# transcrição inteira já fica em `documents.transcription_text` (medido: 585 a
+# 4035 caracteres nos 12 primeiros), e para imagem é a descrição da visão que
+# cai lá. Esse reprocessamento -- o mais provável de todos -- nunca precisou de
+# mídia nem de Instagram.
+#
+# O padrão é `false` de propósito: se o .env não for carregado, o pior caso
+# passa a ser encher o disco (visível e reversível) em vez de perder trabalho de
+# rede em silêncio (invisível e caro).
+IG_DELETE_AFTER_INGEST = os.environ.get("IG_DELETE_AFTER_INGEST", "false").lower() in (
     "1", "true", "yes",
 )
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
@@ -221,6 +237,13 @@ def process_message(
         language=lang,
         ig_pk=message.get("ig_pk"),
         extra_tags=extra_tags,
+        # Onde a mídia ficou. A coluna sempre existiu e estava `None` nos 12
+        # primeiros documentos -- o esquema já previa guardar a origem, e apagar
+        # o arquivo tornava o campo morto. Guardando a mídia, ele volta a ter
+        # uso: é por ele que se acha o que re-transcrever sem voltar ao
+        # Instagram. Aponta para o primeiro arquivo; num carrossel, os irmãos
+        # estão na mesma pasta (uma por `ig_pk`).
+        raw_file_path=filepaths[0],
         # Only when vision did not already classify it. Vision looks at the
         # picture; the summary model only ever sees words, so it is the weaker
         # judge -- but for a video it is the only one there is, and videos are
@@ -306,8 +329,35 @@ def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
     return [("clip_download", pk)]
 
 
+def post_media_dir(pk: str) -> Path:
+    """Onde a mídia de um post vive: uma pasta por `ig_pk`.
+
+    Sem isso não dá para perguntar "a mídia deste post já está no disco?". Os
+    nomes de arquivo vêm do instagrapi e, num carrossel, carregam o pk do
+    **recurso**, não o do post -- então o pk do post não aparece em lugar nenhum
+    e nada liga os oito arquivos de um álbum ao álbum.
+    """
+    return IG_DOWNLOADS_DIR / str(pk)
+
+
+def existing_media(pk: str) -> list[str]:
+    """Arquivos já baixados deste post, em ordem de download.
+
+    Ordena por mtime (e nome, para desempatar) porque a ordem importa: num
+    carrossel, `process_message` junta a descrição de cada foto NA ORDEM, e uma
+    reordenação mudaria o texto do documento entre a primeira passada e um
+    reprocessamento.
+    """
+    d = post_media_dir(pk)
+    if not d.is_dir():
+        return []
+    files = [p for p in d.iterdir() if p.is_file()]
+    files.sort(key=lambda p: (p.stat().st_mtime, p.name))
+    return [str(p) for p in files]
+
+
 def _default_download(message: dict) -> dict:
-    """Download the media for a saved post.
+    """Download the media for a saved post — ou reaproveita o que já está no disco.
 
     Prefers the authenticated instagrapi client (the worker already has
     IG_SESSIONID, and saved/private posts are unreachable by anonymous yt-dlp),
@@ -318,19 +368,35 @@ def _default_download(message: dict) -> dict:
     Os pares vindos de `_download_targets` são `(método, argumento)`, e o
     argumento é um **pk ou uma URL** conforme o método — os três aceitam o
     primeiro posicional mais `folder=`, então a chamada aqui serve para ambos.
+
+    **O reuso vem antes de qualquer requisição, e é ele que dá sentido a guardar
+    a mídia.** Guardar arquivo sem conferir se ele existe não pouparia nada: o
+    worker baixaria de novo do mesmo jeito, e cada retry da DLQ (são três) seria
+    mais uma ida ao Instagram. O que se evita aqui não é só o download -- é o
+    `media_info` de `_download_targets`, que é a chamada AUTENTICADA, uma por
+    post, 3606 vezes numa corrida completa.
     """
     url = message.get("url", "")
     pk = message.get("ig_pk", "")
     if pk:
+        cached = existing_media(pk)
+        if cached:
+            logger.info(
+                "post %s: reaproveitando %d arquivo(s) do disco, sem tocar o Instagram",
+                pk, len(cached),
+            )
+            return {"ok": True, "filepath": cached[0], "filepaths": cached, "reused": True}
+    if pk:
         try:
-            IG_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
+            dest = post_media_dir(pk)
+            dest.mkdir(parents=True, exist_ok=True)
             from minimax_mcp import ig_sync
 
             client = ig_sync.make_client()
             client.delay_range = [0.5, 1.0]
             filepaths: list[str] = []
             for method, target in _download_targets(client, pk):
-                out = getattr(client, method)(target, folder=str(IG_DOWNLOADS_DIR))
+                out = getattr(client, method)(target, folder=str(dest))
                 if out and Path(out).exists():
                     filepaths.append(str(Path(out)))
             if filepaths:
@@ -340,8 +406,9 @@ def _default_download(message: dict) -> dict:
 
     from minimax_mcp.downloader import VideoDownloader
 
-    IG_DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
-    downloader = VideoDownloader(output_dir=IG_DOWNLOADS_DIR, browser="chrome")
+    dest = post_media_dir(pk) if pk else IG_DOWNLOADS_DIR
+    dest.mkdir(parents=True, exist_ok=True)
+    downloader = VideoDownloader(output_dir=dest, browser="chrome")
     dl = downloader.download(url)
     if dl.get("ok") and dl.get("filepath"):
         dl["filepaths"] = [dl["filepath"]]
@@ -354,10 +421,14 @@ _categories_cache: list[str] | None = None
 def _discard_media(res: dict) -> None:
     """Apaga a mídia baixada, tenha a ingestão dado certo ou não.
 
-    O download é rascunho: o que fica é o documento na base. Chamar isto no
-    caminho de erro é o que impede um sync completo de encher o disco, já que
-    a mídia de um post que falhou não tem nenhum uso posterior -- se ele for
-    retentado, baixa de novo.
+    Só roda quando `IG_DELETE_AFTER_INGEST` é ligado explicitamente, e hoje o
+    padrão é NÃO apagar -- ver a nota em cima da constante. Guardar troca disco
+    (barato, local, mensurável) por requisição ao Instagram (escassa e punível).
+
+    A frase que ficava aqui, "se ele for retentado, baixa de novo", deixou de
+    ser o comportamento normal e passou a descrever só o caso de quem liga a
+    variável: com a mídia no disco, `_default_download` reaproveita e o retry
+    não volta à rede.
     """
     if not IG_DELETE_AFTER_INGEST:
         return
