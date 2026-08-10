@@ -83,6 +83,42 @@ amarrava as duas.
 LLM. A transcrição inteira já fica em `documents.transcription_text` (585 a 4035
 caracteres nos 12 primeiros), e para imagem é a descrição da visão que cai lá.
 
+### O que o piloto mediu (40 mensagens, 08:30→09:30)
+
+| | |
+|---|---|
+| ritmo | **90,8 s por mensagem** — a pausa de 90 s governa, como projetado |
+| **disco** | **4,0 MB por post** → **12,4 GB** para os 3111. Estimei 19–31 GB; **errei para cima por 2×** |
+| falhas | 15%: 10% vídeo mudo, 5% timeout de CDN |
+| bloqueio | nenhum. Zero `public_request`, zero parede de login |
+
+**Vídeo mudo era 15 h de desperdício garantido.** Reel de música: o VAD do
+Whisper remove 100% do áudio, a transcrição volta vazia, `ingest_text` recusa, e
+o post só morria na DLQ **depois de três tentativas** — sendo que transcrever o
+mesmo arquivo dá o mesmo vazio, sempre.
+
+Corrigido em `f1f559c` (decisão do usuário: usar a legenda):
+
+- cai para a legenda **completa**, colhida do `media_info` que o download já faz
+  (a mensagem da fila só traz a primeira linha, cortada em 80 caracteres);
+- `_download_targets` foi partido em `_targets_from_info`, puro, para o
+  `media_info` continuar sendo **um** por post;
+- sem fala **e** sem legenda → falha **permanente**, direto para a DLQ. Falha de
+  rede continua retentável: só o determinístico perde o retry.
+
+**E o link de todo documento estava quebrado.** A URL era `/p/{pk}/`, mas `/p/`
+quer o **shortcode** — por isso o fallback de yt-dlp levava HTTP 400 e nunca
+poderia ter funcionado. `ig_sync.post_url()` calcula o shortcode a partir do pk
+(mesmo número noutra base, codec do instagrapi), **sem rede**. Conferido contra
+um post real: o `code` informado pelo Instagram e o calculado dão o mesmo
+`DaqrmRXICEP`. O worker recalcula do `ig_pk` em vez de confiar na mensagem,
+porque as 3111 já publicadas carregam a URL velha. **Backfill feito: 55 de 56.**
+
+⚠️ **Trocar o daemon é seguro, e a fila prova.** Ao parar: `unacked` voltou para
+`ready` (3067 → 3068), nada se perdeu. Esperar `consumers=0` antes de subir o
+novo — o RabbitMQ leva alguns segundos para largar a conexão morta, e subir
+antes daria dois consumidores na mesma GPU.
+
 ### Disco é o recurso apertado
 
 `/home` tinha 51 GB livres (já a 90%) quando o piloto começou. A projeção é
