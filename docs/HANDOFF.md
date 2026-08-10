@@ -42,6 +42,14 @@ noite de 2026-08-09.
 | **Export** | `kb_export` / `kb_export_search` testadas com dados reais |
 | **Os 12 documentos** | re-ingeridos e backfillados; backup em `output/kb-backup-antes/` e snapshots em `output/kb-backup/` |
 
+**São 12 documentos com `ig_pk`, todos reais** (ids 154–165). O fixture
+`Teste de ingestão` (id 150, `ig_pk` 12345) foi apagado em 2026-08-10 00:40 — ele
+tinha `ig_pk`, então entrava em toda consulta de Instagram e ia sujar a contagem
+do sync. Snapshot restaurável ficou em `output/kb-backup/150-12345.json`.
+
+Isso torna a verificação de amanhã exata: `/ig-sync` deve devolver
+`skipped_existing = 12`. Qualquer outro número é sinal de que algo mudou.
+
 ### A armadilha que mais custou
 
 **O venv carrega o `minimax_mcp` do `src/` da `main`, não do diretório atual.**
