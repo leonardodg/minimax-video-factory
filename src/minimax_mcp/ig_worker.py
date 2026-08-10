@@ -35,9 +35,41 @@ _CTA_PATTERNS = (
     r"curte e compartilha",
     r"ativa o sininho",
     r"coment(?:a|e)[^.!?]*que eu te mando",
+    # Inglês. Metade do que o usuário salva é de conta gringa, e o vocabulário
+    # só existia em português -- por isso "😱Still not Following me?? You'll
+    # miss all of it.." virou TÍTULO do doc 212, e "Follow @darpan.decoded"
+    # entrou no conteúdo pelo texto lido da tela.
+    #
+    # Os padrões são estreitos de propósito. `follow` sozinho apagaria "follow
+    # the steps below" e "follow this pattern", que é exatamente o conteúdo que
+    # esta base existe para guardar: um CTA que sobrevive é ruído, uma instrução
+    # apagada é perda.
+    # "follow me/us" SÓ quando fecha a oração ou vem seguido de on/for/@ --
+    # senão apaga "the compiler will follow us through the type graph", que é
+    # conteúdo. Um CTA que sobrevive é ruído; uma instrução apagada é perda.
+    r"follow(?:ing)? (?:me|us)(?=\W*(?:on\b|for\b|@|$|[.!?]))",
+    r"follow @",
+    r"follow (?:for|to get) more",
+    r"still not following",
+    r"save (?:this|the) (?:post|video|reel|one)",
+    r"share (?:this|it) with (?:a|your|ur)",
+    r"tag (?:a|your) (?:friend|buddy)",
+    r"link in (?:the )?bio",
+    r"(?:double.?tap|smash that)",
+    r"(?:comment|drop a comment)[^.!?]*(?:below|and i(?:'|’)?ll|to get)",
+    r"turn on (?:the )?notifications",
 )
+# Fim de frase é `.!?` SEGUIDO de espaço ou fim do texto -- não qualquer ponto.
+# O separador antigo quebrava dentro de `main.py`, `Python 3.11` e do handle
+# `@darpan.decoded`, e essa última quebra fez o padrão de CTA atravessar o ponto
+# e engolir a frase seguinte inteira ("How can I scale containers?" sumiu junto
+# com o "Follow @..."). Este conteúdo é cheio de nome de arquivo e versão, então
+# o defeito não era teórico.
+_TERM = r"[.!?](?=\s|$)"
+_NAO_TERM = r"(?:(?!" + _TERM + r").)"
+
 _CTA_SENTENCE_RE = re.compile(
-    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*[.!?]",
+    _NAO_TERM + r"*(?:" + "|".join(_CTA_PATTERNS) + r")" + _NAO_TERM + r"*" + _TERM,
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -58,9 +90,16 @@ def strip_cta(text: str) -> str:
 # Título de legenda frequentemente não tem pontuação nenhuma -- "Siga para mais
 # 👉 @fulano" atravessava o strip_cta intacto porque a sentença nunca terminava.
 _CTA_TAIL_RE = re.compile(
-    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*$",
+    _NAO_TERM + r"*(?:" + "|".join(_CTA_PATTERNS) + r")" + _NAO_TERM + r"*$",
     re.IGNORECASE | re.DOTALL,
 )
+# Num TÍTULO, qualquer CTA condena a linha inteira. O título vem da primeira
+# linha da legenda, é curto, e quando ele cai o `ingest_text` deriva um a partir
+# do resumo -- então descartar é barato e o resultado é melhor. Recortar um
+# pedaço deixava sobras sem sentido: "😱Still not Following me?? You'll miss all
+# of it.." virava "? You'll miss all of it..", que tem duas palavras e passava
+# no teste de tamanho.
+_CTA_QUALQUER_RE = re.compile("|".join(_CTA_PATTERNS), re.IGNORECASE)
 _HASHTAG_RE = re.compile(r"#\S+")
 _WORD_RE = re.compile(r"\w{2,}", re.UNICODE)
 
@@ -83,6 +122,16 @@ def clean_title(raw: str | None) -> str | None:
     do resumo assumir.
     """
     if not raw:
+        return None
+    # CTA na PRIMEIRA frase condena o título inteiro; depois dela, basta aparar.
+    # A posição é o que separa os dois casos reais:
+    #   "😱Still not Following me?? You'll miss all of it.."  -> abre com CTA, a
+    #      linha é promocional inteira, e aparar deixava "You'll miss all of it..",
+    #      que não é título de nada;
+    #   "Estude comigo na Fluency. Link na Bio."              -> o CTA é o rabo,
+    #      e "Estude comigo na Fluency." é um título legítimo -- foi para isso
+    #      que o clean_title nasceu.
+    if _CTA_QUALQUER_RE.search(re.split(_TERM, raw, maxsplit=1)[0]):
         return None
     t = _CTA_TAIL_RE.sub("", strip_cta(raw))
     t = _HASHTAG_RE.sub("", t)
