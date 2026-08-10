@@ -46,14 +46,21 @@ recorre ao **GraphQL público**, que é anônimo, leva 401 e cai na parede.
 
 Um vídeo simples passa (doc 154 foi ingerido normalmente). **Carrossel não.**
 
-> **Bloqueante para os 2145.** Carrosséis são uma fatia grande do acervo, e cada
-> um deles hoje custa um laço de requisições públicas — que é justamente o
-> comportamento que atrai punição. Corrigir antes de sincronizar: baixar os
-> recursos a partir do `media_info` do ÁLBUM (que já se tem em mãos, autenticado)
-> em vez de re-resolver recurso por recurso.
+> ✅ **CONSERTADO** em `0e7a53d`, merjado na `main` (`43453e2`). Os recursos são
+> baixados a partir das URLs assinadas que o `media_info` do **álbum** já traz —
+> some a re-resolução, some a queda para o GraphQL público.
+>
+> Precisão importante: `*_download_by_url` faz um `requests.get` **sem sessão**.
+> O download nunca foi o problema; o que sumiu foi a **consulta** ao endpoint
+> bloqueado. A autenticação continua acontecendo uma vez só, na busca do álbum.
+
+Verificado contra o post que travava: duas chamadas privadas 200, **zero
+públicas**, 8 recursos resolvidos, um baixado de verdade (102 KB). Depois disso,
+os 12 posts passaram inteiros — inclusive o carrossel de 8 fotos — em **39 s por
+post**, sem uma falha e com a DLQ vazia.
 
 A commit `474ef24` ensinou o pipeline a baixar todos os recursos do carrossel; o
-que faltou foi mantê-los na via autenticada.
+que faltou foi mantê-los fora da via pública.
 
 O lado bom: a fila é durável e nada se perdeu — 11 mensagens voltaram intactas,
 `unacked=0`, DLQ vazia. O trabalho retoma exatamente de onde parou.
@@ -62,14 +69,29 @@ O lado bom: a fila é durável e nada se perdeu — 11 mensagens voltaram intact
 
 ## Pré-requisitos, os dois bloqueantes
 
-### 1. Fazer merge de `feat/cta-export-markdown` antes de qualquer coisa
+### 1. Fazer merge de `feat/cta-export-markdown` — é funcional, não cosmético
 
 Sem isso, os 2145 documentos nascem com CTA na transcrição **e no título** —
-`"Siga para mais @fulano"`, `"Comenta 'PROCESSO' que eu te mando"`. Refazer
-custaria as 30 h de novo, mais uma segunda leva de requisições ao Instagram, que
-é o recurso que não se pode gastar duas vezes.
+`"Siga para mais @fulano"`, `"Comenta 'PROCESSO' que eu te mando"`.
 
-A branch está pronta: 14 testes, ruff limpo, 26 tools consistentes.
+⚠️ **E não adianta rodar o worker "de dentro do worktree".** O `minimax_mcp` está
+instalado no venv apontando para o `src/` do **repo principal**, então
+`python -m minimax_mcp.ig_worker` carrega o código da `main` **independentemente
+do diretório atual**. Verificado em 2026-08-10 00:19 do jeito mais caro possível:
+os 12 posts foram re-ingeridos de dentro do worktree e saíram **sem** a limpeza,
+porque ela só existia na branch. O conserto de carrossel, esse sim, funcionou —
+ele já estava na `main`.
+
+```bash
+# como conferir, antes de confiar:
+./.venv/bin/python -c "import minimax_mcp.ig_worker as w; print(w.__file__, hasattr(w,'clean_title'))"
+```
+
+Para scripts avulsos dá para forçar com `PYTHONPATH=src`, mas **o daemon tem de
+rodar com o código merjado** — é a única forma de garantir o que ele executa.
+
+A branch está pronta: 14 testes, ruff limpo, 26 tools consistentes, e já trouxe a
+`main` para dentro dela (o conserto de carrossel).
 
 ### 2. Validar os 12 re-ingeridos
 
@@ -213,6 +235,10 @@ de representar o lote — aprovar-se-ia uma coisa e rodar-se-ia outra.
 
 ### Cronograma que sai dessas escolhas
 
+O ritmo real medido em 2026-08-10 foi **39 s por post**, não 50 — 12 posts,
+incluindo um carrossel de 8 fotos, sem falha. Com `IG_WORKER_MIN_INTERVAL=90` o
+gargalo passa a ser a pausa, não o processamento:
+
 ```
 2145 posts ÷ 40/h ≈ 54 h de janela dedicada
   piloto      50 posts     ~1 h 15    → conferir e decidir se segue
@@ -221,4 +247,30 @@ de representar o lote — aprovar-se-ia uma coisa e rodar-se-ia outra.
 ```
 
 Divisível como for conveniente — a fila é durável e o worker pode parar e voltar
-a qualquer momento sem perder nada.
+a qualquer momento sem perder nada. ⚠️ Mas **cada reinício relista as coleções**,
+então dividir custa uma varredura por bloco: preferir poucos blocos longos.
+
+---
+
+## O que a noite de 2026-08-09 ensinou, e vale antes de começar
+
+| lição | consequência prática |
+|---|---|
+| O venv carrega o código da **main** | merge é pré-requisito funcional; conferir com o one-liner acima |
+| CTA vive mais na **legenda** que na fala | dos 13 documentos, **3 títulos** contra **2 transcrições**. O `clean_title` é a peça que mais muda o resultado, e ele é o mais novo de todos |
+| O daemon **não sobe nem desce sozinho** | `/ig-worker` e `/ig-worker-stop` só publicam `start`/`stop` numa fila de controle e alternam um booleano. Se o processo não estiver de pé, a tool responde ok e nada acontece |
+| Falha de env vira "conexão caiu" | `KB_DATABASE_URL` ausente aparece como `consumer connection dropped`, com backoff — parece rede e é ambiente |
+| Sessão expirada ≠ bloqueio | a queda para `public_request` é o sintoma; a listagem por `private_request` continua 200. Olhar QUAL request falhou antes de culpar rate limit |
+
+### Antes de dormir com isso rodando
+
+```bash
+# 1. o daemon está mesmo de pé? (pgrep vazio = ninguém consumindo)
+pgrep -af "minimax_mcp.ig_worker"
+
+# 2. está avançando? (compare duas leituras espaçadas)
+curl -s -u guest:guest localhost:15672/api/queues | python3 -c "..."
+
+# 3. está falhando em silêncio? DLQ cheia = 3 tentativas esgotadas
+#    e o log dirá se é IG (public_request) ou ambiente
+```
