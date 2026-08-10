@@ -26,18 +26,34 @@ public_request ERROR Status 200: JSONDecodeError (url=https://www.instagram.com/
 >>> <!DOCTYPE html> ... <title>Instagram</title>
 ```
 
-**Isso não foi ritmo.** Foram duas ou três chamadas. As hipóteses, em ordem:
+**Não é ritmo e NÃO é sessão.** Sessão nova instalada e revalidada em
+2026-08-10 00:00 — três chamadas privadas seguidas retornaram 200 autenticadas:
 
-1. **Sessão expirada.** Com o `IG_SESSIONID` inválido, o `instagrapi` cai para
-   requisição **pública**, e a Meta responde a essas com a página de login. O
-   sintoma bate exatamente: erro em `public_request`, não em `private_request`.
-   Note que a listagem de coleções, feita por `private_request`, **funcionou**
-   (`leo.dg [200]`) — o que sugere sessão válida para uma coisa e não para outra,
-   ou expirando no meio.
-2. **Conta penalizada** pelas varreduras anteriores.
+```
+00:00:00  private_request [200]  collections/list                 leo.dg  ✓
+00:00:04  private_request [200]  users/<id>/info                          ✓
+00:00:06  private_request [200]  media/3957796350083531969/info            ✓
+00:00:08  public_request  [401]  graphql/query?shortcode=...   ← sem sessão
+00:00:19  public_request  [200]  /p/Dbs6s-kEQTB/               ← HTML de login
+00:00:22+ POST /api/graphql -> HTML, em laço de ~5 s
+```
 
-> **Antes de qualquer coisa: renovar o `IG_SESSIONID` e validar com UM post.**
-> Rodar 2145 com a sessão nesse estado gastaria 54 h para encher a DLQ.
+**O download de carrossel cai na API pública.** O post travado
+(`3957796350083531969`) é `media_type=8`. `_download_targets` resolve o álbum por
+`media_info(pk)` — privada, funciona — e depois baixa **cada recurso**
+individualmente; o `media_info` do recurso não está em cache e o `instagrapi`
+recorre ao **GraphQL público**, que é anônimo, leva 401 e cai na parede.
+
+Um vídeo simples passa (doc 154 foi ingerido normalmente). **Carrossel não.**
+
+> **Bloqueante para os 2145.** Carrosséis são uma fatia grande do acervo, e cada
+> um deles hoje custa um laço de requisições públicas — que é justamente o
+> comportamento que atrai punição. Corrigir antes de sincronizar: baixar os
+> recursos a partir do `media_info` do ÁLBUM (que já se tem em mãos, autenticado)
+> em vez de re-resolver recurso por recurso.
+
+A commit `474ef24` ensinou o pipeline a baixar todos os recursos do carrossel; o
+que faltou foi mantê-los na via autenticada.
 
 O lado bom: a fila é durável e nada se perdeu — 11 mensagens voltaram intactas,
 `unacked=0`, DLQ vazia. O trabalho retoma exatamente de onde parou.
