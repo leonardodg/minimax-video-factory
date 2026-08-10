@@ -520,6 +520,15 @@ if "call-to-action" in llm.SUMMARY_PROMPT_TEMPLATE or "CTA" in llm.SUMMARY_PROMP
 else:
     bad("summary prompt has no CTA omission instruction")
 
+print("== unit_knowledge: export functions ==")
+from minimax_mcp import knowledge as _k
+
+for fname in ("export_search", "export_documents", "_document_to_dict"):
+    if callable(getattr(_k, fname, None)):
+        ok(f"knowledge.{fname} exists")
+    else:
+        bad(f"knowledge.{fname} missing")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

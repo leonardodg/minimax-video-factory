@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from sqlalchemy import select
 
 from minimax_mcp import db, llm, vault
 
@@ -461,3 +462,107 @@ def reindex(embedding_model: str | None = None) -> dict[str, Any]:
     finally:
         session.close()
     return {"ok": True, "documents_reindexed": count}
+
+
+def _document_to_dict(doc: Any) -> dict[str, Any]:
+    """Map a Document ORM row to the dict shape vault.write_markdown_copy expects."""
+    return {
+        "id": doc.id,
+        "title": doc.title,
+        "summary": doc.summary,
+        "tutorial": doc.tutorial,
+        "objectives": doc.objectives,
+        "tags": doc.tags or [],
+        "source_url": doc.source_url,
+        "platform": doc.platform,
+        "type": doc.type,
+        "transcription_text": doc.transcription_text,
+        "ig_pk": doc.ig_pk,
+        "llm_model": doc.llm_model,
+    }
+
+
+def export_search(
+    query: str | None = None,
+    ids: list[int] | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List documents for export — by ids, or by keyword query, or latest first.
+
+    Never writes anything. Returns the table the user validates before
+    calling export_documents.
+    """
+    if (unavailable := _kb_unavailable()):
+        return unavailable
+    session = db.get_session()
+    try:
+        stmt = select(db.Document)
+        if ids:
+            stmt = stmt.where(db.Document.id.in_(ids))
+        elif query and query.strip():
+            ranked = db.search_documents(
+                session, query, embed_fn=llm.embed, top_k=limit
+            )
+            hit_ids = [r["document_id"] for r in ranked]
+            if not hit_ids:
+                return {"ok": True, "total": 0, "documents": []}
+            stmt = (
+                select(db.Document)
+                .where(db.Document.id.in_(hit_ids))
+                .order_by(db.Document.id.desc())
+            )
+        else:
+            stmt = stmt.order_by(db.Document.id.desc())
+        stmt = stmt.limit(limit)
+        docs = session.execute(stmt).scalars().all()
+        documents = [
+            {
+                "id": d.id, "type": d.type, "title": d.title, "tags": d.tags,
+                "ig_pk": d.ig_pk,
+                "summary_len": len(d.summary or ""),
+                "tutorial_len": len(d.tutorial or ""),
+                "transcription_len": len(d.transcription_text or ""),
+                "created_at": str(d.created_at),
+            }
+            for d in docs
+        ]
+    finally:
+        session.close()
+    return {"ok": True, "total": len(documents), "documents": documents}
+
+
+def export_documents(
+    ids: list[int],
+    output_dir: str = "output/kb-export/",
+) -> dict[str, Any]:
+    """Write the selected documents as readable .md files.
+
+    Uses vault.write_markdown_copy (which appends /Knowledge to the path and
+    never raises). Missing ids are reported per-file without aborting the rest.
+    """
+    if (unavailable := _kb_unavailable()):
+        return unavailable
+    if not ids:
+        return {"ok": False, "error": "ids required"}
+    session = db.get_session()
+    try:
+        rows = session.execute(
+            select(db.Document).where(db.Document.id.in_(ids))
+        ).scalars().all()
+        by_id = {d.id: d for d in rows}
+    finally:
+        session.close()
+
+    files: list[dict[str, Any]] = []
+    for doc_id in ids:
+        doc = by_id.get(doc_id)
+        if doc is None:
+            files.append({"id": doc_id, "ok": False, "error": "not found"})
+            continue
+        result = vault.write_markdown_copy(_document_to_dict(doc), output_dir)
+        files.append(
+            {"id": doc_id, "ok": result.get("ok", False),
+             "skipped": result.get("skipped", False), "path": result.get("path"),
+             "error": result.get("reason")}
+        )
+    return {"ok": True, "output_dir": output_dir, "files": files}
