@@ -171,6 +171,8 @@ def process_message(
     content spread across carousel photos is captured. The first photo's
     categoria becomes a `categoria:<name>` tag.
     """
+    from minimax_mcp import ig_sync
+
     if not message:
         return {"status": "error", "error": "empty message"}
 
@@ -192,6 +194,36 @@ def process_message(
             return {"status": "error", "error": tr.get("error", "transcribe failed"), "filepaths": filepaths}
         text, lang = tr["text"], tr.get("language", "pt")
         doc_type = "video"
+        if not (text or "").strip():
+            # Vídeo sem fala nenhuma -- reel de música. Medido no piloto de
+            # 2026-08-10: 4 dos 40 primeiros posts (10%), com o VAD do Whisper
+            # removendo 100% do áudio ("VAD filter removed 00:10.613" num clipe
+            # de 00:10.613). O `ingest_text` recusa texto vazio, então isso
+            # falhava e ia para a DLQ depois de TRÊS tentativas.
+            #
+            # As três tentativas eram desperdício garantido: transcrever o mesmo
+            # arquivo dá o mesmo vazio, sempre. Na escala da corrida, ~15 h de
+            # GPU para re-falhar.
+            #
+            # A legenda completa vem do `media_info` que o download já fez; o
+            # título da mensagem é o reserva, e é pior (primeira linha, 80
+            # caracteres) -- só serve quando a mídia veio reaproveitada do disco
+            # e não houve `media_info`.
+            text = (dl.get("caption") or message.get("title") or "").strip()
+            lang = "pt"
+            if not text:
+                # Sem fala e sem legenda não existe documento possível: não há
+                # texto nenhum para resumir. `permanent` manda direto para a
+                # DLQ, sem gastar as duas tentativas restantes num resultado
+                # que já se sabe.
+                return {
+                    "status": "error", "error": "sem fala e sem legenda",
+                    "permanent": True, "filepaths": filepaths,
+                }
+            logger.info(
+                "ig_pk=%s sem fala; usando a legenda (%d caracteres)",
+                message.get("ig_pk"), len(text),
+            )
     else:
         if describe is None:
             return {"status": "error", "error": "no describe provided for image", "filepaths": filepaths}
@@ -230,7 +262,12 @@ def process_message(
     title = clean_title(message.get("title"))
     ing = ingest(
         text,
-        source_url=message.get("url"),
+        # Recalculado do pk em vez de confiado à mensagem. As 3111 mensagens
+        # publicadas em 2026-08-10 08:29 carregam `/p/{pk}/`, que não abre, e
+        # elas não se reescrevem -- consertar só a listagem deixaria a corrida
+        # inteira com link quebrado. Cálculo local, sem rede.
+        source_url=ig_sync.post_url(message.get("ig_pk")) if message.get("ig_pk")
+        else message.get("url"),
         title=title,
         platform="instagram",
         doc_type=doc_type,
@@ -299,7 +336,17 @@ def _download_targets(client: Any, pk: str) -> list[tuple[str, str]]:
     nenhum 401. A autenticação continua acontecendo uma vez só, na consulta do
     álbum, que é onde ela sempre funcionou.
     """
-    info = client.media_info(pk)
+    return _targets_from_info(client.media_info(pk), pk)
+
+
+def _targets_from_info(info: Any, pk: str) -> list[tuple[str, str]]:
+    """A parte pura de `_download_targets`: dado o `media_info`, quais downloads.
+
+    Separado para que quem já tem o `info` na mão não peça de novo. O
+    `media_info` é a chamada AUTENTICADA do consumo, uma por post e 3111 numa
+    corrida -- duplicá-la só para ler a legenda seria dobrar exatamente o
+    recurso escasso.
+    """
     mtype = int(getattr(info, "media_type", 0) or 0)
     if mtype == 8:
         resources = list(getattr(info, "resources", None) or [])
@@ -394,13 +441,22 @@ def _default_download(message: dict) -> dict:
 
             client = ig_sync.make_client()
             client.delay_range = [0.5, 1.0]
+            # Um media_info só, e dele saem as duas coisas: o que baixar e a
+            # legenda COMPLETA. A mensagem da fila só carrega a primeira linha
+            # cortada em 80 caracteres (`to_messages`), que é pouco para virar
+            # documento quando o vídeo não tem fala nenhuma.
+            info = client.media_info(pk)
+            legenda = (getattr(info, "caption_text", "") or "").strip()
             filepaths: list[str] = []
-            for method, target in _download_targets(client, pk):
+            for method, target in _targets_from_info(info, pk):
                 out = getattr(client, method)(target, folder=str(dest))
                 if out and Path(out).exists():
                     filepaths.append(str(Path(out)))
             if filepaths:
-                return {"ok": True, "filepath": filepaths[0], "filepaths": filepaths}
+                return {
+                    "ok": True, "filepath": filepaths[0],
+                    "filepaths": filepaths, "caption": legenda,
+                }
         except Exception as e:
             logger.warning("instagrapi download failed for %s: %s", pk, e)
 
@@ -584,9 +640,21 @@ def run() -> None:
             _pace(started, message.get("ig_pk"))
             _safe_ack(ch, method)
         else:
-            logger.warning("processing failed ig_pk=%s: %s", message["ig_pk"], res["error"])
+            permanente = bool(res.get("permanent"))
+            logger.warning(
+                "processing failed ig_pk=%s: %s%s",
+                message["ig_pk"], res["error"], " (permanente)" if permanente else "",
+            )
             try:
-                ig_queue.handle_failure(ch, properties, body)
+                # Uma falha determinística não melhora na segunda tentativa. Só
+                # o que depende do mundo lá fora -- timeout de CDN, soluço de
+                # rede -- merece o retry; repetir o que já se sabe custa dois
+                # ciclos de IG_WORKER_MIN_INTERVAL por post e, na escala desta
+                # corrida, horas de GPU para chegar no mesmo lugar.
+                if permanente:
+                    ig_queue.dead_letter(ch, properties, body)
+                else:
+                    ig_queue.handle_failure(ch, properties, body)
             except Exception as exc:
                 logger.warning("handle_failure failed: %s", exc)
             # A pausa vale para a falha também. Um post que falhou já gastou as

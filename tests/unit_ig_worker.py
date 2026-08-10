@@ -651,6 +651,82 @@ if clean_title("Link na bio! #dev") is None:
 else:
     bad(f"clean_title de resto curto = {clean_title('Link na bio! #dev')!r}")
 
+print("== unit_ig_worker: vídeo mudo cai para a legenda ==")
+
+# 10% dos 40 primeiros posts do piloto (2026-08-10) eram reel de música: o VAD
+# do Whisper remove 100% do áudio e a transcrição volta vazia.
+_visto: dict = {}
+
+
+def _ing_captura(text, **kw):
+    _visto.clear()
+    _visto["text"] = text
+    _visto.update(kw)
+    return {"ok": True, "document_id": 900}
+
+
+r = ig_worker.process_message(
+    {"ig_pk": "1", "url": "u", "title": "Primeira linha cortada"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4", "filepaths": ["/tmp/x.mp4"],
+                        "caption": "A legenda inteira do post, bem mais longa que o título."},
+    transcribe=lambda f: {"ok": True, "text": "   ", "language": "pt"},
+    describe=None,
+    ingest=_ing_captura,
+)
+if r["status"] == "done" and _visto["text"].startswith("A legenda inteira"):
+    ok("sem fala, o documento nasce da legenda COMPLETA do media_info")
+else:
+    bad(f"fallback de legenda não usou o caption: {r!r} / {_visto.get('text')!r}")
+
+# Sem media_info (mídia reaproveitada do disco) sobra o título da mensagem.
+r = ig_worker.process_message(
+    {"ig_pk": "2", "url": "u", "title": "Só o título sobrou aqui"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4", "filepaths": ["/tmp/x.mp4"]},
+    transcribe=lambda f: {"ok": True, "text": "", "language": "pt"},
+    describe=None,
+    ingest=_ing_captura,
+)
+if r["status"] == "done" and _visto["text"] == "Só o título sobrou aqui":
+    ok("sem caption, o título da mensagem é o reserva")
+else:
+    bad(f"reserva de título falhou: {r!r} / {_visto.get('text')!r}")
+
+# Sem fala E sem legenda não há documento possível -- e repetir isso três vezes
+# é desperdício determinístico, então tem de ser falha PERMANENTE.
+r = ig_worker.process_message(
+    {"ig_pk": "3", "url": "u", "title": None},
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4", "filepaths": ["/tmp/x.mp4"],
+                        "caption": ""},
+    transcribe=lambda f: {"ok": True, "text": "", "language": "pt"},
+    describe=None,
+    ingest=_ing_captura,
+)
+if r["status"] == "error" and r.get("permanent") is True:
+    ok("sem fala e sem legenda vira falha permanente, sem gastar retry")
+else:
+    bad(f"deveria ser permanente: {r!r}")
+
+# E uma falha comum continua NÃO sendo permanente -- timeout de CDN merece retry.
+r = ig_worker.process_message(
+    {"ig_pk": "4", "url": "u", "title": "x"},
+    download=lambda m: {"ok": False, "error": "Read timed out"},
+    transcribe=None, describe=None, ingest=_ing_captura,
+)
+if r["status"] == "error" and not r.get("permanent"):
+    ok("falha de rede continua retentável")
+else:
+    bad(f"falha de rede não pode ser permanente: {r!r}")
+
+# A parte pura não pode pedir media_info de novo: é a chamada autenticada.
+class _Info:
+    media_type = 2
+
+
+if ig_worker._targets_from_info(_Info(), "77") == [("clip_download", "77")]:
+    ok("_targets_from_info decide sem tocar no client")
+else:
+    bad(f"_targets_from_info = {ig_worker._targets_from_info(_Info(), '77')!r}")
+
 print("== unit_ig_worker: mídia preservada e reaproveitada ==")
 import tempfile
 

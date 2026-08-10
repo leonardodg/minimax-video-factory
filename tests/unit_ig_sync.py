@@ -55,7 +55,10 @@ m0 = msgs[0]
 if (
     m0["ig_pk"] == "1001"
     and m0["media_type"] == "video"
-    and m0["url"] == "https://www.instagram.com/p/1001/"
+    # Shortcode, não o pk: `/p/` só resolve com o código. Esta linha afirmava
+    # `/p/1001/`, que é o formato que gravou link quebrado em todo documento e
+    # fazia o fallback de yt-dlp levar HTTP 400.
+    and m0["url"] == "https://www.instagram.com/p/Pp/"
     and m0["owner_username"] == "anajcodes"
     and m0["title"] == "Reel de teste"
     and m0["collection_name"] is None
@@ -64,6 +67,24 @@ if (
     ok("to_messages maps video Media to the message contract")
 else:
     bad(f"video message = {m0!r}")
+
+# O `code` que o Instagram manda tem de vencer o calculado -- e quando ele não
+# vem, o calculado tem de dar exatamente o mesmo. Verificado com um post real
+# em 2026-08-10: pk 3939152570070606095 -> DaqrmRXICEP pelos dois caminhos.
+if (
+    ig_sync.post_url("3939152570070606095", "DaqrmRXICEP")
+    == ig_sync.post_url("3939152570070606095")
+    == "https://www.instagram.com/p/DaqrmRXICEP/"
+):
+    ok("post_url: o code informado e o calculado do pk concordam")
+else:
+    bad(f"post_url divergiu: {ig_sync.post_url('3939152570070606095')!r}")
+
+# Um pk que não é número não pode derrubar a listagem inteira.
+if ig_sync.post_url("nao-numerico") == "https://www.instagram.com/p/nao-numerico/":
+    ok("post_url degrada sem levantar quando o pk não é numérico")
+else:
+    bad(f"post_url com lixo = {ig_sync.post_url('nao-numerico')!r}")
 
 if msgs[1]["media_type"] == "image" and msgs[2]["media_type"] == "carousel":
     ok("image and carousel media_types map correctly")
