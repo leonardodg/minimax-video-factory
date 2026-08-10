@@ -72,7 +72,7 @@ minimax-video-factory/
 ├── workflows/
 │   └── minimax_h3_t2v_api.json   <- EXPANDED T2V workflow (14 nodes), see §6
 ├── src/minimax_mcp/
-│   ├── server.py             <- FastMCP app, 11 tools; model set + prefix from env; path mapping host<->container
+│   ├── server.py             <- FastMCP app, 26 tools (H3 + studio + IG + 9 KB); model set + prefix from env; path mapping host<->container
 │   ├── comfyui_client.py     <- ComfyUIClient (submit/history/websocket/download)
 │   ├── downloader.py         <- NEW: yt-dlp wrapper with browser cookies
 │   ├── transcriber.py        <- NEW: faster-whisper wrapper (GPU, PT-BR)
