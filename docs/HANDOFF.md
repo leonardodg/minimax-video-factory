@@ -23,14 +23,17 @@ noite de 2026-08-09.
 ### Ordem de execução
 
 ```
-1. merge de feat/cta-export-markdown na main        ← PRÉ-REQUISITO FUNCIONAL
-2. conferir:  ./.venv/bin/python -c "import minimax_mcp.ig_worker as w; \
-                 print(w.__file__, hasattr(w,'clean_title'))"
-3. implementar IG_WORKER_MIN_INTERVAL=90 (o worker não tem pausa nenhuma hoje)
-4. /ig-sync  UMA vez  → esperado published ≈ 2145, skipped_existing = 12
+1. ✅ FEITO — merge de feat/cta-export-markdown na main (2026-08-10 00:45)
+      conferido: minimax_mcp.ig_worker vem de src/ da main e TEM clean_title
+      14 testes verdes, ruff limpo, 26 tools
+2. implementar IG_WORKER_MIN_INTERVAL=90 (o worker não tem pausa nenhuma hoje)
+3. /ig-sync  UMA vez  → esperado published ≈ 2145, skipped_existing = 12
    ⚠️ se vier MUITO abaixo de 2145, PARAR — a listagem trunca em vez de dar erro
-5. subir o daemon e deixar consumir; bloco piloto de 50 e conferir
+4. subir o daemon e deixar consumir; bloco piloto de 50 e conferir
 ```
+
+Sobra **uma** peça de código antes de começar: a pausa. Todo o resto do caminho
+já está na `main` e verificado.
 
 ### O que já está pronto e NÃO precisa refazer
 
@@ -38,7 +41,7 @@ noite de 2026-08-09.
 |---|---|
 | **Sessão do Instagram** | renovada e validada em 2026-08-10 00:05 |
 | **Download de carrossel** | consertado e merjado na `main` (`43453e2`) — era o bloqueio real, não a sessão |
-| **Limpeza de CTA** | pronta na branch: `strip_cta` (fala) + `clean_title` (legenda) |
+| **Limpeza de CTA** | **na `main`**: `strip_cta` (fala) + `clean_title` (legenda) |
 | **Export** | `kb_export` / `kb_export_search` testadas com dados reais |
 | **Os 12 documentos** | re-ingeridos e backfillados; backup em `output/kb-backup-antes/` e snapshots em `output/kb-backup/` |
 
