@@ -47,6 +47,17 @@ fora do JSON) com estas chaves:
   palavras — NÃO reconstrua, NÃO adivinhe o nome do pacote, NÃO complete o
   trecho. Um código plausível e errado é pior que nenhum: quem lê esta base vai
   copiar e colar o que estiver aqui.
+  ⚠️ O CÓDIGO NA TELA COSTUMA SER CENÁRIO, não a lição. Muito vídeo mostra um
+  editor com código qualquer enquanto o narrador ensina outra coisa — medido:
+  um post sobre certificação AWS exibia um formulário HTML de "Nome/Preço" que
+  não tinha relação nenhuma com o assunto. Quando a lição está na FALA (o nome
+  de um site, um atalho de teclado, um passo descrito em voz), documente a FALA,
+  em palavras, e ignore o código decorativo. Não force um bloco de código só
+  porque havia código na imagem.
+
+  ⚠️ ANTES E DEPOIS: se o material mostra primeiro um exemplo ERRADO e termina
+  com a versão corrigida, documente a CORRIGIDA e diga, numa frase, que havia um
+  contraexemplo. Misturar as duas produz um tutorial que ensina o erro.
 - "objetivos": uma lista de objetivos/aprendizados principais (array de strings).
 - "tags": uma lista de 3 a 8 tags curtas relevantes (array de strings).
 
@@ -212,6 +223,47 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
+# Prosa que o modelo embrulha em cerca: item de lista, negrito de passo, título.
+_MARCADOR_PROSA = re.compile(r"^\s*(?:\d+[.)]|[-*+•]\s|\*\*|#{1,6}\s)")
+# Sinais de que a linha é para copiar e colar, não para ler.
+_SINAL_CODIGO = re.compile(
+    r"[{};=<>]|::|\(|^\s*[a-z][\w.-]*\s+-{1,2}\w|^\s*\$\s"
+    # Declaração sem pontuação nenhuma: `from x import y`, `import os`, `def f`.
+    # Sem isto, `from win10toast import ToastNotifier` -- a linha que motivou
+    # toda a verificação -- não contava como código, e um bloco legítimo era
+    # julgado por uma amostra menor do que ele tem.
+    r"|^\s*(?:import|from|def|class|const|let|var|function|return|export|public|"
+    r"private|package|SELECT|INSERT|UPDATE|DELETE)\b"
+)
+
+
+def _linha_parece_codigo(linha: str) -> bool:
+    """A âncora vale para o que se copia e cola, não para prosa.
+
+    O modelo embrulha listas em ``` com frequência, e exigir que uma frase em
+    português apareça literalmente na transcrição condenava blocos inteiros de
+    conteúdo legítimo. Dois casos reais de 2026-08-10:
+
+      "1. Cadastre-se em [Skillbuilders.aws](https://skillbuilders.aws)."
+      "2. Selecionar todas as palavras: Ctrl + D"
+
+    O primeiro carrega justamente o nome do site que o narrador DIZ na fala
+    ("o Skillbuilders.aws", aos 23,7 s); o segundo, o atalho que ele fala como
+    "apertando Ctrl mais D". Nenhum dos dois aparece com essa grafia na
+    transcrição, e a régua antiga apagava os dois blocos -- destruindo a
+    resposta em vez de proteger dela.
+
+    Marcador de prosa vence: `1.`, `-`, `**`, `#` no início dizem "isto é
+    texto", mesmo que haja um trecho de código no meio da frase.
+    """
+    s = linha.strip()
+    if len(s) < 4:
+        return False
+    if _MARCADOR_PROSA.match(linha):
+        return False
+    return bool(_SINAL_CODIGO.search(s))
+
+
 def _parece_codigo(s: str) -> bool:
     """Heurística para span inline: vale a pena exigir âncora?
 
@@ -249,11 +301,17 @@ def ancorar_codigo(tutorial: str, fonte: str, *, limiar: float = 0.5) -> tuple[s
 
     def bloco(m: re.Match) -> str:
         nonlocal removidos
-        linhas = [ln for ln in m.group(1).splitlines() if len(ln.strip()) >= 4]
+        # SÓ as linhas de código contam. Um bloco de prosa embrulhado em cerca
+        # não é objeto desta verificação -- ver `_linha_parece_codigo`.
+        linhas = [ln for ln in m.group(1).splitlines() if _linha_parece_codigo(ln)]
         if not linhas:
             return m.group(0)
         ancoradas = sum(1 for ln in linhas if _norm(ln) in alvo)
-        if ancoradas / len(linhas) >= limiar:
+        # Maioria ESTRITA: meio a meio não passa. Um bloco com metade das linhas
+        # inventadas é perigoso justamente por parecer inteiro -- foi o caso do
+        # post 3671499376976917314, em que o vídeo edita o código na tela e o
+        # modelo completou de cabeça as duas linhas que faltavam.
+        if ancoradas / len(linhas) > limiar:
             return m.group(0)
         removidos += 1
         return f"\n{NAO_MOSTRADO}\n"
