@@ -184,6 +184,33 @@ for termo in ("`Pod`", "`array`", "`useState`"):
     else:
         bad(f"{termo} virou código e foi removido")
 
+print("== unit_llm_ancora: a linguagem na cerca declara que é código ==")
+
+# ```bash com comando puro: nenhuma linha tem símbolo, mas a cerca diz o que é.
+# Foi assim que `sudo apt update` / `sudo apt install nmap` atravessaram a régua
+# no post 3704821969073991262 mesmo depois do conserto dos spans inline.
+TUT_BASH = "```bash\nsudo apt update\nsudo apt install nmap\n```"
+saida, n = ancorar_codigo(TUT_BASH, "o vídeo fala de escanear portas na internet")
+if n == 1 and "sudo apt" not in saida:
+    ok("bloco ```bash de comando puro sem âncora é removido")
+else:
+    bad(f"bloco bash passou: removidos={n} saida={saida!r}")
+
+saida, n = ancorar_codigo(TUT_BASH, "rode sudo apt update e depois sudo apt install nmap")
+if n == 0 and "sudo apt install nmap" in saida:
+    ok("bloco ```bash ancorado na fonte sobrevive")
+else:
+    bad(f"bloco bash legítimo removido: {saida!r}")
+
+# Cerca SEM linguagem contendo prosa continua livre -- é o caso do 3709415772515231896.
+TUT_PROSA = ("```\n1. Cadastre-se em [Skillbuilders.aws](https://skillbuilders.aws).\n"
+             "2. Explore os cursos oferecidos pela AWS.\n```")
+saida, n = ancorar_codigo(TUT_PROSA, "[23.70s] o Skillbuilders.aws.")
+if n == 0 and "Skillbuilders.aws" in saida:
+    ok("cerca sem linguagem com prosa continua passando")
+else:
+    bad(f"prosa em cerca nua foi removida: removidos={n}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
