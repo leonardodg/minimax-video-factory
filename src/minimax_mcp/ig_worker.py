@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 _CTA_PATTERNS = (
     r"segue(?:-me| me)?(?: aqui)? (?:para|pra)(?: não| nao)? perder",
-    r"ja me segue",
+    r"j[aá] me segue",
     r"siga para mais",
     r"salva(?: esse| este| o) vídeo",
     r"salv(e|a) para fazer depois",

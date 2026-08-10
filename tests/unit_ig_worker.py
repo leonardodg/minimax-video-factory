@@ -462,6 +462,20 @@ if "link na bio" not in strip_cta("Curte e compartilha. Link na bio. O conteúdo
 else:
     bad("strip_cta did not remove 'link na bio'")
 
+# Standalone accented 'Já me segue' (no following 'para perder') is stripped.
+accented = strip_cta("A receita é boa. Já me segue. Asse por 15 min.")
+if "Já me segue" not in accented and "A receita é boa" in accented and "Asse por 15 min" in accented:
+    ok("strip_cta strips standalone accented 'Já me segue'")
+else:
+    bad(f"strip_cta(accented) = {accented!r}")
+
+# A legit sentence containing the bare word 'já' survives (no over-match).
+already = "Já assei por 15 minutos. O resto é fácil."
+if strip_cta(already) == already:
+    ok("strip_cta leaves a sentence with bare 'já' intact")
+else:
+    bad(f"strip_cta(bare já) = {strip_cta(already)!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
