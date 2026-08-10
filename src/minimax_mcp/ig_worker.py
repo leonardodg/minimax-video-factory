@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -22,6 +23,35 @@ from typing import Any
 from minimax_mcp import db, ig_queue, knowledge, llm
 
 logger = logging.getLogger(__name__)
+
+_CTA_PATTERNS = (
+    r"segue(?:-me| me)?(?: aqui)? (?:para|pra)(?: não| nao)? perder",
+    r"ja me segue",
+    r"siga para mais",
+    r"salva(?: esse| este| o) vídeo",
+    r"salv(e|a) para fazer depois",
+    r"compartilh(a|e) com (?:seus|teus|os) amigos",
+    r"link na bio",
+    r"curte e compartilha",
+    r"ativa o sininho",
+    r"coment(?:a|e).*que eu te mando",
+)
+_CTA_SENTENCE_RE = re.compile(
+    r"[^.!?]*(?:" + "|".join(_CTA_PATTERNS) + r")[^.!?]*[.!?]",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_cta(text: str) -> str:
+    """Remove sentences containing Instagram call-to-action phrases.
+
+    A sentence is delimited by `.`, `!` or `?`. Only the sentence that contains
+    the CTA is removed; surrounding content is preserved. Never raises and
+    returns input unchanged when no CTA pattern matches.
+    """
+    if not text:
+        return text
+    return _CTA_SENTENCE_RE.sub("", text).strip()
 
 IG_DOWNLOADS_DIR = Path(os.environ.get("IG_DOWNLOADS_DIR", "downloads/ig"))
 IG_DELETE_AFTER_INGEST = os.environ.get("IG_DELETE_AFTER_INGEST", "true").lower() in (

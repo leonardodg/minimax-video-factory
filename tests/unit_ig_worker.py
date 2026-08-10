@@ -426,6 +426,42 @@ if seen.get("categories") == VOCAB:
 else:
     bad(f"'outros' blocked the second attempt: categories={seen.get('categories')!r}")
 
+print("== unit_ig_worker: strip_cta ==")
+from minimax_mcp.ig_worker import strip_cta
+
+# A sentence containing a CTA is removed entirely.
+cleaned = strip_cta(
+    "Misture a batata doce amassada com o azeite. "
+    "Já me segue aqui para não perder uma receita. "
+    "Asse na Air Fryer a 170°C por 15 minutos."
+)
+if "Já me segue aqui" not in cleaned and "Asse na Air Fryer" in cleaned and "Misture a batata" in cleaned:
+    ok("strip_cta removes the CTA sentence, keeps surrounding content")
+else:
+    bad(f"strip_cta = {cleaned!r}")
+
+# No CTA -> text unchanged.
+plain = "Asse na Air Fryer a 170°C por 15 minutos e sirva."
+if strip_cta(plain) == plain:
+    ok("strip_cta leaves CTA-free text intact")
+else:
+    bad(f"strip_cta(plain) = {strip_cta(plain)!r}")
+
+# Empty / whitespace input never raises.
+try:
+    if strip_cta("") == "" and strip_cta("   ").strip() == "":
+        ok("strip_cta handles empty/whitespace input")
+    else:
+        bad("strip_cta empty input result wrong")
+except Exception as e:
+    bad(f"strip_cta('') raised {e!r}")
+
+# 'link na bio' as its own sentence.
+if "link na bio" not in strip_cta("Curte e compartilha. Link na bio. O conteúdo principal.").lower():
+    ok("strip_cta removes 'link na bio' sentence")
+else:
+    bad("strip_cta did not remove 'link na bio'")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
