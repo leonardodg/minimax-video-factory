@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -651,6 +652,155 @@ if clean_title("Link na bio! #dev") is None:
 else:
     bad(f"clean_title de resto curto = {clean_title('Link na bio! #dev')!r}")
 
+print("== unit_ig_worker: imagem simples baixa pela URL assinada ==")
+
+
+class _InfoFoto:
+    media_type = 1
+    thumbnail_url = "https://cdn.example/assinada.jpg"
+
+
+# O conserto de carrossel (43453e2) trocou a re-resolução por URL assinada no
+# álbum e deixou a imagem simples no caminho antigo. `photo_download(pk)` faz o
+# instagrapi re-resolver por dentro, cair no GraphQL público e bater na parede
+# de login -- observado em produção em 2026-08-10.
+if ig_worker._targets_from_info(_InfoFoto(), "55") == [
+    ("photo_download_by_url", "https://cdn.example/assinada.jpg")
+]:
+    ok("imagem simples usa photo_download_by_url, sem re-resolver pelo pk")
+else:
+    bad(f"imagem simples = {ig_worker._targets_from_info(_InfoFoto(), '55')!r}")
+
+
+class _InfoFotoSemUrl:
+    media_type = 1
+
+
+# Sem URL, é melhor o caminho antigo que descartar o post em silêncio.
+if ig_worker._targets_from_info(_InfoFotoSemUrl(), "55") == [("photo_download", "55")]:
+    ok("sem thumbnail_url, cai no download por pk em vez de perder o post")
+else:
+    bad(f"fallback de imagem = {ig_worker._targets_from_info(_InfoFotoSemUrl(), '55')!r}")
+
+print("== unit_ig_worker: leitura de tela ==")
+
+# Quadros vizinhos repetem a tela, e um deles costuma vir truncado no meio da
+# linha. Repetir isso no documento não acrescenta nada e desvia o resumo.
+# O truncamento real vem CRU, sem fechar a aspa -- é o quadro pegando a tela no
+# meio da digitação. Observado em 2026-08-10 no post 3818562307589048738:
+#   quadro 3: msg="Seu script Python te lembrou de beber água!",
+#   quadro 4: msg="Seu script Python te lembrou d
+# (Uma versão anterior deste teste inventou a aspa de fechamento na linha
+# cortada, o que não acontece e tornava o caso insolúvel por subcadeia.)
+juntado = ig_worker.merge_screen_text([
+    "from win10toast import ToastNotifier",
+    "from win10toast import ToastNotifier\ntoaster = ToastNotifier()",
+    'toaster = ToastNotifier()\nmsg="Seu script te lembrou d',
+    'msg="Seu script te lembrou de beber água!"',
+])
+linhas = juntado.splitlines()
+if (
+    linhas.count("from win10toast import ToastNotifier") == 1
+    and len(linhas) == 3
+    and linhas[-1] == 'msg="Seu script te lembrou de beber água!"'
+):
+    ok("merge_screen_text não repete linha e a completa substitui a truncada")
+else:
+    bad(f"merge_screen_text = {juntado!r}")
+
+# E no sentido inverso: a completa chega primeiro, a truncada depois.
+inv = ig_worker.merge_screen_text([
+    'msg="Seu script te lembrou de beber água!"',
+    'msg="Seu script te lembrou d',
+])
+if inv == 'msg="Seu script te lembrou de beber água!"':
+    ok("truncada que chega depois da completa é descartada")
+else:
+    bad(f"merge_screen_text inverso = {inv!r}")
+
+if ig_worker.merge_screen_text([]) == "" and ig_worker.merge_screen_text(["", None]) == "":
+    ok("merge_screen_text aguenta vazio e None")
+else:
+    bad("merge_screen_text quebrou no caso vazio")
+
+# A tela entra no documento junto com a fala, rotulada.
+_v = {}
+
+
+def _ing_v(text, **kw):
+    _v.clear(); _v["text"] = text; _v.update(kw)
+    return {"ok": True, "document_id": 901}
+
+
+r = ig_worker.process_message(
+    {"ig_pk": "9", "url": "u", "title": "t"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4", "filepaths": ["/tmp/x.mp4"]},
+    transcribe=lambda f: {"ok": True, "text": "olha esse código aqui", "language": "pt"},
+    describe=None,
+    read_screen=lambda f: {"ok": True, "text": "from win10toast import ToastNotifier"},
+    ingest=_ing_v,
+)
+if r["status"] == "done" and "win10toast" in _v["text"] and "olha esse código" in _v["text"]:
+    ok("a tela entra no documento junto com a fala")
+else:
+    bad(f"tela não entrou: {_v.get('text')!r}")
+
+# Sem fala, a tela é o conteúdo -- e vem ANTES da legenda, que é divulgação.
+r = ig_worker.process_message(
+    {"ig_pk": "10", "url": "u", "title": "t"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4", "filepaths": ["/tmp/x.mp4"],
+                        "caption": "Comenta CHEAT que eu envio"},
+    transcribe=lambda f: {"ok": True, "text": "", "language": "pt"},
+    describe=None,
+    read_screen=lambda f: {"ok": True, "text": "np.reshape(a, (2,3))"},
+    ingest=_ing_v,
+)
+if r["status"] == "done" and _v["text"].index("np.reshape") < _v["text"].index("Comenta"):
+    ok("vídeo mudo com tela: a tela vem antes da legenda")
+else:
+    bad(f"ordem errada: {_v.get('text')!r}")
+
+# Falha ao ler a tela não pode custar a transcrição que já foi paga.
+r = ig_worker.process_message(
+    {"ig_pk": "11", "url": "u", "title": "t"},
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4", "filepaths": ["/tmp/x.mp4"]},
+    transcribe=lambda f: {"ok": True, "text": "a fala sobreviveu", "language": "pt"},
+    describe=None,
+    read_screen=lambda f: {"ok": False, "error": "ollama caiu"},
+    ingest=_ing_v,
+)
+if r["status"] == "done" and _v["text"] == "a fala sobreviveu":
+    ok("falha na leitura de tela não descarta a transcrição")
+else:
+    bad(f"falha de tela contaminou: {r!r} / {_v.get('text')!r}")
+
+# A capa sai de graça: é cópia de um quadro que já foi extraído para ler a tela.
+with tempfile.TemporaryDirectory() as _t:
+    _p = Path(_t)
+    (_p / "post.mp4").write_bytes(b"v")
+    qs = []
+    for i, cor in enumerate([b"aaa", b"bbb", b"ccc", b"ddd"]):
+        f = _p / f"f_{i}.jpg"
+        f.write_bytes(cor)
+        qs.append(str(f))
+    capa = ig_worker.guardar_capa(qs, str(_p / "post.mp4"))
+    # O segundo quadro: a abertura costuma ser rosto ou tela preta.
+    if capa and Path(capa).name == "capa.jpg" and Path(capa).read_bytes() == b"bbb":
+        ok("guardar_capa escolhe o segundo quadro e grava ao lado do vídeo")
+    else:
+        bad(f"capa = {capa!r}")
+
+    if ig_worker.guardar_capa([], str(_p / "post.mp4")) is None:
+        ok("sem quadros, guardar_capa devolve None em vez de quebrar")
+    else:
+        bad("guardar_capa deveria devolver None sem quadros")
+
+    um = ig_worker.guardar_capa([qs[0]], str(_p / "post.mp4"))
+    if um and Path(um).read_bytes() == b"aaa":
+        ok("com um quadro só, usa esse mesmo")
+    else:
+        bad(f"capa de quadro único = {um!r}")
+
 print("== unit_ig_worker: vídeo mudo cai para a legenda ==")
 
 # 10% dos 40 primeiros posts do piloto (2026-08-10) eram reel de música: o VAD
@@ -728,7 +878,6 @@ else:
     bad(f"_targets_from_info = {ig_worker._targets_from_info(_Info(), '77')!r}")
 
 print("== unit_ig_worker: mídia preservada e reaproveitada ==")
-import tempfile
 
 import minimax_mcp.ig_worker as _w
 
