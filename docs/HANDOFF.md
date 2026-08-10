@@ -181,7 +181,7 @@ resolveu:
 
 ```bash
 systemd-run --user --unit=ig-worker --collect \
-  --working-directory=/home/leodg/tools-local/minimax-video-factory \
+  --working-directory="$PROJECT_ROOT" \
   /bin/bash -c 'set -a; . ./.env; set +a; exec ./.venv/bin/python -m minimax_mcp.ig_worker >> <log> 2>&1'
 ```
 
