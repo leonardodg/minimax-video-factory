@@ -55,6 +55,30 @@ def list_categories(client: Any) -> list[str]:
         return list(FALLBACK_CATEGORIES)
 
 
+def post_url(pk: Any, code: str | None = None) -> str:
+    """O link do post. `/p/` quer o SHORTCODE, não o pk numérico.
+
+    Estava montado como `/p/{pk}/`, e isso quebrava duas coisas ao mesmo tempo:
+    o `source_url` de todo documento apontava para um link que não abre, e o
+    fallback de yt-dlp -- que recebe essa URL quando o download autenticado
+    falha -- levava HTTP 400 e nunca poderia funcionar. Medido em 2026-08-10,
+    num post cujo download travou por timeout do CDN.
+
+    Sem `code` à mão, o shortcode se CALCULA a partir do pk: é o mesmo número
+    noutra base, e o instagrapi traz o codec. Nenhuma requisição de rede -- o
+    que importa porque isso corrige em massa documentos já gravados.
+    """
+    if code:
+        return f"https://www.instagram.com/p/{code}/"
+    try:
+        from instagrapi.utils import InstagramIdCodec
+
+        return f"https://www.instagram.com/p/{InstagramIdCodec.encode(int(pk))}/"
+    except Exception:
+        # Um link torto é melhor que uma exceção no meio da listagem.
+        return f"https://www.instagram.com/p/{pk}/"
+
+
 def make_client() -> Any:
     """Build an authenticated instagrapi Client from IG_SESSIONID."""
     from instagrapi import Client
@@ -143,7 +167,7 @@ def to_messages(items: list[dict]) -> list[dict]:
         messages.append({
             "ig_pk": str(pk),
             "media_type": media_type,
-            "url": f"https://www.instagram.com/p/{pk}/",
+            "url": post_url(pk, getattr(m, "code", None)),
             "title": title,
             "owner_username": getattr(user, "username", None),
             "collection_name": entry.get("collection_name"),
