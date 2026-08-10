@@ -6,6 +6,7 @@ uses a fake deterministic embedding function.
 Run: uv run --directory . python tests/integration_knowledge_db.py
 """
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +29,7 @@ def bad(label: str) -> None:
     print(f"  [BAD]  {label}")
 
 
-from minimax_mcp import db
+from minimax_mcp import db, knowledge
 
 
 def fake_embed(text: str) -> list[float]:
@@ -39,6 +40,7 @@ def fake_embed(text: str) -> list[float]:
 
 
 doc = None
+export_doc_id = None
 print("== integration_knowledge_db: cleanup previous test runs ==")
 session = db.get_session()
 try:
@@ -142,6 +144,90 @@ try:
         bad(f"list_ig_pks = {pks!r}")
 finally:
     session.close()
+
+print("== integration_knowledge_db: export round-trip ==")
+session = db.get_session()
+try:
+    export_doc = db.save_document(
+        session,
+        type="text",
+        source_url="https://example.com/export-test",
+        platform="manual",
+        title="Export test doc",
+        language="pt",
+        transcription_text="Receita: bata 2 ovos com açúcar. Finalize com canela.",
+        summary="Resumo de export test.",
+        tutorial="## Passo 1\nBata ovos.",
+        objectives="Objetivo 1\nObjetivo 2",
+        tags=["test", "export"],
+        raw_file_path=None,
+        llm_provider="ollama",
+        llm_model="lfm2:24b",
+        embed_fn=fake_embed,
+        embedding_model="fake-embed-test",
+    )
+    export_doc_id = export_doc.id
+    if export_doc_id is not None:
+        ok(f"save_document created export-test document id={export_doc_id}")
+    else:
+        bad("save_document did not assign an id to the export-test document")
+except Exception as e:
+    bad(f"export round-trip: save_document raised: {e}")
+finally:
+    session.close()
+
+try:
+    if export_doc_id is None:
+        bad("export round-trip: skipping exercises because save_document failed")
+    else:
+        try:
+            listed = knowledge.export_search(ids=[export_doc_id])
+            if (
+                listed.get("ok")
+                and listed.get("total") == 1
+                and listed["documents"][0]["id"] == export_doc_id
+            ):
+                ok("export_search(ids=[doc_id]) lists exactly the saved document")
+            else:
+                bad(f"export_search returned unexpected result: {listed!r}")
+        except Exception as e:
+            bad(f"export_search raised: {e}")
+
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                exported = knowledge.export_documents([export_doc_id], output_dir=tmp)
+                f0 = exported["files"][0]
+                if (
+                    exported.get("ok")
+                    and f0.get("ok")
+                    and Path(f0["path"]).exists()
+                ):
+                    ok(f"export_documents wrote markdown file: {f0['path']}")
+                else:
+                    bad(f"export_documents returned unexpected result: {exported!r}")
+        except Exception as e:
+            bad(f"export_documents raised: {e}")
+
+        try:
+            missing = knowledge.export_documents([99999999])
+            if missing.get("ok") and missing["files"][0]["ok"] is False:
+                ok("export_documents tolerates a missing id (files[0].ok is False)")
+            else:
+                bad(f"export_documents missing-id result unexpected: {missing!r}")
+        except Exception as e:
+            bad(f"export_documents(missing id) raised: {e}")
+finally:
+    session = db.get_session()
+    try:
+        removed = db.delete_documents(session, source_url="https://example.com/export-test")
+        if removed >= 1:
+            ok(f"export round-trip cleanup removed {removed} document(s)")
+        else:
+            bad("export round-trip cleanup removed 0 documents")
+    except Exception as e:
+        bad(f"export round-trip cleanup raised: {e}")
+    finally:
+        session.close()
 
 print()
 if FAIL:
