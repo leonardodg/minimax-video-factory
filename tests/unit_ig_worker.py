@@ -137,6 +137,61 @@ if ig_worker.apply_command(state, "stop") == "paused" and state["paused"] is Tru
 else:
     bad("apply_command(stop) did not pause")
 
+# O booleano NÃO pausava nada: era lido só numa linha de log, e o worker seguia
+# consumindo depois de responder "paused". Custou um OOM real em 2026-08-10 --
+# a GPU foi entregue a um reprocessamento confiando numa pausa que não existia.
+# O que prova a pausa é o cancelamento da assinatura, não o booleano.
+class CanalFalso:
+    def __init__(self):
+        self.cancelados = []
+        self.consumos = []
+        self._n = 0
+
+    def basic_cancel(self, tag):
+        self.cancelados.append(tag)
+
+    def basic_consume(self, queue, on_message_callback):
+        self._n += 1
+        self.consumos.append(queue)
+        return f"tag{self._n}"
+
+
+canal = CanalFalso()
+st = {"paused": False, "canal": canal, "tag": "tag0", "on_work": lambda *a: None}
+
+ig_worker.apply_command(st, "stop")
+if canal.cancelados == ["tag0"] and st["tag"] is None:
+    ok("stop CANCELA a assinatura da fila de trabalho, não só marca um booleano")
+else:
+    bad(f"stop não cancelou: cancelados={canal.cancelados} tag={st['tag']!r}")
+
+ig_worker.apply_command(st, "start")
+if canal.consumos == [ig_worker.ig_queue.QUEUE] and st["tag"] == "tag1":
+    ok("start volta a assinar a fila de trabalho")
+else:
+    bad(f"start não reassinou: consumos={canal.consumos} tag={st['tag']!r}")
+
+# Comando repetido não pode cancelar duas vezes nem duplicar o consumo.
+ig_worker.apply_command(st, "start")
+if canal.consumos == [ig_worker.ig_queue.QUEUE]:
+    ok("start repetido não duplica a assinatura")
+else:
+    bad(f"start repetido duplicou: {canal.consumos}")
+
+ig_worker.apply_command(st, "stop")
+ig_worker.apply_command(st, "stop")
+if canal.cancelados == ["tag0", "tag1"]:
+    ok("stop repetido não cancela duas vezes")
+else:
+    bad(f"stop repetido cancelou demais: {canal.cancelados}")
+
+# Sem canal (testes, ou comando antes da conexão) o booleano ainda vale.
+st2 = {"paused": False, "canal": None, "tag": None}
+if ig_worker.apply_command(st2, "stop") == "paused" and st2["paused"] is True:
+    ok("sem canal, apply_command não quebra")
+else:
+    bad("apply_command quebrou sem canal")
+
 print("== unit_ig_worker: _download_targets ==")
 class FakeRes:
     def __init__(self, media_type, pk, video_url=None, thumbnail_url=None):

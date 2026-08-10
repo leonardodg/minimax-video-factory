@@ -384,12 +384,35 @@ def process_message(
 
 
 def apply_command(state: dict, command: str) -> str:
-    """Handle a start/stop control message, mutating `state`."""
+    """Trata start/stop, mutando `state` E a assinatura da fila de trabalho.
+
+    O booleano sozinho não pausava nada -- era lido só numa linha de log, e o
+    worker continuava consumindo depois de responder "paused". Aqui o efeito é
+    real: `basic_cancel` faz o broker parar de entregar; `basic_consume` volta a
+    receber. `state["canal"]` e `state["tag"]` são preenchidos pelo laço de
+    consumo a cada conexão, e ficam None nos testes, onde só o booleano importa.
+    """
+    canal, tag = state.get("canal"), state.get("tag")
     if command == "start":
+        ja_rodando = not state["paused"]
         state["paused"] = False
+        if canal is not None and not ja_rodando:
+            try:
+                state["tag"] = canal.basic_consume(
+                    queue=ig_queue.QUEUE, on_message_callback=state["on_work"]
+                )
+            except Exception as exc:
+                logger.warning("não consegui retomar o consumo: %s", exc)
         return "resumed"
     if command == "stop":
+        ja_parado = state["paused"]
         state["paused"] = True
+        if canal is not None and tag is not None and not ja_parado:
+            try:
+                canal.basic_cancel(tag)
+                state["tag"] = None
+            except Exception as exc:
+                logger.warning("não consegui cancelar o consumo: %s", exc)
         return "paused"
     return "unknown"
 
@@ -786,7 +809,20 @@ def run() -> None:
     """
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    state = {"paused": False}
+    # `paused` precisa CANCELAR a assinatura da fila de trabalho, não só virar um
+    # booleano. Até 2026-08-10 ele era escrito por `apply_command` e lido em UM
+    # lugar: a linha de log da conexão. `/ig-worker-stop` respondia "paused", o
+    # log dizia "paused", e o worker continuava consumindo.
+    #
+    # Custou um OOM de verdade: confiando na pausa, a GPU foi entregue a um
+    # reprocessamento, o worker seguiu transcrevendo, e o Whisper caiu para CPU
+    # com "CUDA failed with error out of memory". Os dois usos da GPU não cabem
+    # juntos -- o pico do worker é 10,8 GB dos 12,3 GB da placa.
+    #
+    # `basic_cancel` para o broker de ENTREGAR; nack/requeue não serviria, porque
+    # a mensagem voltaria na hora e o worker giraria em falso consumindo CPU e
+    # incrementando `attempts` até a DLQ.
+    state: dict = {"paused": False, "tag": None, "canal": None}
 
     def _pace(started: float, pk: str | None) -> None:
         """Dorme o que faltar para fechar IG_WORKER_MIN_INTERVAL desde `started`.
@@ -903,7 +939,13 @@ def run() -> None:
             channel = connection.channel()
             ig_queue.declare(channel)
             channel.basic_qos(prefetch_count=1)
-            channel.basic_consume(queue=ig_queue.QUEUE, on_message_callback=on_work)
+            # A fila de CONTROLE é assinada sempre; a de trabalho, só quando não
+            # está pausado. Assim uma reconexão no meio de uma pausa não a
+            # desfaz em silêncio -- e `start` continua chegando para retomar.
+            state["canal"], state["on_work"] = channel, on_work
+            state["tag"] = None if state["paused"] else channel.basic_consume(
+                queue=ig_queue.QUEUE, on_message_callback=on_work
+            )
             channel.basic_consume(queue=ig_queue.CONTROL_QUEUE, on_message_callback=on_control)
             logger.info("ig-worker consuming %s (paused=%s)", ig_queue.QUEUE, state["paused"])
             channel.start_consuming()
