@@ -137,9 +137,17 @@ else:
 
 print("== unit_ig_worker: _download_targets ==")
 class FakeRes:
-    def __init__(self, media_type, pk):
+    def __init__(self, media_type, pk, video_url=None, thumbnail_url=None):
         self.media_type = media_type
         self.pk = pk
+        # O instagrapi entrega estas duas em todo recurso de álbum; são elas que
+        # permitem baixar sem re-resolver o recurso na API pública.
+        self.video_url = video_url if video_url is not None else (
+            f"https://cdn/{pk}.mp4" if media_type == 2 else None
+        )
+        self.thumbnail_url = thumbnail_url if thumbnail_url is not None else (
+            f"https://cdn/{pk}.jpg" if media_type != 2 else None
+        )
 class FakeInfo:
     def __init__(self, media_type, resources=()):
         self.media_type = media_type
@@ -162,20 +170,42 @@ if r == [("clip_download", "222")]:
 else:
     bad(f"single video targets = {r!r}")
 
+# Carrossel baixa POR URL. Baixar por pk fazia o instagrapi chamar
+# media_info(resource_pk) por dentro, não achar (recurso de álbum não é mídia
+# autônoma na API privada), cair no GraphQL público, levar 401 e entrar em laço
+# na página de login. Foi o que bloqueou o sync em 2026-08-10.
 car = FakeInfo(8, [FakeRes(1, "p1"), FakeRes(2, "v2"), FakeRes(1, "p3")])
 r = ig_worker._download_targets(FakeClient(car), "888")
-if r == [("photo_download", "p1"), ("clip_download", "v2"), ("photo_download", "p3")]:
-    ok("carousel -> one pair per resource, video->clip, photo->photo")
+if r == [
+    ("photo_download_by_url", "https://cdn/p1.jpg"),
+    ("video_download_by_url", "https://cdn/v2.mp4"),
+    ("photo_download_by_url", "https://cdn/p3.jpg"),
+]:
+    ok("carousel -> download by URL, one pair per resource, video vs photo")
 else:
     bad(f"carousel targets = {r!r}")
 
+if not any(m in ("clip_download", "photo_download") for m, _ in r):
+    ok("carousel never uses the pk methods that fall back to the public API")
+else:
+    bad(f"carousel still routes through a pk download: {r!r}")
+
 car_img = FakeInfo(8, [FakeRes(1, "p1"), FakeRes(1, "p2")])
 if ig_worker._download_targets(FakeClient(car_img), "888") == [
-    ("photo_download", "p1"), ("photo_download", "p2"),
+    ("photo_download_by_url", "https://cdn/p1.jpg"),
+    ("photo_download_by_url", "https://cdn/p2.jpg"),
 ]:
-    ok("carousel with only images -> photo_download per photo")
+    ok("carousel with only images -> photo_download_by_url per photo")
 else:
     bad(f"carousel img targets = {ig_worker._download_targets(FakeClient(car_img), '888')!r}")
+
+# Recurso sem URL: cai no caminho antigo em vez de sumir do álbum. Pode bater na
+# API pública, mas um álbum incompleto em silêncio é pior.
+car_nourl = FakeInfo(8, [FakeRes(2, "v9", video_url="", thumbnail_url="")])
+if ig_worker._download_targets(FakeClient(car_nourl), "888") == [("clip_download", "v9")]:
+    ok("resource without url falls back to the pk method instead of vanishing")
+else:
+    bad(f"no-url resource = {ig_worker._download_targets(FakeClient(car_nourl), '888')!r}")
 
 if ig_worker._download_targets(FakeClient(FakeInfo(8, [])), "888") == [("photo_download", "888")]:
     ok("empty carousel -> [photo_download(pk)]")
@@ -199,6 +229,20 @@ class FakeClientDownload(FakeClient):
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_bytes(b"x")
         return str(p)
+    # As duas rotas por URL, que é como carrossel passa a ser baixado. O nome do
+    # arquivo sai da URL, como o instagrapi faz quando `filename` vem vazio.
+    def photo_download_by_url(self, url, filename="", folder=""):
+        self.calls.append(("photo_download_by_url", url))
+        p = Path(folder) / f"fake_{Path(url).name}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return str(p)
+    def video_download_by_url(self, url, filename="", folder=""):
+        self.calls.append(("video_download_by_url", url))
+        p = Path(folder) / f"fake_{Path(url).name}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        return str(p)
 
 from minimax_mcp import ig_sync
 
@@ -209,7 +253,7 @@ try:
 finally:
     ig_sync.make_client = _orig_make_client
 fps = res.get("filepaths") or []
-if res.get("ok") and len(fps) == 2 and any(fps[0].endswith("fake_p1.jpg") for f in fps) and any(fps[1].endswith("fake_v2.mp4") for f in fps):
+if res.get("ok") and len(fps) == 2 and fps[0].endswith("fake_p1.jpg") and fps[1].endswith("fake_v2.mp4"):
     ok("carousel download returns all filepaths (p1.jpg + v2.mp4)")
 else:
     bad(f"carousel download = {res!r}")
