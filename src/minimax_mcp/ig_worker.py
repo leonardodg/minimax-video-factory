@@ -161,6 +161,7 @@ def process_message(
     download: Callable[[dict], dict],
     transcribe: Callable[[str], dict] | None,
     describe: Callable[[str], dict] | None,
+    read_screen: Callable[[str], dict] | None = None,
     ingest: Callable[[str], dict],
     categories: list[str] | None = None,
 ) -> dict:
@@ -194,6 +195,40 @@ def process_message(
             return {"status": "error", "error": tr.get("error", "transcribe failed"), "filepaths": filepaths}
         text, lang = tr["text"], tr.get("language", "pt")
         doc_type = "video"
+
+        # O que está NA TELA e o áudio não diz. Roda aqui, no mesmo processo e em
+        # sequência, porque a folga já existe: o post leva ~46 s dentro de uma
+        # janela de 90 s, e a leitura custou ~14 s no teste de 2026-08-10. O
+        # `pace_sleep_seconds` conta do início da mensagem, então isso encolhe a
+        # pausa em vez de esticar a corrida -- custo de cronograma ZERO.
+        #
+        # Sequencial, não paralelo, e a diferença é a VRAM: o pico do worker é
+        # 10,8 GB dos 12,3 GB da placa, sobrando 1,4 GB. O modelo de visão pede
+        # ~6 GB. Dois processos disputando a GPU colidiriam -- um de cada vez, não.
+        tela = ""
+        if read_screen is not None:
+            rs = read_screen(filepaths[0])
+            if rs.get("ok"):
+                tela = (rs.get("text") or "").strip()
+            else:
+                # Ler a tela é ganho, não requisito: a falha não pode custar a
+                # transcrição que já foi paga.
+                logger.warning("leitura de tela falhou: %s", rs.get("error"))
+        if tela and (text or "").strip():
+            text = f"{text}\n\n--- texto na tela ---\n{tela}"
+        elif tela:
+            # Sem fala, a tela É o conteúdo -- e vem antes da legenda, que é
+            # material de divulgação. É o caso dos posts de dica sobre imagem
+            # parada com música, que o usuário apontou em 2026-08-10.
+            legenda = (dl.get("caption") or "").strip()
+            text = f"--- texto na tela ---\n{tela}"
+            if legenda:
+                text = f"{text}\n\n--- legenda ---\n{legenda}"
+            lang = "pt"
+            logger.info(
+                "ig_pk=%s sem fala; usando a tela (%d caracteres)",
+                message.get("ig_pk"), len(tela),
+            )
         if not (text or "").strip():
             # Vídeo sem fala nenhuma -- reel de música. Medido no piloto de
             # 2026-08-10: 4 dos 40 primeiros posts (10%), com o VAD do Whisper
@@ -372,6 +407,19 @@ def _targets_from_info(info: Any, pk: str) -> list[tuple[str, str]]:
             pairs.append(("clip_download" if rm == 2 else "photo_download", str(r.pk)))
         return pairs
     if mtype == 1:
+        # Pela URL assinada, não pelo pk -- e é o MESMO defeito que o conserto de
+        # carrossel (43453e2) resolveu para o álbum e deixou passar aqui.
+        # `photo_download(pk)` re-resolve a mídia por dentro do instagrapi, cai
+        # no GraphQL PÚBLICO, leva 401 e bate na parede de login. Observado em
+        # 2026-08-10 11:57 no post 3780736256808395559: media_info privado 200,
+        # depois três 401 públicos e um HTML de login em ~25 s. O post foi
+        # ingerido assim mesmo, então isso nunca apareceu como falha -- só como
+        # 62 imagens da fila cutucando a parede de graça, que é justamente o
+        # padrão que atrai bloqueio de verdade.
+        url = getattr(info, "thumbnail_url", None)
+        if url:
+            return [("photo_download_by_url", str(url))]
+        logger.warning("imagem %s sem thumbnail_url, caindo no download por pk", pk)
         return [("photo_download", pk)]
     return [("clip_download", pk)]
 
@@ -469,6 +517,130 @@ def _default_download(message: dict) -> dict:
     if dl.get("ok") and dl.get("filepath"):
         dl["filepaths"] = [dl["filepath"]]
     return dl
+
+
+IG_SCREEN_FRAMES = int(os.environ.get("IG_SCREEN_FRAMES", "4") or 4)
+
+
+def extract_frames(video_path: str, n: int = IG_SCREEN_FRAMES) -> list[str]:
+    """`n` quadros espalhados pelo vídeo, num diretório temporário.
+
+    Espalhados e não do começo: o código costuma entrar depois da abertura, e os
+    últimos segundos costumam ser CTA. Medido em 2026-08-10 num vídeo de 14,6 s,
+    4 quadros custaram **0,15 s** de ffmpeg -- irrelevante perto dos ~14 s da
+    visão, então não vale otimizar aqui.
+
+    Os quadros são descartáveis: o que se guarda é o vídeo, e refazer custa 0,15 s.
+    """
+    import subprocess
+    import tempfile
+
+    try:
+        dur = float(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", video_path],
+            capture_output=True, text=True, timeout=30, check=True,
+        ).stdout.strip())
+    except Exception as exc:
+        logger.warning("ffprobe falhou em %s: %s", video_path, exc)
+        return []
+    if dur <= 0:
+        return []
+
+    d = Path(tempfile.mkdtemp(prefix="igframes_"))
+    try:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-i", video_path,
+             "-vf", f"fps={n}/{dur},scale=1080:-1", "-frames:v", str(n),
+             "-q:v", "2", str(d / "f_%02d.jpg")],
+            capture_output=True, timeout=120, check=True,
+        )
+    except Exception as exc:
+        logger.warning("ffmpeg falhou em %s: %s", video_path, exc)
+        return []
+    return sorted(str(p) for p in d.glob("*.jpg"))
+
+
+def merge_screen_text(pedacos: list[str]) -> str:
+    """Junta o texto dos quadros sem repetir o que já apareceu.
+
+    Quadros vizinhos de um vídeo parado mostram quase a mesma tela -- no teste de
+    2026-08-10 os quadros 3 e 4 devolveram o mesmo bloco de código, um deles
+    truncado no meio de uma linha. Repetir isso três vezes no documento não
+    acrescenta nada e ainda empurra o resumo para o lado errado.
+
+    Deduplica por LINHA e preserva a ordem: a linha truncada some porque a
+    completa já entrou, e o que é genuinamente novo em cada quadro fica.
+    """
+    saida: list[str] = []      # a linha como veio, para o documento
+    chaves: list[str] = []      # a mesma, normalizada, para comparar
+    for p in pedacos:
+        for linha in (p or "").splitlines():
+            chave = " ".join(linha.split())
+            if not chave:
+                continue
+            # O truncamento pode chegar nos DOIS sentidos: a versão cortada vem
+            # antes da inteira quando o quadro mais cedo pegou a digitação no
+            # meio, e depois dela quando o vídeo já rolou. Tratar só um sentido
+            # deixava as duas no documento -- foi o que o teste pegou.
+            contida = next((i for i, k in enumerate(chaves) if chave in k), None)
+            if contida is not None:
+                continue
+            contem = next((i for i, k in enumerate(chaves) if k in chave), None)
+            if contem is not None:
+                saida[contem] = linha.rstrip()
+                chaves[contem] = chave
+                continue
+            chaves.append(chave)
+            saida.append(linha.rstrip())
+    return "\n".join(saida).strip()
+
+
+def guardar_capa(quadros: list[str], video_path: str) -> str | None:
+    """Guarda UM quadro como capa do post, ao lado do vídeo.
+
+    De graça: os quadros já foram extraídos para ler a tela, e o que se guarda é
+    uma cópia de ~100 KB (~310 MB nos 3111 posts). Converter para GIF daria uma
+    prévia mais expressiva num meme, mas custa outra passada de ffmpeg por post
+    e pesa bem mais -- e o mp4 inteiro continua no disco de qualquer forma.
+
+    O segundo quadro, não o primeiro: a abertura costuma ser rosto falando ou
+    tela preta, e o fim costuma ser CTA. O miolo representa melhor o post.
+    """
+    if not quadros:
+        return None
+    escolhido = quadros[1] if len(quadros) > 1 else quadros[0]
+    destino = Path(video_path).parent / "capa.jpg"
+    try:
+        destino.write_bytes(Path(escolhido).read_bytes())
+        return str(destino)
+    except OSError as exc:
+        logger.warning("não consegui guardar a capa de %s: %s", video_path, exc)
+        return None
+
+
+def _default_read_screen(video_path: str) -> dict:
+    """Lê o texto na tela do vídeo: extrai quadros e transcreve cada um."""
+    import shutil
+
+    quadros = extract_frames(video_path)
+    if not quadros:
+        return {"ok": True, "text": ""}
+    pai = str(Path(quadros[0]).parent)
+    try:
+        capa = guardar_capa(quadros, video_path)
+        pedacos = []
+        for q in quadros:
+            r = llm.read_screen(q)
+            if r.get("ok") and r.get("text"):
+                pedacos.append(r["text"])
+            elif not r.get("ok"):
+                logger.warning("leitura de tela falhou em %s: %s", q, r.get("error"))
+        return {"ok": True, "text": merge_screen_text(pedacos), "capa": capa}
+    finally:
+        # Os quadros são descartáveis (0,15 s para refazer); a capa já foi
+        # copiada para fora daqui.
+        shutil.rmtree(pai, ignore_errors=True)
 
 
 _categories_cache: list[str] | None = None
@@ -608,6 +780,7 @@ def run() -> None:
             download=_default_download,
             transcribe=_default_transcribe,
             describe=_default_describe,
+            read_screen=_default_read_screen,
             ingest=knowledge.ingest_text,
             categories=_category_vocabulary(),
         )
