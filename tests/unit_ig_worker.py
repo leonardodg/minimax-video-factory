@@ -557,6 +557,38 @@ if "Segue pra não perder" not in seen_text.get("text", "") and "A dica é boa" 
 else:
     bad(f"ingest received uncleaned text: {seen_text.get('text')!r}")
 
+print("== unit_ig_worker: pace_sleep_seconds ==")
+from minimax_mcp.ig_worker import pace_sleep_seconds
+
+# Desconta o tempo já gasto: a pausa é um TETO de velocidade, não um imposto fixo
+# somado ao processamento. Sem descontar, o espaçamento real viraria
+# `processamento + intervalo` e variaria com o tamanho de cada vídeo -- 39 s num
+# post curto, minutos num longo.
+if pace_sleep_seconds(30.0, 90.0) == 60.0:
+    ok("desconta o tempo já gasto (30 s de 90 -> dorme 60)")
+else:
+    bad(f"pace(30,90) = {pace_sleep_seconds(30.0, 90.0)}")
+
+# Post mais lento que o intervalo segue direto: quem manda passa a ser o
+# processamento, e a pausa não atrasa nada de propósito.
+if pace_sleep_seconds(120.0, 90.0) == 0.0:
+    ok("post mais lento que o intervalo não dorme nada")
+else:
+    bad(f"pace(120,90) = {pace_sleep_seconds(120.0, 90.0)}")
+
+# Padrão 0 = comportamento antigo, para não mudar nada de quem não configurou.
+if pace_sleep_seconds(1.0, 0.0) == 0.0 and pace_sleep_seconds(0.0, 0.0) == 0.0:
+    ok("intervalo 0 desliga a pausa (comportamento antigo preservado)")
+else:
+    bad("intervalo 0 ainda dorme")
+
+# Medição negativa (relógio, ou início registrado errado) não pode virar pausa
+# maior que o intervalo.
+if pace_sleep_seconds(-5.0, 90.0) == 90.0:
+    ok("elapsed negativo não vira pausa maior que o intervalo")
+else:
+    bad(f"pace(-5,90) = {pace_sleep_seconds(-5.0, 90.0)}")
+
 print("== unit_ig_worker: clean_title ==")
 from minimax_mcp.ig_worker import clean_title
 

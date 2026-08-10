@@ -97,6 +97,20 @@ IG_DELETE_AFTER_INGEST = os.environ.get("IG_DELETE_AFTER_INGEST", "true").lower(
     "1", "true", "yes",
 )
 WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "small")
+
+# Ritmo mínimo entre mensagens, em segundos. 0 = comportamento antigo, consumir o
+# mais rápido que a máquina aguentar.
+#
+# Existe porque o limite deste pipeline é o Instagram, não a GPU: duas varreduras
+# completas numa hora já geraram 429 e derrubaram coleções inteiras da listagem.
+# O worker processa uma mensagem por vez (prefetch=1) mas não esperava nada entre
+# elas -- a 39 s por post, ~92 posts/hora contínuos.
+#
+# E tem de ser AQUI DENTRO, não ligando e desligando o processo: o vocabulário de
+# categorias é buscado uma vez por processo (`_categories_cache`), então cada
+# reinício custa uma listagem das 46 coleções -- exatamente a operação que atrai
+# punição. Um daemon longo com pausa interna faz UMA listagem para a corrida toda.
+IG_WORKER_MIN_INTERVAL = float(os.environ.get("IG_WORKER_MIN_INTERVAL", "0") or 0)
 WHISPER_DEVICE = os.environ.get("WHISPER_DEVICE", "cuda")
 
 VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov"}
@@ -104,6 +118,25 @@ VIDEO_EXTS = {".mp4", ".mkv", ".webm", ".mov"}
 
 def classify_file(filepath: str) -> str:
     return "video" if Path(filepath).suffix.lower() in VIDEO_EXTS else "image"
+
+
+def pace_sleep_seconds(elapsed: float, interval: float = IG_WORKER_MIN_INTERVAL) -> float:
+    """Quanto ainda falta dormir para a mensagem ter levado `interval` no total.
+
+    Conta do INÍCIO da mensagem, não do fim. Dormir `interval` depois de
+    processar daria um espaçamento real de `processamento + interval`, que varia
+    com o tamanho do vídeo -- 39 s num post curto, minutos num longo -- e o ritmo
+    deixaria de ser previsível justamente onde a previsibilidade importa.
+
+    Descontando o tempo já gasto, um post que levou mais que `interval` segue
+    direto (devolve 0.0) e o ritmo fica limitado pelo processamento, que é o
+    comportamento certo: a pausa é um TETO de velocidade, não um imposto fixo.
+
+    Pura de propósito -- dá para testar o ritmo sem fila, sem rede e sem GPU.
+    """
+    if interval <= 0:
+        return 0.0
+    return max(0.0, interval - max(0.0, elapsed))
 
 
 def process_message(
@@ -407,7 +440,21 @@ def run() -> None:
 
     state = {"paused": False}
 
+    def _pace(started: float, pk: str | None) -> None:
+        """Dorme o que faltar para fechar IG_WORKER_MIN_INTERVAL desde `started`.
+
+        Antes do `ack`, de propósito: com prefetch=1 o broker só entrega a próxima
+        depois do ack, então dormir aqui atrasa a busca seguinte no Instagram. Se
+        fosse depois, a mensagem nova já estaria em mãos e a pausa não seguraria
+        nada.
+        """
+        pausa = pace_sleep_seconds(time.monotonic() - started)
+        if pausa > 0:
+            logger.info("pace: aguardando %.1fs antes do próximo (ig_pk=%s)", pausa, pk)
+            time.sleep(pausa)
+
     def on_work(ch, method, properties, body):
+        started = time.monotonic()
         parsed = ig_queue.parse_message(body)
         if not parsed["ok"]:
             logger.warning("corrupted message -> DLQ: %s", parsed["error"])
@@ -463,6 +510,7 @@ def run() -> None:
                 # source of truth -- the document is already in the KB. Failing
                 # to write it must not nack a message that actually succeeded.
                 logger.warning("could not update the progress file: %s", exc)
+            _pace(started, message.get("ig_pk"))
             _safe_ack(ch, method)
         else:
             logger.warning("processing failed ig_pk=%s: %s", message["ig_pk"], res["error"])
@@ -470,6 +518,11 @@ def run() -> None:
                 ig_queue.handle_failure(ch, properties, body)
             except Exception as exc:
                 logger.warning("handle_failure failed: %s", exc)
+            # A pausa vale para a falha também. Um post que falhou já gastou as
+            # requisições dele no Instagram, e uma sequência de falhas rápidas é
+            # justamente o padrão que faz a conta ser bloqueada -- foi assim que
+            # o instagrapi entrou em laço de 5 s contra a página de login.
+            _pace(started, message.get("ig_pk"))
             _safe_ack(ch, method)
 
     def on_control(ch, method, properties, body):
@@ -495,6 +548,18 @@ def run() -> None:
             channel.start_consuming()
         except KeyboardInterrupt:
             raise
+        except KeyError as exc:
+            # Variável de ambiente faltando NÃO é queda de conexão, e chamá-la
+            # assim custou tempo real: `KB_DATABASE_URL` ausente aparecia como
+            # "consumer connection dropped: 'KB_DATABASE_URL'" com backoff
+            # exponencial, o que parece rede instável e manda investigar o
+            # RabbitMQ. Repetir para sempre não conserta um `.env` -- é preciso
+            # dizer o que falta e por que não adianta esperar.
+            logger.error(
+                "variável de ambiente ausente: %s — o worker NÃO vai se recuperar "
+                "sozinho, isto não é queda de conexão. Carregue o .env antes de "
+                "subir o daemon: `set -a; . ./.env; set +a`", exc,
+            )
         except Exception as exc:
             logger.warning("consumer connection dropped: %s", exc)
         finally:
