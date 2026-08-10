@@ -332,9 +332,19 @@ def process_message(
                     escritos.append(rs["text"].strip())
                 elif not rs.get("ok"):
                     logger.warning("leitura de texto da imagem falhou: %s", rs.get("error"))
-        text = "\n\n".join(p for p in pieces if p)
-        if escritos:
-            text = f"{text}\n\n--- texto na imagem ---\n{merge_screen_text(escritos)}".strip()
+        descricao = "\n\n".join(p for p in pieces if p)
+        lido = merge_screen_text(escritos)
+        # REGRA: post só de imagem, sem fala nenhuma -> o TEXTO DA IMAGEM é o
+        # conteúdo, e a descrição é apoio. Antes vinha ao contrário, e o que o
+        # modelo lia primeiro era "Como adicionar aspas automáticas em um bloco
+        # de citação usando HTML e CSS" -- a descrição do que o post ensina, com
+        # o CSS de verdade relegado ao fim.
+        if lido:
+            text = f"--- texto na imagem ---\n{lido}"
+            if descricao:
+                text = f"{text}\n\n--- descrição da imagem ---\n{descricao}"
+        else:
+            text = descricao
         lang = "pt"
         doc_type = "image"
 

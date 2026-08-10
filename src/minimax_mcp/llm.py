@@ -41,12 +41,18 @@ fora do JSON) com estas chaves:
   si e não repita a transcrição. A transcrição/descrição abaixo é apenas
   material de apoio.
 - "tutorial": um tutorial detalhado, passo a passo, do que foi ensinado/demonstrado, em markdown.
-  REGRA DURA sobre código, nomes de pacote, comandos e URLs: copie APENAS o que
-  aparece literalmente no conteúdo abaixo. Se o conteúdo descreve um código sem
-  mostrá-lo, escreva "o código não aparece no material" e descreva o passo em
-  palavras — NÃO reconstrua, NÃO adivinhe o nome do pacote, NÃO complete o
-  trecho. Um código plausível e errado é pior que nenhum: quem lê esta base vai
-  copiar e colar o que estiver aqui.
+  REGRA DURA — VOCÊ NÃO ESCREVE CÓDIGO. Explique em palavras o que foi feito.
+  Você NÃO conhece o código deste post: só existe o que está no material abaixo.
+  Nunca reconstrua um trecho, nunca adivinhe nome de pacote, comando ou URL,
+  nunca complete o que está cortado. Um código plausível e errado é pior que
+  nenhum — quem lê esta base copia e cola o que estiver aqui.
+
+  CRASE E CERCA SIGNIFICAM UMA COISA SÓ: "copiei isto literalmente do material
+  abaixo". Use `crase` ou ```cerca``` APENAS para reproduzir, caractere por
+  caractere, algo que está escrito no conteúdo. Para tudo o que for seu — sua
+  explicação, sua paráfrase, o nome de uma tecla como você a escreveria —
+  escreva em texto normal, sem marcação. Tudo o que vier marcado será conferido
+  contra o material.
   ⚠️ O CÓDIGO NA TELA COSTUMA SER CENÁRIO, não a lição. Muito vídeo mostra um
   editor com código qualquer enquanto o narrador ensina outra coisa — medido:
   um post sobre certificação AWS exibia um formulário HTML de "Nome/Preço" que
@@ -215,6 +221,10 @@ def _openai_compatible_generate(prompt: str, model: str, *, force_json: bool) ->
 _BLOCO_RE = re.compile(r"```([^\n]*)\n(.*?)```", re.DOTALL)
 _INLINE_RE = re.compile(r"`([^`\n]+)`")
 NAO_MOSTRADO = "(não mostrado no material)"
+# O aviso que substitui a cerca quando a citação não confere. Não apaga nada:
+# diz ao leitor que aquele trecho NÃO foi encontrado no post, e portanto não
+# deve ser copiado como se fosse.
+NAO_VERIFICADO = "⚠️ trecho abaixo não encontrado no material — não copie como código do post:"
 
 
 def _norm(s: str) -> str:
@@ -223,88 +233,40 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
-# Prosa que o modelo embrulha em cerca: item de lista, negrito de passo, título.
-_MARCADOR_PROSA = re.compile(r"^\s*(?:\d+[.)]|[-*+•]\s|\*\*|#{1,6}\s)")
-# Sinais de que a linha é para copiar e colar, não para ler.
-_SINAL_CODIGO = re.compile(
-    r"[{};=<>]|::|\(|^\s*[a-z][\w.-]*\s+-{1,2}\w|^\s*\$\s"
-    # Declaração sem pontuação nenhuma: `from x import y`, `import os`, `def f`.
-    # Sem isto, `from win10toast import ToastNotifier` -- a linha que motivou
-    # toda a verificação -- não contava como código, e um bloco legítimo era
-    # julgado por uma amostra menor do que ele tem.
-    r"|^\s*(?:import|from|def|class|const|let|var|function|return|export|public|"
-    r"private|package|SELECT|INSERT|UPDATE|DELETE)\b"
-)
-
-
-def _linha_parece_codigo(linha: str) -> bool:
-    """A âncora vale para o que se copia e cola, não para prosa.
-
-    O modelo embrulha listas em ``` com frequência, e exigir que uma frase em
-    português apareça literalmente na transcrição condenava blocos inteiros de
-    conteúdo legítimo. Dois casos reais de 2026-08-10:
-
-      "1. Cadastre-se em [Skillbuilders.aws](https://skillbuilders.aws)."
-      "2. Selecionar todas as palavras: Ctrl + D"
-
-    O primeiro carrega justamente o nome do site que o narrador DIZ na fala
-    ("o Skillbuilders.aws", aos 23,7 s); o segundo, o atalho que ele fala como
-    "apertando Ctrl mais D". Nenhum dos dois aparece com essa grafia na
-    transcrição, e a régua antiga apagava os dois blocos -- destruindo a
-    resposta em vez de proteger dela.
-
-    Marcador de prosa vence: `1.`, `-`, `**`, `#` no início dizem "isto é
-    texto", mesmo que haja um trecho de código no meio da frase.
-    """
-    s = linha.strip()
-    if len(s) < 4:
-        return False
-    if _MARCADOR_PROSA.match(linha):
-        return False
-    return bool(_SINAL_CODIGO.search(s))
-
-
-def _parece_codigo(s: str) -> bool:
-    """Heurística para span inline: vale a pena exigir âncora?
-
-    Prosa entre crases (`assim`) é ênfase e não machuca ninguém. O que machuca é
-    comando e chamada -- é onde a pessoa copia e cola.
-
-    ⚠️ A versão anterior só olhava pontuação, e por isso **comando puro passava
-    sem verificação nenhuma**: `sudo apt install nmap`, `pip install win10toast`
-    e `npm i vitest` não têm parêntese, igual, ponto nem barra. Eram justamente
-    os mais copiáveis de todos. Pior: um teste que eu dava por bom passava por
-    omissão -- o span nunca era classificado como código, então "estar ancorado"
-    nunca foi verificado.
-
-    Duas palavras já bastam para não ser ênfase. `Pod`, `array` e `useState`
-    seguem livres, que é o uso legítimo de crase em prosa.
-    """
-    s = s.strip()
-    if len(s) < 4:
-        return False
-    if len(s.split()) >= 2:
-        return True
-    return any(m in s for m in ("(", "=", "--", "/", "_", ".", " -", "$"))
+# NENHUMA heurística de "isto parece código?". Ela não existe mais, e a razão
+# está registrada porque custou cinco iterações: símbolos, marcador de prosa,
+# palavras-chave, comando puro e linguagem da cerca. Cada rodada de validação
+# achava outro buraco, porque a pergunta "esta linha é código?" não tem resposta
+# boa por sintaxe -- `sudo apt install nmap` não se distingue de prosa por
+# símbolo nenhum, e `Ctrl + D` não se distingue de comando.
+#
+# O contrato mudou de lugar: crase e cerca passam a significar UMA coisa --
+# "copiei isto literalmente do material". O prompt pede isso explicitamente, e
+# aqui se confere TUDO que está marcado, sem classificar nada.
 
 
 def ancorar_codigo(tutorial: str, fonte: str, *, limiar: float = 0.5) -> tuple[str, int]:
-    """Tira do tutorial o código que NÃO aparece na fonte. Devolve (texto, removidos).
+    """Confere que tudo marcado como citação existe mesmo no material.
 
-    Existe porque pedir ao modelo não bastou, e isso foi medido, não suposto. A
-    regra "não invente código" no prompt funcionou onde o código estava na tela
-    (post 3818562307589048738: copiou `from win10toast import ToastNotifier`) e
-    falhou exatamente onde deveria valer -- no post 3839009985007901571, cuja
-    tela não tem comando nenhum, o tutorial saiu com `kubectl create pod`,
-    `kubectl expose pod` e `kubectl scale deployment`, todos inventados.
+    O modelo não deve escrever código de cabeça -- o código real vem da fala e da
+    tela, e nós já o extraímos. Quando ele marca algo com crase ou cerca, está
+    afirmando "isto está no material". Esta função verifica a afirmação.
 
-    Instrução em prompt é pedido; isto é verificação. Quem lê esta base copia e
-    cola o que estiver nela, e um comando plausível e falso é o pior resultado
-    que ela pode produzir.
+    Sem classificação e sem casos especiais:
 
-    O bloco cercado só cai quando MENOS DE `limiar` das suas linhas substantivas
-    aparecem na fonte: o modelo reformata indentação e quebra linha, e derrubar
-    um bloco correto por causa disso seria trocar um defeito por outro.
+      bloco cercado que não confere  -> vira "(não mostrado no material)"
+      trecho entre crases que não confere -> PERDE A CRASE, mantém as palavras
+
+    A assimetria entre os dois é deliberada. Um bloco que se anuncia como código
+    e não é copiável precisa sumir, porque a pessoa vai colar. Um trecho inline
+    costuma ser paráfrase legítima -- `Ctrl + D` para o que o narrador falou como
+    "Ctrl mais D", ou `Skillbuilders.aws` para "o Skillbuilders.aws" -- e aí a
+    marcação é que estava errada, não o conteúdo. Tirar a crase corrige a
+    afirmação sem destruir a resposta, que foi o defeito das versões anteriores.
+
+    Bloco cai por maioria ESTRITA das linhas: meio a meio não passa, porque um
+    bloco metade inventado engana justamente por parecer inteiro. A tolerância
+    existe porque o modelo reformata indentação e quebra de linha.
     """
     if not tutorial:
         return tutorial, 0
@@ -313,42 +275,32 @@ def ancorar_codigo(tutorial: str, fonte: str, *, limiar: float = 0.5) -> tuple[s
 
     def bloco(m: re.Match) -> str:
         nonlocal removidos
-        # A LINGUAGEM NA CERCA é o modelo declarando "isto é código". Quando ela
-        # está lá (```bash, ```css, ```python), toda linha conta -- inclusive
-        # comando puro, que não tem símbolo nenhum e escapava da classificação
-        # por símbolo. Foi como `sudo apt update` e `sudo apt install nmap`
-        # atravessaram a régua no post 3704821969073991262 depois de eu já ter
-        # consertado o mesmo buraco nos spans inline.
-        #
-        # Sem linguagem, decide-se linha a linha: o modelo embrulha prosa em
-        # ``` puro com frequência, e ali a régua não deve valer.
-        linguagem = (m.group(1) or "").strip()
-        corpo = m.group(2)
-        if linguagem:
-            linhas = [ln for ln in corpo.splitlines() if len(ln.strip()) >= 4]
-        else:
-            linhas = [ln for ln in corpo.splitlines() if _linha_parece_codigo(ln)]
+        linhas = [ln for ln in m.group(2).splitlines() if len(ln.strip()) >= 4]
         if not linhas:
             return m.group(0)
         ancoradas = sum(1 for ln in linhas if _norm(ln) in alvo)
-        # Maioria ESTRITA: meio a meio não passa. Um bloco com metade das linhas
-        # inventadas é perigoso justamente por parecer inteiro -- foi o caso do
-        # post 3671499376976917314, em que o vídeo edita o código na tela e o
-        # modelo completou de cabeça as duas linhas que faltavam.
         if ancoradas / len(linhas) > limiar:
             return m.group(0)
         removidos += 1
-        return f"\n{NAO_MOSTRADO}\n"
+        # Desmarca em vez de apagar -- mesma regra do inline. Apagar o bloco
+        # destruía conteúdo junto com a afirmação falsa: no post
+        # 3709415772515231896 o modelo pôs uma lista em PROSA dentro de cerca, e
+        # o bloco inteiro sumia levando o "Skillbuilders.aws" que o narrador diz.
+        #
+        # Sem a cerca, o trecho deixa de se anunciar como copiável, e o aviso
+        # diz ao leitor o que ele tem em mãos. Nada se perde, e nada mente.
+        corpo = m.group(2).rstrip()
+        return f"\n{NAO_VERIFICADO}\n{corpo}\n"
 
     saida = _BLOCO_RE.sub(bloco, tutorial)
 
     def inline(m: re.Match) -> str:
         nonlocal removidos
         trecho = m.group(1)
-        if not _parece_codigo(trecho) or _norm(trecho) in alvo:
+        if _norm(trecho) in alvo:
             return m.group(0)
         removidos += 1
-        return NAO_MOSTRADO
+        return trecho
 
     return _INLINE_RE.sub(inline, saida), removidos
 
