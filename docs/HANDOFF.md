@@ -25,15 +25,21 @@ noite de 2026-08-09.
 ```
 1. ✅ FEITO — merge de feat/cta-export-markdown na main (2026-08-10 00:45)
       conferido: minimax_mcp.ig_worker vem de src/ da main e TEM clean_title
-      14 testes verdes, ruff limpo, 26 tools
-2. implementar IG_WORKER_MIN_INTERVAL=90 (o worker não tem pausa nenhuma hoje)
+2. ✅ FEITO — IG_WORKER_MIN_INTERVAL implementado e merjado (061ff7e)
+      pôr IG_WORKER_MIN_INTERVAL=90 no .env antes de subir o daemon
 3. /ig-sync  UMA vez  → esperado published ≈ 2145, skipped_existing = 12
    ⚠️ se vier MUITO abaixo de 2145, PARAR — a listagem trunca em vez de dar erro
-4. subir o daemon e deixar consumir; bloco piloto de 50 e conferir
+4. subir o daemon COM o .env carregado:
+      set -a; . ./.env; set +a
+      nohup ./.venv/bin/python -m minimax_mcp.ig_worker >> <log> 2>&1 &
+5. bloco piloto de 50 e conferir antes de deixar seguir
 ```
 
-Sobra **uma** peça de código antes de começar: a pausa. Todo o resto do caminho
-já está na `main` e verificado.
+**Não sobra código nenhum.** Tudo o que a corrida precisa está na `main`, testado
+e merjado. O passo 3 ficou para a sessão nova de propósito: a listagem é a
+operação arriscada, ela falha **truncando em silêncio**, e o resultado precisa ser
+conferido por alguém acordado no minuto seguinte. Disparar antes de dormir
+gastaria a tentativa sem ninguém para ler o número.
 
 ### O que já está pronto e NÃO precisa refazer
 
