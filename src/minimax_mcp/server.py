@@ -493,6 +493,27 @@ def knowledge_reindex(
     return knowledge.reindex(embedding_model=embedding_model)
 
 
+@mcp.tool()
+def kb_export_search(
+    query: str | None = Field(default=None, description="Texto para buscar em título/resumo/conteúdo (opcional)"),
+    ids: list[int] | None = Field(default=None, description="IDs diretos dos documentos (opcional)"),
+    limit: int = Field(default=20, description="Número máximo de resultados"),
+) -> dict[str, Any]:
+    """Lista documentos para export — por IDs, por busca, ou os mais recentes. Nao grava nada."""
+    from minimax_mcp import knowledge
+    return knowledge.export_search(query=query, ids=ids, limit=limit)
+
+
+@mcp.tool()
+def kb_export(
+    ids: list[int] = Field(description="IDs dos documentos a exportar (confirme antes com kb-export-search)"),
+    output_dir: str = Field(default="output/kb-export/", description="Diretório de destino dos .md"),
+) -> dict[str, Any]:
+    """Exporta documentos selecionados como arquivos .md legíveis."""
+    from minimax_mcp import knowledge
+    return knowledge.export_documents(ids=ids, output_dir=output_dir)
+
+
 # =============================================================================
 # NEW: Instagram Saved Posts -> Knowledge Base (RabbitMQ queue + ig-worker)
 # =============================================================================
