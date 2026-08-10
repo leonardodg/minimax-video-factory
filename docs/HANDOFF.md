@@ -132,7 +132,22 @@ Disco: a mídia é apagada depois de processada, **inclusive quando falha**
 
 | Processo | O que faz | Log |
 |---|---|---|
-| `rodada3.py` | H1 nas três variantes, desde 2026-08-09 15:38 | `~/bkp/minimax-night/rodada3.log` |
+| `rodada32.py` | os dois últimos testes da rodada 3, desde 23:16 | `~/bkp/minimax-night/rodada32.log` |
+
+### ⚠️ O usuário tem worktrees ativos — não encostar
+
+```
+.worktrees/cta-export    feat/cta-export-markdown    trabalho dele, 2026-08-09
+.worktrees/igsync        feat/ig-saved-sync          trabalho dele (regra 3)
+.claude/worktrees/last-frame                          meu, JÁ MERJADO, pode remover
+```
+
+Há também um arquivo **dele** sem rastreio na `main`:
+`docs/superpowers/plans/2026-08-09-cta-cleanup-and-markdown-export.md`.
+
+> **Nunca `git add -A` neste repo.** Sempre caminhos nomeados, senão o trabalho
+> não commitado dele entra num commit alheio. Os 14 commits desta rodada foram
+> todos assim.
 
 **O `ig_worker` está PARADO.** Foi encerrado em 2026-08-09 15:44 **a pedido
 explícito do usuário**, para não disputar a GPU com os renders da rodada 3.
@@ -353,17 +368,21 @@ contra a versão anterior: 2 BAD, exit 1, um por bug.**
 
 ## Pendências
 
-- **O enquadramento da rodada 3 é aberto demais para diálogo.** Achado em
-  2026-08-09 no `H1_raposa_A_p1`: a raposa ocupa ~5% do quadro, então as falas
-  se ouvem mas **não se vê ninguém falando**. A causa é o vocabulário herdado da
-  rodada 2 (`wide shot`, `the camera pans gently`), que era de paisagem, não de
-  conversa. **Decisão do usuário: não mexer no meio da bancada** — mudar o
-  enquadramento agora contaminaria a comparação entre A, B e C, que existe para
-  responder sobre *montagem*. Corrigir na rodada 4, com a montagem já escolhida:
-  `medium shot`, personagem grande no quadro, nas batidas com fala.
+- **Os scripts da rodada 3 ainda estão fora do git**, em `~/bkp/minimax-night/`.
+  Quatro deles são ferramenta reutilizável e mereciam `scripts/`:
+  `voice_check.py` (F0 por fala, pega troca de voz), `motion.py` (movimento +
+  concentração), `smooth_seam.py` (cruza vídeo e áudio pela mesma duração),
+  `unify_audio3.py` (nível entre capítulos). **Não foram movidos em 2026-08-09
+  porque o usuário avisou que estava trabalhando num worktree** — mover exigiria
+  criar outro, e não valia o risco no fim da noite. É o mesmo problema que este
+  handoff resolveu para a documentação: conhecimento útil fora do versionamento.
+- ~~O enquadramento aberto demais para diálogo~~ **resolvido no mesmo dia**, e por
+  um caminho que não era o planejado: a ficha de elenco detalhada faz o modelo
+  aproximar o enquadramento sozinho. A correção manual (`medium shot` nas batidas
+  com fala) entrou também. Ver `docs/PROMPT_DESENHO_COM_FALA.md`.
 - **Portar o encadeamento de frame + a unificação de áudio para tools MCP.**
-  Hoje só existem em `round2.py` e `unify_audio.py`. São as duas peças que
-  faltam para durações longas, e as duas foram validadas em 4 vídeos.
+  O `last_frame` já entrou nas tools (`submit_scene`, `generate_video`); falta a
+  **extração de quadro** e a **unificação de áudio**, que seguem em script.
 - **Task 6 do plano de IG** (`docs/superpowers/plans/2026-08-09-ig-content-focused-pipeline.md`).
   Steps 1–3 eram no-op: a base não tinha nenhum documento de IG, o `state.json`
   não existia e o worker estava parado. Step 4 (publicar + consumir) foi
