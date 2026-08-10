@@ -13,33 +13,82 @@ regras antigas deste arquivo eram do INT4 e **metade caiu**. O que está abaixo
 
 ---
 
-## 👉 A TAREFA DA SESSÃO NOVA: sincronizar os 2145 posts do Instagram
+## 👉 EM ANDAMENTO desde 2026-08-10 08:30: o sync do Instagram
 
-**Plano completo:** [`docs/superpowers/plans/2026-08-10-ig-sync-completo-2145-posts.md`](superpowers/plans/2026-08-10-ig-sync-completo-2145-posts.md)
-— leia inteiro antes de rodar qualquer coisa. Ele já traz as decisões tomadas
-(ritmo de 90 s, janela dedicada, Whisper `small`) e as armadilhas que custaram a
-noite de 2026-08-09.
+**Plano:** [`docs/superpowers/plans/2026-08-10-ig-sync-completo-2145-posts.md`](superpowers/plans/2026-08-10-ig-sync-completo-2145-posts.md).
+⚠️ **O número no nome do arquivo está errado.** Eram 2145 na estimativa antiga;
+a contagem da própria API do Instagram, medida em 2026-08-10, é **3618 posts
+salvos em 52 coleções** — não 2157 em 46. O plano continua valendo em tudo o
+mais (ritmo de 90 s, janela dedicada, Whisper `small`).
 
-### Ordem de execução
+### Estado agora
 
 ```
-1. ✅ FEITO — merge de feat/cta-export-markdown na main (2026-08-10 00:45)
-      conferido: minimax_mcp.ig_worker vem de src/ da main e TEM clean_title
-2. ✅ FEITO — IG_WORKER_MIN_INTERVAL implementado e merjado (061ff7e)
-      pôr IG_WORKER_MIN_INTERVAL=90 no .env antes de subir o daemon
-3. /ig-sync  UMA vez  → esperado published ≈ 2145, skipped_existing = 12
-   ⚠️ se vier MUITO abaixo de 2145, PARAR — a listagem trunca em vez de dar erro
-4. subir o daemon COM o .env carregado:
-      set -a; . ./.env; set +a
-      nohup ./.venv/bin/python -m minimax_mcp.ig_worker >> <log> 2>&1 &
-5. bloco piloto de 50 e conferir antes de deixar seguir
+listagem   ✅ 2026-08-10 07:56→08:28, 32 min, 354 requisições, TODAS [200]
+           3123 posts distintos de 3618 = 86,3%  ·  12 já no banco
+publicado  ✅ 3111 mensagens na fila ig.saved (DLQ 0)
+daemon     ✅ de pé desde 08:30, pid em output/ig-sync-2026-08-10/worker.pid
+           log em output/ig-sync-2026-08-10/worker.log
+projeção   3111 × 90 s ≈ 78 h de janela dedicada, sem nenhum render
 ```
 
-**Não sobra código nenhum.** Tudo o que a corrida precisa está na `main`, testado
-e merjado. O passo 3 ficou para a sessão nova de propósito: a listagem é a
-operação arriscada, ela falha **truncando em silêncio**, e o resultado precisa ser
-conferido por alguém acordado no minuto seguinte. Disparar antes de dormir
-gastaria a tentativa sem ninguém para ler o número.
+### ⚠️ Faltam ~495 posts, e NÃO foi bloqueio
+
+A coleção catch-all ("All posts", que guarda os 3618) **morreu inteira num erro
+de modelo de dados**, aos 14 min da varredura:
+
+```
+WARNING skipping collection None: 1 validation error for Media
+code
+  Field required [type=missing, ...]
+```
+
+Um post do feed voltou sem o campo `code`; o `Media` do instagrapi exige esse
+campo; o pydantic levantou. Como `saved_posts` protege **cada coleção** com
+try/except, a exceção descartou tudo o que a catch-all já havia paginado e
+seguiu adiante. As 3111 mensagens vieram todas das 51 coleções nomeadas —
+confirmado: nenhuma tem `collection_name` vazio.
+
+**Não confundir com punição do Instagram.** A prova: 354 requisições, **354
+respostas 200**, zero `public_request`, zero HTML de login. Um 429 não se parece
+com isso.
+
+Os ~495 que faltam são os que existem **só** na catch-all — nunca arquivados
+numa pasta. Para recuperá-los sem relistar tudo:
+
+1. consertar a enumeração para tolerar item inválido (pular o item, não a
+   coleção) — hoje um post malformado derruba 3618;
+2. listar **só** a catch-all;
+3. filtrar contra o banco **e** contra `output/ig-sync-2026-08-10/mensagens.json`.
+   O segundo filtro não é opcional: `existing_pks` só conhece o que já está no
+   banco, e enquanto a fila tiver milhares pendentes eles ainda não estão lá —
+   sem esse filtro, republicaria duplicado.
+
+⚠️ Não fazer isso na mesma hora de uma varredura completa. É exatamente o padrão
+"duas varreduras numa hora" que a noite de 2026-08-09 culpou pelo 429.
+
+### O que mudou no código nesta sessão (`cf5d080`)
+
+| | |
+|---|---|
+| **Listagem sem teto** | `max_per_collection` 200 → 0. O teto truncava **em silêncio**: a catch-all entregaria 200 de 3618, e Receitas (1124), Inglês (564) e Dev (287) também passavam. Suspeita registrada, não conclusão: "202 posts em vez de 2157" em 2026-08-09 bate com 200 + 2 |
+| **Mídia preservada** | `IG_DELETE_AFTER_INGEST` agora é `false` por padrão. Uma pasta por `ig_pk`, e `existing_media()` responde "já está no disco?" **antes** de qualquer requisição — economiza o `media_info`, que é a chamada autenticada, uma por post |
+| **`raw_file_path`** | deixou de ser fixo em `None`. A coluna existia e estava vazia nos 12 primeiros |
+
+A razão das três é a mesma assimetria: **requisição ao Instagram é escassa e
+punível; reprocessar na GPU é só tempo de máquina local.** Apagar a mídia
+amarrava as duas.
+
+**O que nunca dependeu disso:** refazer resumo, categoria, tags ou prompt do
+LLM. A transcrição inteira já fica em `documents.transcription_text` (585 a 4035
+caracteres nos 12 primeiros), e para imagem é a descrição da visão que cai lá.
+
+### Disco é o recurso apertado
+
+`/home` tinha 51 GB livres (já a 90%) quando o piloto começou. A projeção é
+~20 GB de mídia para 3111 posts, mas **é estimativa** — a medida real sai do
+piloto: `du -sm downloads/ig` dividido pelo número de pastas, vezes 3111.
+Coletor pronto em `scratchpad/ig_report.sh`.
 
 ### O que já está pronto e NÃO precisa refazer
 
