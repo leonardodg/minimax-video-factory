@@ -30,7 +30,7 @@ from sqlalchemy import select
 
 from minimax_mcp import db, knowledge, llm, vault
 from minimax_mcp.db import Document
-from minimax_mcp.ig_worker import strip_cta
+from minimax_mcp.ig_worker import clean_title, strip_cta
 
 load_dotenv()
 
@@ -171,6 +171,13 @@ def main() -> int:
         print(f"[{doc.id}] cta_changed={changed}")
         if args.dry_run:
             print(f"    transcription {len(doc.transcription_text or '')} -> {len(cleaned)} chars")
+            # O título também, senão o dry-run esconde metade do efeito: na prática
+            # o CTA sobrevive mais no título (vindo da legenda) do que na fala.
+            novo = clean_title(doc.title)
+            if novo != doc.title:
+                print(f"    título {doc.title!r}")
+                print(f"        -> {novo!r}" if novo else
+                      "        -> (None: o resumo assume a primeira linha)")
             continue
 
         # A guarda olha SÓ o .json, e de propósito. Ele é escrito por último em
@@ -210,6 +217,16 @@ def main() -> int:
             doc.tags = fields.get("tags")
             doc.llm_provider = fields.get("provider")
             doc.llm_model = fields.get("model")
+            # O título também, senão o backfill deixa passar o campo MAIS visível
+            # -- é ele que aparece na listagem e vira o nome do arquivo exportado.
+            # Quando `clean_title` devolve None o CTA era o título inteiro, e aí a
+            # primeira linha do resumo recém-gerado assume, que é a mesma regra do
+            # `ingest` (`title or resumo[:80]`).
+            novo_titulo = clean_title(doc.title)
+            if novo_titulo is None:
+                resumo = fields.get("resumo") or ""
+                novo_titulo = resumo[:80] or doc.title
+            doc.title = novo_titulo
             s2.commit()
         except Exception as e:
             s2.rollback()
