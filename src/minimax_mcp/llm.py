@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import unicodedata
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
@@ -198,6 +201,76 @@ def _openai_compatible_generate(prompt: str, model: str, *, force_json: bool) ->
     return resp.json()["choices"][0]["message"]["content"]
 
 
+_BLOCO_RE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+_INLINE_RE = re.compile(r"`([^`\n]+)`")
+NAO_MOSTRADO = "(não mostrado no material)"
+
+
+def _norm(s: str) -> str:
+    """Só o essencial para comparar: espaços colapsados. NÃO baixa a caixa --
+    `ToastNotifier` e `toastnotifier` são coisas diferentes em código."""
+    return " ".join(s.split())
+
+
+def _parece_codigo(s: str) -> bool:
+    """Heurística para span inline: vale a pena exigir âncora?
+
+    Prosa entre crases (`assim`) é ênfase e não machuca ninguém. O que machuca é
+    comando e chamada -- é onde a pessoa copia e cola.
+    """
+    s = s.strip()
+    if len(s) < 4:
+        return False
+    return any(m in s for m in ("(", "=", "--", "/", "_", ".", " -", "$"))
+
+
+def ancorar_codigo(tutorial: str, fonte: str, *, limiar: float = 0.5) -> tuple[str, int]:
+    """Tira do tutorial o código que NÃO aparece na fonte. Devolve (texto, removidos).
+
+    Existe porque pedir ao modelo não bastou, e isso foi medido, não suposto. A
+    regra "não invente código" no prompt funcionou onde o código estava na tela
+    (post 3818562307589048738: copiou `from win10toast import ToastNotifier`) e
+    falhou exatamente onde deveria valer -- no post 3839009985007901571, cuja
+    tela não tem comando nenhum, o tutorial saiu com `kubectl create pod`,
+    `kubectl expose pod` e `kubectl scale deployment`, todos inventados.
+
+    Instrução em prompt é pedido; isto é verificação. Quem lê esta base copia e
+    cola o que estiver nela, e um comando plausível e falso é o pior resultado
+    que ela pode produzir.
+
+    O bloco cercado só cai quando MENOS DE `limiar` das suas linhas substantivas
+    aparecem na fonte: o modelo reformata indentação e quebra linha, e derrubar
+    um bloco correto por causa disso seria trocar um defeito por outro.
+    """
+    if not tutorial:
+        return tutorial, 0
+    alvo = _norm(fonte or "")
+    removidos = 0
+
+    def bloco(m: re.Match) -> str:
+        nonlocal removidos
+        linhas = [ln for ln in m.group(1).splitlines() if len(ln.strip()) >= 4]
+        if not linhas:
+            return m.group(0)
+        ancoradas = sum(1 for ln in linhas if _norm(ln) in alvo)
+        if ancoradas / len(linhas) >= limiar:
+            return m.group(0)
+        removidos += 1
+        return f"\n{NAO_MOSTRADO}\n"
+
+    saida = _BLOCO_RE.sub(bloco, tutorial)
+
+    def inline(m: re.Match) -> str:
+        nonlocal removidos
+        trecho = m.group(1)
+        if not _parece_codigo(trecho) or _norm(trecho) in alvo:
+            return m.group(0)
+        removidos += 1
+        return NAO_MOSTRADO
+
+    return _INLINE_RE.sub(inline, saida), removidos
+
+
 def generate_structured(
     transcription: str,
     *,
@@ -233,7 +306,22 @@ def generate_structured(
             return {"ok": False, "error": f"LLM response missing keys: {missing}", "raw": raw}
         if categories:
             parsed["categoria"] = coerce_categoria(parsed.get("categoria"), categories)
-        return {"ok": True, "provider": provider, "model": model, **parsed}
+        # A verificação vem DEPOIS do modelo, e é o que de fato segura a
+        # invenção: a regra no prompt é um pedido, isto é um teste.
+        tut, removidos = ancorar_codigo(parsed.get("tutorial") or "", transcription)
+        if removidos:
+            logger.warning(
+                "tutorial: %d trecho(s) de código sem âncora no material, removidos",
+                removidos,
+            )
+        parsed["tutorial"] = tut
+        # Tag vazia saiu na prova do post 3818562307589048738 e viraria uma tag
+        # em branco na busca.
+        parsed["tags"] = [t for t in (parsed.get("tags") or []) if str(t).strip()]
+        return {
+            "ok": True, "provider": provider, "model": model,
+            "codigo_removido": removidos, **parsed,
+        }
     except Exception as e:
         return {"ok": False, "error": f"LLM generation failed: {e}"}
 
