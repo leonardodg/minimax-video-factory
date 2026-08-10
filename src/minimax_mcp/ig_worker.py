@@ -312,6 +312,7 @@ def process_message(
         if describe is None:
             return {"status": "error", "error": "no describe provided for image", "filepaths": filepaths}
         pieces: list[str] = []
+        escritos: list[str] = []
         for fp in filepaths:
             de = describe(fp)
             if not de.get("ok"):
@@ -319,7 +320,21 @@ def process_message(
             pieces.append(de.get("conteudo_principal") or de.get("text") or "")
             if categoria is None:
                 categoria = de.get("categoria")
+            # DESCREVER não é LER. O `describe_image` devolvia "Como adicionar
+            # aspas automáticas em um bloco de citação usando HTML e CSS" para um
+            # carrossel que MOSTRAVA o CSS inteiro na imagem -- a descrição do
+            # que o post ensina, não o que está escrito nele. Num post de
+            # infográfico ou print de código, o texto É o conteúdo, e ele estava
+            # sendo perdido inteiro (doc 333, apontado pelo usuário).
+            if read_screen is not None:
+                rs = read_screen(fp)
+                if rs.get("ok") and (rs.get("text") or "").strip():
+                    escritos.append(rs["text"].strip())
+                elif not rs.get("ok"):
+                    logger.warning("leitura de texto da imagem falhou: %s", rs.get("error"))
         text = "\n\n".join(p for p in pieces if p)
+        if escritos:
+            text = f"{text}\n\n--- texto na imagem ---\n{merge_screen_text(escritos)}".strip()
         lang = "pt"
         doc_type = "image"
 
@@ -692,8 +707,17 @@ def guardar_capa(quadros: list[str], video_path: str) -> str | None:
 
 
 def _default_read_screen(video_path: str) -> dict:
-    """Lê o texto na tela do vídeo: extrai quadros e transcreve cada um."""
+    """Lê o texto que está escrito na mídia. Aceita vídeo e imagem.
+
+    Imagem vai direto para a visão; vídeo precisa de quadros antes. Sem esse
+    desvio, uma foto entraria no ffmpeg como se fosse filme e não sobraria
+    quadro nenhum -- e é justamente no post de imagem (infográfico, print de
+    código) que o texto escrito É o conteúdo.
+    """
     import shutil
+
+    if classify_file(video_path) == "image":
+        return llm.read_screen(video_path)
 
     quadros = extract_frames(video_path)
     if not quadros:

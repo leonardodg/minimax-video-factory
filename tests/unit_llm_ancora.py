@@ -96,6 +96,64 @@ if ancorar_codigo("", "x") == ("", 0) and ancorar_codigo(None, "x") == (None, 0)
 else:
     bad("borda de tutorial vazio quebrou")
 
+print("== unit_llm_ancora: prosa embrulhada em cerca NÃO é código ==")
+
+# Os dois casos que o usuário analisou em 2026-08-10. A régua antiga apagava os
+# blocos inteiros -- e com eles a resposta que o post tinha.
+FONTE_AWS = ("[20.70s] Primeiro, eu tive que me cadastrar no site da Amazon, "
+             "[23.70s] o Skillbuilders.aws. [25.90s] E assim que você entra na plataforma,")
+TUT_AWS = ("```\n1. Cadastre-se em [Skillbuilders.aws](https://skillbuilders.aws).\n"
+           "2. Explore os cursos oferecidos pela AWS.\n"
+           "3. Selecione a certificação desejada e verifique os pré-requisitos.\n```")
+saida, n = ancorar_codigo(TUT_AWS, FONTE_AWS)
+if n == 0 and "Skillbuilders.aws" in saida:
+    ok("lista numerada em prosa sobrevive, e o nome do site com ela")
+else:
+    bad(f"prosa foi apagada: removidos={n} saida={saida!r}")
+
+FONTE_VS = ("[4.38s] Apertando Ctrl mais D, você vai selecionar todas as palavras iguais "
+            "[11.16s] Apertando Ctrl mais P, você consegue buscar um nome de arquivo")
+TUT_VS = ("```\n1. Aumentar produtividade no VS Code com atalhos.\n"
+          "2. Selecionar todas as palavras: Ctrl + D\n"
+          "3. Buscar e abrir arquivos rapidamente: Ctrl + P\n```")
+saida, n = ancorar_codigo(TUT_VS, FONTE_VS)
+if n == 0 and "Ctrl + D" in saida:
+    ok("atalho falado e escrito na forma canônica sobrevive")
+else:
+    bad(f"atalhos apagados: removidos={n} saida={saida!r}")
+
+print("== unit_llm_ancora: e o código de verdade continua sendo cobrado ==")
+
+# CSS inventado (doc 333): tem chave, ponto-e-vírgula e ::, é para copiar.
+TUT_CSS = '```\ntag[role="quote"]::before {\n  content: "";\n  font-style: italic;\n}\n```'
+saida, n = ancorar_codigo(TUT_CSS, "São pseudo-elementos do CSS que deixam você adicionar coisas")
+if n == 1 and "font-style" not in saida:
+    ok("bloco CSS sem âncora na fonte continua caindo")
+else:
+    bad(f"CSS inventado sobreviveu: removidos={n} saida={saida!r}")
+
+# Comando de terminal inventado (doc 310).
+saida, n = ancorar_codigo(
+    "```\nnmap -p- --open -T4 -v -A -iL ips.txt\n```",
+    "Hoje vou te mostrar como escanear todos os IPs da internet",
+)
+if n == 1:
+    ok("comando de terminal sem âncora continua caindo")
+else:
+    bad(f"comando inventado sobreviveu: removidos={n}")
+
+# E o misto do doc 322: metade do bloco veio da tela, metade o modelo completou.
+FONTE_REACT = "export const Component = () => { useEffect(() => {"
+TUT_REACT = ("```\nimport { useState, useEffect } from 'react';\n"
+             "export const Component = () => {\n"
+             "const [count, setCount] = useState(0);\n"
+             "useEffect(() => {\n```")
+saida, n = ancorar_codigo(TUT_REACT, FONTE_REACT)
+if n == 1:
+    ok("bloco com metade inventada cai (2 de 4 ancoradas, abaixo do limiar)")
+else:
+    bad(f"bloco misto: removidos={n} saida={saida!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
