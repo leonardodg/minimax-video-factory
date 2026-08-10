@@ -6,6 +6,10 @@ ComfyUI + MiniMax H3 (FL2VA, INT8) exposto por um servidor MCP.
 > Este arquivo é carregado em **toda** sessão. O estado detalhado — o que está
 > rodando, o que já foi medido, as pendências — está em **[`docs/HANDOFF.md`](docs/HANDOFF.md)**,
 > e é lá que ele deve ser atualizado. Aqui ficam só as regras que não mudam.
+>
+> **Vai escrever prompt de desenho com fala?** A receita completa — molde,
+> fichas de voz e de elenco, tratamento de emenda, o que já falhou — está em
+> **[`docs/PROMPT_DESENHO_COM_FALA.md`](docs/PROMPT_DESENHO_COM_FALA.md)**.
 
 ---
 
