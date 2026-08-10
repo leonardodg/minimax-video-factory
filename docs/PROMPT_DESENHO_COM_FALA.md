@@ -225,6 +225,47 @@ Nível não é timbre. O H1 tinha 0,2 dB de degrau **e** a voz do corvo saltando
 
 ---
 
+## Elenco: quem pode falar
+
+Veredito humano sobre 16 clipes da rodada 3, e ele é consistente:
+
+| personagem | boca? | sincronia vista | veredito |
+|---|---|---|---|
+| raposa | boca de verdade | **a melhor** | "voz boa e sincronizada" |
+| corvo | bico | funciona | ok |
+| gaivota | bico | **falhou** | "não tem sincronia, horrível" |
+| robô, caracol | **nenhuma** | inexistente | "não tem bocas" |
+| **faroleiro (humano)** | boca | **falhou** | o pior clipe da rodada |
+
+Duas regras que saem daí:
+
+1. **Para diálogo visível, escale personagens com boca.** Focinho > bico >
+   carcaça sem boca. A raposa teve a melhor sincronia de toda a rodada, e a
+   boca dela **fecha no meio da frase** — articulação de consoante, não uma
+   boca batendo solta.
+2. **Evite rosto humano falando em plano fechado.** É a categoria que o
+   `README.md` já listava como das mais difíceis em qualquer resolução, e a
+   história do faroleiro confirmou: embaçado, sem sincronia, e no fim o
+   personagem "nem parece um marinheiro".
+
+## Enquadramento muda entre renders, nunca dentro de um
+
+Erro cometido na rodada 3: dentro do MESMO render de 15 s, a batida 1 pedia
+`medium shot, the keeper large in frame` e a batida 2 pedia `medium close shot of
+the seagull large in frame`. O modelo **não corta — ele deforma a escala**, e a
+gaivota "fica grande do nada".
+
+Todas as batidas de um mesmo clipe devem compartilhar o tamanho de plano.
+Mudança de enquadramento pertence à fronteira entre renders.
+
+## Movimento compete com nitidez
+
+O usuário notou sem ser perguntado: o capítulo com pouca movimentação saiu bom, o
+com muita coisa se mexendo ao mesmo tempo saiu pior. Parece ser o **número de
+elementos independentes em movimento**, não a velocidade — um trenó descendo
+rápido com um só assunto ficou nítido, enquanto raposa andando + corvo voando +
+câmera acompanhando degradou.
+
 ## Como verificar sem depender de ouvir tudo
 
 | pergunta | ferramenta |
@@ -238,12 +279,57 @@ Nível não é timbre. O H1 tinha 0,2 dB de degrau **e** a voz do corvo saltando
 mistura os dois personagens e acusa salto onde só houve distribuição desigual das
 falas. Quase virou conclusão errada nesta rodada.
 
+### Nitidez NÃO é medível por métrica simples — não tente de novo
+
+Duas tentativas, as duas **anticorrelacionadas** com o julgamento humano sobre os
+mesmos 16 clipes:
+
+| métrica | o que deu |
+|---|---|
+| variância do laplaciano | clipes de 512×320 ("qualidade pior") no topo; o preferido do usuário quase no fundo |
+| acutância de borda (p95 do gradiente) | mesma inversão |
+
+O motivo é do estilo: num desenho de **cor chapada**, energia de alta frequência
+mede **granulado**, não detalhe. O clipe ruidoso ganha pontos pelo ruído e o clipe
+limpo perde pontos pelas grandes áreas lisas — que são justamente o que o faz
+bonito. O que a pessoa chama de "nitidez" aqui é ausência de artefato e coerência
+de forma: propriedade estrutural, não de sinal.
+
+O script está em `~/bkp/minimax-night/sharpness.py` com as duas versões
+documentadas. **Guardado como resultado negativo**: o olho continua sendo o
+instrumento, e não vale gastar rodada tentando automatizar esse julgamento.
+
 ---
+
+## A emenda não é a culpada pela voz — o erro é esporádico
+
+Testado em 2026-08-09 (rodada 3.1) com a mesma voz grave falando **calma** dos dois
+lados de uma emenda:
+
+```
+capítulo 1  corvo  "O sol ainda vai demorar pra nascer."   213 Hz  ❌
+capítulo 2  corvo  "A neve vai durar a semana toda."       103 Hz  ✓
+   (logo depois da emenda)
+```
+
+**A fala depois da emenda saiu perfeita.** Isso elimina a emenda como causa, e
+deixa "atuação" como explicação mais provável para a dispersão medida antes — a
+fala mais desviada era dita no instante em que um trenó dispara.
+
+**Mas o erro de amarração continua, esporádico:** com a ficha ativa, cerca de
+**2 falas em 15** caem no registro errado, sem relação com posição no vídeo nem
+com emenda.
+
+> Consequência prática: **uma tomada com voz errada se re-rola, não se reescreve.**
+> Trocar a seed e refazer aquele clipe é o conserto. Mais engenharia de prompt não
+> resolve o que é variação de amostragem.
 
 ## Em aberto
 
-- **Deriva de voz residual contra atuação.** Teste que decide: uma fala
-  deliberadamente **calma** logo depois de uma emenda. Se subir de tom é deriva;
-  se ficar no registro, era interpretação.
-- **Keyframe autorado** faria a variante B funcionar? Não testado.
+- **Keyframe autorado** faria a variante B funcionar, ou ancorar as duas pontas
+  mata a ação de qualquer jeito? Em teste.
+- **A ampliação do âncora borra o clipe inteiro?** A variante B foi a única a
+  1024×576 e levou "qualidade ruim" nos quatro capítulos — e foi a única ancorada
+  num quadro de 512×320 esticado para 1024. Se confirmado, nunca ancorar com
+  imagem ampliada.
 - **Corte seco, cruzado ou dissolve** — julgamento humano, não medida.
