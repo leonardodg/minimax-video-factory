@@ -154,6 +154,36 @@ if n == 1:
 else:
     bad(f"bloco misto: removidos={n} saida={saida!r}")
 
+print("== unit_llm_ancora: comando puro TAMBÉM é código ==")
+
+# A versão anterior só olhava pontuação, então comando sem símbolo nenhum
+# passava sem verificação -- e são os mais copiáveis que existem. Observado no
+# post 3704821969073991262: `sudo apt install nmap` entrou no tutorial sem que a
+# régua sequer o examinasse.
+saida, n = ancorar_codigo("Rode `sudo apt install nmap` antes.", "o vídeo fala de escanear portas")
+if n == 1 and "sudo apt install" not in saida:
+    ok("comando puro sem âncora é removido")
+else:
+    bad(f"comando puro passou sem verificação: removidos={n} saida={saida!r}")
+
+# E quando ele foi realmente dito/mostrado, continua passando.
+saida, n = ancorar_codigo(
+    "Rode `sudo apt install nmap` antes.",
+    "primeiro você roda sudo apt install nmap no terminal",
+)
+if n == 0:
+    ok("comando puro ancorado na fonte sobrevive")
+else:
+    bad(f"comando legítimo removido: {saida!r}")
+
+# Uma palavra só continua sendo ênfase, não código.
+for termo in ("`Pod`", "`array`", "`useState`"):
+    saida, n = ancorar_codigo(f"Use o {termo} aqui", "nada relacionado")
+    if n == 0:
+        ok(f"{termo} segue tratado como ênfase")
+    else:
+        bad(f"{termo} virou código e foi removido")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

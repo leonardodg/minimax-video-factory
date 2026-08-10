@@ -269,10 +269,22 @@ def _parece_codigo(s: str) -> bool:
 
     Prosa entre crases (`assim`) é ênfase e não machuca ninguém. O que machuca é
     comando e chamada -- é onde a pessoa copia e cola.
+
+    ⚠️ A versão anterior só olhava pontuação, e por isso **comando puro passava
+    sem verificação nenhuma**: `sudo apt install nmap`, `pip install win10toast`
+    e `npm i vitest` não têm parêntese, igual, ponto nem barra. Eram justamente
+    os mais copiáveis de todos. Pior: um teste que eu dava por bom passava por
+    omissão -- o span nunca era classificado como código, então "estar ancorado"
+    nunca foi verificado.
+
+    Duas palavras já bastam para não ser ênfase. `Pod`, `array` e `useState`
+    seguem livres, que é o uso legítimo de crase em prosa.
     """
     s = s.strip()
     if len(s) < 4:
         return False
+    if len(s.split()) >= 2:
+        return True
     return any(m in s for m in ("(", "=", "--", "/", "_", ".", " -", "$"))
 
 
