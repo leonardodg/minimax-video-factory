@@ -56,6 +56,14 @@ def snapshot_doc(doc) -> Path:
     """
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
+    res = vault.write_markdown_copy(knowledge._document_to_dict(doc), str(BACKUP_DIR))
+    if not res.get("path"):
+        raise RuntimeError(
+            f"snapshot write failed for doc {doc.id}: {res.get('reason')}"
+        )
+    target = _snapshot_path(doc.id, doc.ig_pk)
+    os.replace(res["path"], target)
+
     json_path = _snapshot_json_path(doc.id, doc.ig_pk)
     json_path.write_text(
         json.dumps(
@@ -82,21 +90,15 @@ def snapshot_doc(doc) -> Path:
         ),
         encoding="utf-8",
     )
-
-    res = vault.write_markdown_copy(knowledge._document_to_dict(doc), str(BACKUP_DIR))
-    if not res.get("path"):
-        raise RuntimeError(
-            f"snapshot write failed for doc {doc.id}: {res.get('reason')}"
-        )
-    target = _snapshot_path(doc.id, doc.ig_pk)
-    os.replace(res["path"], target)
     return target
 
 
 def restore_doc(doc_id: int, ig_pk: str) -> dict:
     """Read the .json snapshot back into a field dict for Postgres restore.
 
-    The .json is authoritative; the .md is only a human-readable fallback.
+    The .json is authoritative and required; the .md is a comparison artifact
+    only and is never read here. Returns {"ok": False, "error"} if the .json is
+    missing or unparseable.
     """
     p = _snapshot_json_path(doc_id, ig_pk)
     if not p.exists():
@@ -171,9 +173,18 @@ def main() -> int:
             print(f"    transcription {len(doc.transcription_text or '')} -> {len(cleaned)} chars")
             continue
 
-        if _snapshot_path(doc.id, doc.ig_pk).exists() or _snapshot_json_path(doc.id, doc.ig_pk).exists():
+        # A guarda olha SÓ o .json, e de propósito. Ele é escrito por último em
+        # snapshot_doc() e é o único artefato que o --restore consegue ler, então
+        # a presença dele é a única prova de que o snapshot inteiro deu certo.
+        #
+        # Olhar o .md também reabriria o buraco que a reordenação fechou, só que
+        # do outro lado: .md gravado e .json falhando deixaria a guarda disparando
+        # para sempre num documento que NÃO tem como ser restaurado. Com a checagem
+        # só no .json, qualquer falha no meio do caminho simplesmente permite
+        # refazer o snapshot na próxima execução.
+        if _snapshot_json_path(doc.id, doc.ig_pk).exists():
             print(
-                f"    snapshot exists at {_snapshot_path(doc.id, doc.ig_pk)} "
+                f"    snapshot exists at {_snapshot_json_path(doc.id, doc.ig_pk)} "
                 f"— already backfilled; skipping (use --restore {doc.id} to roll back)"
             )
             continue

@@ -202,15 +202,17 @@ sentences from the transcription text, and the summary prompt instructs the LLM
 to omit CTAs from the generated fields.
 
 `scripts/backfill_cta.py` re-applies this cleanup to **already-ingested** IG
-documents (any row with an `ig_pk`): it snapshots the current state to
-`output/kb-backup/<id>-<ig_pk>.md`, strips CTAs, regenerates
+documents (any row with an `ig_pk`): it snapshots the current state as
+`output/kb-backup/<id>-<ig_pk>.md` plus a machine-readable
+`output/kb-backup/<id>-<ig_pk>.json`, strips CTAs, regenerates
 summary/tutorial/objectives/tags via the LLM, and updates the row (preserving
-`id`/`ig_pk`/`source_url`/`platform`/`created_at`).
+`id`/`ig_pk`/`source_url`/`platform`/`created_at`). Re-runs skip docs that
+already have a snapshot, so the rollback artifacts are never overwritten.
 
 ```bash
 uv run --directory . python scripts/backfill_cta.py            # real run
 uv run --directory . python scripts/backfill_cta.py --dry-run  # show changes, write nothing
-uv run --directory . python scripts/backfill_cta.py --restore <id>  # rollback from snapshot
+uv run --directory . python scripts/backfill_cta.py --restore <id>  # rollback: writes the .json snapshot fields back to Postgres
 ```
 
 ---
