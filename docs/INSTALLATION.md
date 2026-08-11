@@ -41,7 +41,7 @@ run the MCP server or the fastmcp client on the host (dev mode).
 cp .env.example .env
 # edit at least:
 #   PROJECT_ROOT=/path/to/minimax-video-factory   (absolute — used for the /workspace mount)
-#   MODELS_DIR=/var/tmp/minimax/models            (where weights live)
+#   MODELS_DIR=$HOME/minimax/models            (where weights live)
 #   OUTPUT_DIR=/path/to/minimax-video-factory/output
 #   STUDIO_DOWNLOADS_DIR=/path/to/minimax-video-factory/downloads  # new: downloaded videos
 #   WHISPER_MODEL=small      # tiny/base/small/medium/large-v3
@@ -59,13 +59,13 @@ the MCP server.
 ## 3. Models directory
 
 Preferred: `/opt/minimax/models`. If you cannot use `sudo` (e.g. non-interactive
-shell), everything falls back to `/var/tmp/minimax/models` automatically — or just
+shell), everything falls back to `$HOME/minimax/models` automatically — or just
 set `MODELS_DIR` in `.env`.
 
 ```bash
 sudo mkdir -p /opt/minimax/models && sudo chown -R "$USER" /opt/minimax
 # or, no-sudo fallback:
-#   mkdir -p /var/tmp/minimax/models
+#   mkdir -p $HOME/minimax/models
 ```
 
 ---

@@ -20,8 +20,8 @@ ComfyUI and the MCP server run in the SAME container (shared models + output).
 3. Create `.env` from `.env.example`; set at least:
 
    ```
-   MODELS_DIR=/var/tmp/minimax/models
-   OUTPUT_DIR=/var/tmp/minimax/output
+   MODELS_DIR=$HOME/minimax/models
+   OUTPUT_DIR=$HOME/minimax/output
    MCP_TRANSPORT=streamable-http
    MCP_HOST=0.0.0.0
    MCP_PORT=8848

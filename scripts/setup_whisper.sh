@@ -6,7 +6,7 @@
 set -euo pipefail
 
 MODEL="${1:-small}"
-MODELS_DIR="${MODELS_DIR:-/var/tmp/minimax/models/whisper}"
+MODELS_DIR="${MODELS_DIR:-$HOME/minimax/models/whisper}"
 
 echo "=========================================="
 echo "Setup Whisper Model: $MODEL"

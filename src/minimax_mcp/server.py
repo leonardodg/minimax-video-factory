@@ -66,7 +66,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
 WORKFLOW_PATH = Path(os.environ.get("WORKFLOW_PATH", PROJECT_ROOT / "workflows" / "minimax_h3_t2v_api.json"))
 MODELS_DIR = Path(os.environ.get("MODELS_DIR") or
-                  ("/opt/minimax/models" if os.path.isdir("/opt/minimax/models") else "/var/tmp/minimax/models"))
+                  ("/opt/minimax/models" if os.path.isdir("/opt/minimax/models")
+                   else str(Path.home() / "minimax" / "models")))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", PROJECT_ROOT / "output"))
 OUTPUT_HOST_DIR = os.environ.get("OUTPUT_HOST_DIR") or str(OUTPUT_DIR)
 OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "video/factory")

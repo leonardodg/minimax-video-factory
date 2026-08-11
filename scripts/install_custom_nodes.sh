@@ -22,7 +22,10 @@ set -uo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/config.sh"
 
-CUSTOM_NODES_DIR="${CUSTOM_NODES_DIR:-/opt/minimax/custom_nodes}"
+# config.sh already resolves CUSTOM_NODES_DIR (.env, else /opt if writable, else
+# $HOME/minimax/custom_nodes). This is only a belt-and-braces default for anyone
+# running the script with config.sh bypassed.
+CUSTOM_NODES_DIR="${CUSTOM_NODES_DIR:-$HOME/minimax/custom_nodes}"
 COMFY_CONTAINER="${COMFY_CONTAINER:-minimax-comfyui}"
 
 DO_CLONE=1

@@ -44,7 +44,7 @@ PREFIX = f"e2e_{int(time.time())}"
 
 async def main() -> int:
     env = dict(os.environ)
-    env["MODELS_DIR"] = env.get("MODELS_DIR", "/var/tmp/minimax/models")
+    env["MODELS_DIR"] = env.get("MODELS_DIR", os.path.expanduser("~/minimax/models"))
     if server_mode == "container":
         transport = StdioTransport(
             command="docker",

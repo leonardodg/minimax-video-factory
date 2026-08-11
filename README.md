@@ -476,7 +476,8 @@ Plus `uv run pytest -m unit` for the pure-logic suites, which need no GPU, no co
 
 ```bash
 PROJECT_ROOT=/path/to/minimax-video-factory   # absolute; used for the /workspace mount
-MODELS_DIR=/var/tmp/minimax/models            # where the ~32 GB of weights live
+MODELS_DIR=$HOME/minimax/models               # where the ~32 GB of weights live
+CUSTOM_NODES_DIR=$HOME/minimax/custom_nodes   # ComfyUI custom nodes (bind-mounted rw)
 OUTPUT_DIR=.../output                         # generated .mp4 (mounted into the container)
 
 COMFYUI_TAG=v0.30.2  COMFYUI_PORT=8188

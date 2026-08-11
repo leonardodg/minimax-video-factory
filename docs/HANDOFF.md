@@ -573,6 +573,35 @@ mas num modelo quantizado parte do delta é arredondada fora → mais macio);
 `False` aplica em tempo de execução (mais nítido, mais VRAM). O workflow turbo
 deste repo sai com **`True`**, escolha conservadora para 12 GB — **não medida**.
 
+### ⚠️ Tudo saiu de `/var/tmp/minimax/` para `$HOME/minimax/` (2026-08-11)
+
+`/var/tmp` é diretório **temporário** por contrato — o `systemd-tmpfiles` tem o
+direito de limpá-lo, e 73 GB de pesos não são temporários. Pior: estava fora do
+exclude do Timeshift, inchando todo snapshot. `$HOME/minimax/` é gravável sem
+sudo e está coberto pelo exclude.
+
+```
+$HOME/minimax/
+├── models/          73 GB   ← MODELS_DIR
+│   ├── text_encoders/    36 GB
+│   ├── diffusion_models/ 31 GB
+│   ├── vae/             5,5 GB
+│   ├── loras/           1,5 GB   ← novo
+│   └── vae_approx/      9,4 MB   ← novo
+└── custom_nodes/   120 MB   ← CUSTOM_NODES_DIR (8 pacotes + os 2 do ComfyUI)
+```
+
+O caminho antigo estava **hardcoded em 12 lugares** (`config.sh`, `server.py`,
+`ci.yml`, `setup_whisper.sh`, `demo_aurora.sh`, `07_e2e_agent.sh`, README, AGENTS,
+3 docs). Todos passaram a `$HOME/minimax/...`, e o `ci.yml` deixou de fixar
+`MODELS_DIR`: agora **pergunta ao container** de onde vem o bind mount de
+`/comfy/ComfyUI/models`, do mesmo jeito que já fazia com o output. Isso não
+envelhece na próxima mudança de caminho.
+
+⚠️ **`CUSTOM_NODES_DIR` no `.env` não é opcional.** Se faltar, o compose monta o
+default `/opt/minimax/custom_nodes` — vazio — por cima de `/comfy/ComfyUI/custom_nodes`,
+e **todos** os nós somem de uma vez, sem erro visível.
+
 ### Modelos baixados (2026-08-11)
 
 ```
@@ -580,7 +609,10 @@ models/loras/minimax_h3_turbo_v4_step600_ema.safetensors      780 MB  ✅ o reco
 models/loras/minimax_h3_turbo_4step_ema_ckpt850.safetensors   780 MB  ✅ alternativa p/ 4 steps
 models/vae_approx/taeh3.safetensors                            10 MB  ✅ preview
 models/text_encoders/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors
-                                                             26,4 GB  ⏳ baixando
+                                                             26,4 GB  ⏳ baixando ainda no
+                                                                      caminho ANTIGO (o curl
+                                                                      já estava aberto); mover
+                                                                      ao terminar
 ```
 
 ### Duas coisas que o workflow da AcademiaSD revelou

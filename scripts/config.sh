@@ -41,15 +41,34 @@ export COMFYUI_TAG="${COMFYUI_TAG:-v0.30.2}"
 export COMFYUI_EXTRA_ARGS="${COMFYUI_EXTRA_ARGS:---lowvram --fast-disk --disable-pinned-memory}"
 
 # --- Models directory ---
-# Prefer /opt/minimax/models (documented); fall back to a writable path on the /
-# partition if /opt is not user-writable (no sudo in non-interactive shells).
+# Prefer /opt/minimax/models (documented); fall back to $HOME/minimax/models if
+# /opt is not user-writable (no sudo in non-interactive shells).
 # Override freely via MODELS_DIR in .env — disk space is often the constraint.
+#
+# The fallback was /var/tmp/minimax/models until 2026-08-11. Two reasons it moved:
+# /var/tmp is a *temporary* directory (systemd-tmpfiles is entitled to clean it,
+# and 73 GB of weights is not temporary), and it sits outside the home dir that
+# snapshot tools are usually configured to exclude — here it was inflating every
+# Timeshift snapshot. $HOME is writable without sudo on any machine, which is the
+# only property the fallback ever needed.
 if [ -z "${MODELS_DIR:-}" ]; then
     if [ -w /opt/minimax/models ]; then
         export MODELS_DIR="/opt/minimax/models"
     else
-        export MODELS_DIR="/var/tmp/minimax/models"
+        export MODELS_DIR="$HOME/minimax/models"
         echo "[config] /opt/minimax/models not writable; using $MODELS_DIR" >&2
+    fi
+fi
+
+# --- Custom nodes directory ---
+# Bind-mounted read-write over /comfy/ComfyUI/custom_nodes. Sits next to the
+# models dir by the same logic, so one `minimax/` tree holds everything the
+# container needs from the host.
+if [ -z "${CUSTOM_NODES_DIR:-}" ]; then
+    if [ -w /opt/minimax/custom_nodes ]; then
+        export CUSTOM_NODES_DIR="/opt/minimax/custom_nodes"
+    else
+        export CUSTOM_NODES_DIR="$HOME/minimax/custom_nodes"
     fi
 fi
 
