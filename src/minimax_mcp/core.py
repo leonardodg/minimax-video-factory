@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
 WORKFLOW_PATH = Path(os.environ.get("WORKFLOW_PATH", PROJECT_ROOT / "workflows" / "minimax_h3_t2v_api.json"))
+# Same graph with the MiniMax-H3 Turbo LoRA spliced in (node 15) and the stock
+# KSamplerSelect swapped for MiniMaxH3TurboSampler. Node ids 1..14 are unchanged,
+# so inject_scene patches both workflows with the same code.
+TURBO_WORKFLOW_PATH = Path(os.environ.get(
+    "TURBO_WORKFLOW_PATH", PROJECT_ROOT / "workflows" / "minimax_h3_t2v_turbo_api.json"))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", PROJECT_ROOT / "output"))
 OUTPUT_HOST_DIR = os.environ.get("OUTPUT_HOST_DIR") or str(OUTPUT_DIR)
 OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "video/factory")
@@ -33,8 +38,14 @@ SAVE_NODE_CLASS = "SaveVideo"
 # it can never collide as the workflow grows.
 LOAD_IMAGE_NODE_ID = "90"
 SCHEDULER_NODE_ID = "9"          # BasicScheduler
+TURBO_LORA_NODE_ID = "15"        # MiniMaxH3TurboLoRA, turbo workflow only
 DEFAULT_STEPS = 20               # what the workflow ships with, and what every
                                  # render used until steps became tunable
+# The turbo LoRA is distilled for 4-8 steps; its author measures 6-8 as
+# noticeably better than 4 and no gain above 8. Time is linear in steps here
+# (30 steps cost 1.51x of 20, i.e. fixed overhead is ~nil), so 6 steps is
+# ~3.3x faster than the 20-step path.
+DEFAULT_TURBO_STEPS = 6
 
 DIFFUSION_MODEL = os.environ.get("MODEL_DIFFUSION", "minimax_h3_fl2va_pruned_int4_convrot.safetensors")
 TEXT_ENCODER = os.environ.get("MODEL_TEXT_ENCODER", "qwen3vl_32b_minimax_h3_int4_convrot.safetensors")
@@ -43,10 +54,11 @@ AUDIO_VAE = os.environ.get("MODEL_AUDIO_VAE", "minimax_h3_audio_vae_fp32.safeten
 
 
 # ---------------- helpers ----------------
-def load_workflow() -> dict[str, Any]:
-    if not WORKFLOW_PATH.exists():
-        raise FileNotFoundError(f"workflow not found: {WORKFLOW_PATH} (run scripts/ui2api.py first)")
-    with open(WORKFLOW_PATH) as f:
+def load_workflow(turbo: bool = False) -> dict[str, Any]:
+    path = TURBO_WORKFLOW_PATH if turbo else WORKFLOW_PATH
+    if not path.exists():
+        raise FileNotFoundError(f"workflow not found: {path} (run scripts/ui2api.py first)")
+    with open(path) as f:
         return json.load(f)
 
 
@@ -58,7 +70,10 @@ def duration_to_frames(duration: float, fps: int = 24) -> int:
 def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
                  width: int, height: int, seed: int, filename_prefix: str,
                  first_frame: str | None = None,
-                 steps: int | None = None) -> dict[str, Any]:
+                 steps: int | None = None,
+                 turbo_lora: str | None = None,
+                 turbo_strength: float | None = None,
+                 turbo_low_vram: bool | None = None) -> dict[str, Any]:
     """Patch the API workflow for one scene.
 
     `first_frame` is the name of an image already present in ComfyUI's input
@@ -109,6 +124,17 @@ def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
                 "adjust SCHEDULER_NODE_ID"
             )
         sched["inputs"]["steps"] = steps
+
+    # Turbo workflow only: node 15 is the LoRA. Silently ignored on the stock
+    # workflow, which has no node 15 -- so callers may always pass these.
+    lora_node = wf.get(TURBO_LORA_NODE_ID)
+    if lora_node is not None and lora_node.get("class_type") == "MiniMaxH3TurboLoRA":
+        if turbo_lora is not None:
+            lora_node["inputs"]["lora_name"] = turbo_lora
+        if turbo_strength is not None:
+            lora_node["inputs"]["strength"] = turbo_strength
+        if turbo_low_vram is not None:
+            lora_node["inputs"]["low_vram"] = turbo_low_vram
 
     noise = wf.get(NOISE_NODE_ID)
     if noise is not None and "noise_seed" in noise.get("inputs", {}):
@@ -190,6 +216,10 @@ def submit_scene_core(
     filename_prefix: str = "video/factory",
     first_frame: str | None = None,
     steps: int | None = None,
+    turbo: bool = False,
+    turbo_lora: str | None = None,
+    turbo_strength: float | None = None,
+    turbo_low_vram: bool | None = None,
 ) -> dict[str, Any]:
     if seed is None:
         seed = random.randint(0, 2**31 - 1)
@@ -204,18 +234,24 @@ def submit_scene_core(
         except Exception as e:
             return {"ok": False, "stage": "upload", "error": str(e)}
 
-    workflow = load_workflow()
+    try:
+        workflow = load_workflow(turbo=turbo)
+    except FileNotFoundError as e:
+        return {"ok": False, "stage": "workflow", "error": str(e)}
     wf = inject_scene(workflow, prompt=prompt, duration=duration,
                       width=width, height=height, seed=seed,
                       filename_prefix=filename_prefix, first_frame=uploaded,
-                      steps=steps)
+                      steps=steps, turbo_lora=turbo_lora,
+                      turbo_strength=turbo_strength,
+                      turbo_low_vram=turbo_low_vram)
     try:
         prompt_id = client.submit(wf)
     except ComfyUIError as e:
         return {"ok": False, "error": str(e)}
+    effective_steps = steps or (DEFAULT_TURBO_STEPS if turbo else DEFAULT_STEPS)
     return {"ok": True, "prompt_id": prompt_id, "seed": seed,
             "duration": duration, "width": width, "height": height,
-            "first_frame": uploaded, "steps": steps or DEFAULT_STEPS}
+            "first_frame": uploaded, "steps": effective_steps, "turbo": turbo}
 
 
 async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[str, Any]:

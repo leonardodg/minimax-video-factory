@@ -1,6 +1,6 @@
 ---
 description: Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
-argument-hint: <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=900.0]
+argument-hint: <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [turbo=False] [turbo_lora] [turbo_strength] [turbo_low_vram] [wait_seconds=900.0]
 ---
 
 <!-- GERADO AUTOMATICAMENTE por scripts/generate_commands.py -->
@@ -20,7 +20,11 @@ Instruções obrigatórias:
    - `seed`: semente aleatória (inteiro); omita para aleatório (default `None`).
    - `filename_prefix`: prefixo do arquivo de saída (default `studio/`).
    - `first_frame`: Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) (default `None`).
-   - `steps`: Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo (default `None`).
+   - `steps`: Passos do sampler (default 20, ou 6 com turbo=True). Medido: 30 e 40 não melhoram e custam 8x o tempo (default `None`).
+   - `turbo`: Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/ (default `False`).
+   - `turbo_lora`: Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True (default `None`).
+   - `turbo_strength`: Força da Turbo LoRA (default 1.0; o autor recomenda não mexer). Só vale com turbo=True (default `None`).
+   - `turbo_low_vram`: True funde a LoRA nos pesos (menor pico de VRAM, imagem mais macia num modelo quantizado); False aplica em tempo de execução (mais nítida, mais VRAM). Default True (default `None`).
    - `wait_seconds`: Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente (default `900.0`).
 2. Chame `mcp__minimax-video-factory__generate_video` com esses parâmetros. Se o servidor `minimax-video-factory` não estiver conectado, use `mcp__minimax-video-factory-remote__generate_video` ou `mcp__minimax-video-factory-uv__generate_video`.
 3. Se `prompt` vier em PT, traduza para uma descrição visual EN rica antes de chamar a tool.

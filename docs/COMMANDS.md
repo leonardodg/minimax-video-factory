@@ -98,7 +98,7 @@ Mostra a fila de renderização com barra de progresso.
 Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP.
 
 ```
-/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [wait_seconds=900.0]
+/minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [turbo=False] [turbo_lora] [turbo_strength] [turbo_low_vram] [wait_seconds=900.0]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -110,7 +110,11 @@ Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `studio/` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
-| `steps` | não | `None` | Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo |
+| `steps` | não | `None` | Passos do sampler (default 20, ou 6 com turbo=True). Medido: 30 e 40 não melhoram e custam 8x o tempo |
+| `turbo` | não | `False` | Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/ |
+| `turbo_lora` | não | `None` | Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True |
+| `turbo_strength` | não | `None` | Força da Turbo LoRA (default 1.0; o autor recomenda não mexer). Só vale com turbo=True |
+| `turbo_low_vram` | não | `None` | True funde a LoRA nos pesos (menor pico de VRAM, imagem mais macia num modelo quantizado); False aplica em tempo de execução (mais nítida, mais VRAM). Default True |
 | `wait_seconds` | não | `900.0` | Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente |
 
 **Notas operacionais:**
@@ -200,7 +204,7 @@ Pipeline completo: URL → download → transcrição → prompt → vídeo.
 Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 
 ```
-/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [steps]
+/minimax-submit-scene <prompt> [duration=5.0] [width=1024] [height=576] [seed] [filename_prefix=OUTPUT_PREFIX] [first_frame] [steps] [turbo=False] [turbo_lora] [turbo_strength] [turbo_low_vram]
 ```
 
 | Parâmetro | Obrigatório | Default | Descrição |
@@ -212,7 +216,11 @@ Enfileira uma cena no ComfyUI e devolve o prompt_id, sem esperar o render.
 | `seed` | não | `None` | semente aleatória (inteiro); omita para aleatório |
 | `filename_prefix` | não | `OUTPUT_PREFIX` | prefixo do arquivo de saída |
 | `first_frame` | não | `None` | Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) |
-| `steps` | não | `None` | Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente |
+| `steps` | não | `None` | Passos do sampler (default 20, ou 6 com turbo=True). Mais passos = mais detalhe e mais tempo, proporcionalmente |
+| `turbo` | não | `False` | Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/ |
+| `turbo_lora` | não | `None` | Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True |
+| `turbo_strength` | não | `None` | Força da Turbo LoRA (default 1.0; o autor recomenda não mexer). Só vale com turbo=True |
+| `turbo_low_vram` | não | `None` | True funde a LoRA nos pesos (menor pico de VRAM, imagem mais macia num modelo quantizado); False aplica em tempo de execução (mais nítida, mais VRAM). Default True |
 
 **Notas operacionais:**
 

@@ -24,6 +24,15 @@ services:
     volumes:
       # host models dir (set MODELS_DIR in .env) -> container models dir (read-only)
       - ${MODELS_DIR:-/opt/minimax/models}:/comfy/ComfyUI/models:ro
+      # host custom_nodes dir -> container custom_nodes (READ-WRITE, on purpose).
+      # Without this mount custom_nodes lives inside the image, so every
+      # `docker compose build` silently wipes every installed node. Writable
+      # because several packs write next to themselves at runtime (Impact-Pack
+      # config, KJNodes/Frame-Interpolation model downloads).
+      # Seed the host dir from the image before mounting, or the two stock files
+      # ComfyUI ships (websocket_image_save.py, example_node.py.example) vanish:
+      #   docker cp minimax-comfyui:/comfy/ComfyUI/custom_nodes/. ${CUSTOM_NODES_DIR}/
+      - ${CUSTOM_NODES_DIR:-/opt/minimax/custom_nodes}:/comfy/ComfyUI/custom_nodes
       # host output dir (gitignored) -> container output dir
       - ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}:/comfy/ComfyUI/output
       # host input dir (optional; for I2V/R2V reference media)
