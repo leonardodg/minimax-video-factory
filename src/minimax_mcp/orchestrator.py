@@ -91,6 +91,10 @@ class AudiovisualStudio:
         last_frame: str | None = None,
         filename_prefix: str = "studio/",
         steps: int | None = None,
+        turbo: bool = False,
+        turbo_lora: str | None = None,
+        turbo_strength: float | None = None,
+        turbo_low_vram: bool | None = None,
         # 900, not the 240 first guessed: a 512x320 clip measured 270-278s
         # here, so 240 expired before every render finished and studio_pipeline
         # failed on a limit of our own making.
@@ -120,6 +124,10 @@ class AudiovisualStudio:
                 first_frame=first_frame,
                 last_frame=last_frame,
                 steps=steps,
+                turbo=turbo,
+                turbo_lora=turbo_lora,
+                turbo_strength=turbo_strength,
+                turbo_low_vram=turbo_low_vram,
             )
             if not result.get("ok"):
                 return {"ok": False, "error": result.get("error", "Submit failed")}

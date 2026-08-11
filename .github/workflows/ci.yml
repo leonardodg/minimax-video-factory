@@ -140,10 +140,9 @@ jobs:
       # Host-side path resolution in tests 05/07 must therefore point at the same
       # host dirs, or the MCP's host<->container path mapping produces paths the
       # host tests cannot find.
-      # PROJECT_ROOT, OUTPUT_DIR and OUTPUT_HOST_DIR are NOT set here. They are
-      # resolved at runtime from the container's bind mount, in the "Resolve
-      # host output dir" step below -- see the comment there for why.
-      MODELS_DIR: /var/tmp/minimax/models
+      # PROJECT_ROOT, OUTPUT_DIR, OUTPUT_HOST_DIR and MODELS_DIR are NOT set here.
+      # They are resolved at runtime from the container's bind mounts, in the
+      # "Resolve host dirs" step below -- see the comment there for why.
       COMFYUI_URL: http://127.0.0.1:8188
       # The runner's GPU is somebody's desk machine. The render tests wait for
       # the queue to drain rather than pushing a person's job behind CI's, and
@@ -181,22 +180,34 @@ jobs:
       # Deriving it has two properties a hardcoded path or a repo variable do
       # not: it cannot drift from what docker is really doing, and it keeps
       # this public file free of anyone's home directory.
-      - name: Resolve host output dir from the container's bind mount
+      - name: Resolve host dirs from the container's bind mounts
         run: |
           set -euo pipefail
-          out=$(docker inspect minimax-comfyui \
-            --format '{{range .Mounts}}{{if eq .Destination "/comfy/ComfyUI/output"}}{{.Source}}{{end}}{{end}}')
+          mount_src() {
+            docker inspect minimax-comfyui \
+              --format "{{range .Mounts}}{{if eq .Destination \"$1\"}}{{.Source}}{{end}}{{end}}"
+          }
+          out=$(mount_src /comfy/ComfyUI/output)
           if [ -z "$out" ]; then
             echo "::error::minimax-comfyui has no bind mount on /comfy/ComfyUI/output"
             exit 1
           fi
-          # Written to GITHUB_ENV, not echoed: the path contains a home directory.
+          # MODELS_DIR used to be hardcoded in this job's env: block. It broke the
+          # moment the weights moved off /var/tmp. Asking the container where its
+          # models actually come from cannot go stale.
+          models=$(mount_src /comfy/ComfyUI/models)
+          if [ -z "$models" ]; then
+            echo "::error::minimax-comfyui has no bind mount on /comfy/ComfyUI/models"
+            exit 1
+          fi
+          # Written to GITHUB_ENV, not echoed: the paths contain a home directory.
           {
             echo "OUTPUT_DIR=$out"
             echo "OUTPUT_HOST_DIR=$out"
             echo "PROJECT_ROOT=$(dirname "$out")"
+            echo "MODELS_DIR=$models"
           } >> "$GITHUB_ENV"
-          echo "✅ resolved output dir from the container bind mount"
+          echo "✅ resolved output + models dirs from the container bind mounts"
 
       - name: Run full diagnose.sh (00–07)
         run: |

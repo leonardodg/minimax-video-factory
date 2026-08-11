@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/demo_aurora.sh — render the "Aurora" example script through the MCP server
 # (same flow an OpenCode agent runs: health_check -> submit_scene x2 -> wait -> compose_final).
-# Usage: MODELS_DIR=/var/tmp/minimax/models ./scripts/demo_aurora.sh   (log to demo_aurora.log)
+# Usage: MODELS_DIR=$HOME/minimax/models ./scripts/demo_aurora.sh   (log to demo_aurora.log)
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -f "$ROOT/scripts/config.sh" ]; then
@@ -41,7 +41,7 @@ SCENES = [
 
 async def main() -> int:
     env = dict(os.environ)
-    env.setdefault("MODELS_DIR", "/var/tmp/minimax/models")
+    env.setdefault("MODELS_DIR", os.path.expanduser("~/minimax/models"))
     t = StdioTransport(command="uv",
                        args=["run", "--project", root, "python", "src/minimax_mcp/server.py"],
                        cwd=root, env=env)

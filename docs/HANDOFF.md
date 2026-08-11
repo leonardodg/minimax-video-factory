@@ -480,6 +480,11 @@ F1 a 30 steps: **1341 s** contra 886 s a 20 = **1,514×** para 1,5× de steps.
 Custo integral. Com INT4 não houve ganho de qualidade; com INT8 ninguém avaliou
 a diferença ainda.
 
+⚠️ **Essa proporcionalidade é a razão de a Turbo LoRA valer tanto.** 1,514× para
+1,5× de steps significa que o termo fixo (carregar modelo, encodar texto, decodar
+VAE) é ~zero no total: **o tempo é o sampler.** Cortar de 20 para 6 steps corta o
+render na mesma proporção. Ver a seção da Turbo LoRA abaixo.
+
 ### O teto de resolução subiu 39% com o INT8
 
 Era 1024×576, medido com INT4 (11 GB). O INT8 (21 GB, com `--lowvram` fazendo
@@ -494,6 +499,133 @@ na avaliação do usuário. `B2_crowd` e `B3_glass` também renderizaram.
 ### 512×320 é 3,3× mais barato
 
 279 s contra 886 s. E foi o **único** que entregou 15 s num render só.
+
+---
+
+## 🆕 2026-08-11: Turbo LoRA + os custom nodes (instalado, **ainda não validado**)
+
+**O que mudou no repo** (branch `worktree-turbo-lora`):
+
+| | |
+|---|---|
+| `workflows/minimax_h3_t2v_turbo_api.json` | o mesmo grafo, com `MiniMaxH3TurboLoRA` no nó **15** e `MiniMaxH3TurboSampler` no lugar do `KSamplerSelect`. Ids 1–14 idênticos, então `inject_scene` serve aos dois sem `if` |
+| `submit_scene` / `generate_video` | ganharam `turbo`, `turbo_lora`, `turbo_strength`, `turbo_low_vram`. `turbo=False` é o default: **nada muda** para quem não pedir |
+| `docker/docker-compose.yml` | `custom_nodes` virou bind-mount rw a partir de `CUSTOM_NODES_DIR` |
+| `scripts/install_custom_nodes.sh` | clona/atualiza os 8 pacotes e instala as deps no python do ComfyUI |
+
+### ⚠️ O que ainda NÃO foi feito — e por quê
+
+O container **não foi recriado** e as dependências dos pacotes **não foram
+instaladas**. `.claude/settings.local.json` nega `Bash(docker exec:*)` e
+`Bash(docker compose:*)`, então a sessão preparou tudo no host e parou aí. Nenhum
+render turbo rodou: **os 3,3× são aritmética, não medição.**
+
+Para destravar, no host:
+
+```bash
+scripts/install_custom_nodes.sh                 # deps dentro do container
+docker compose -f docker/docker-compose.yml --project-directory . up -d
+```
+
+### custom_nodes vivia dentro da imagem
+
+Não era volume. Todo `docker compose build` apagava, **em silêncio**, qualquer nó
+instalado — e como o build refaz o download do torch/cu128, ninguém refazia o
+build por acidente, então o problema nunca apareceu. Agora é bind-mount.
+
+⚠️ **Semear antes de montar.** O ComfyUI traz `websocket_image_save.py` dentro de
+`custom_nodes`; montar um diretório vazio por cima o esconde. O script faz
+`docker cp` do conteúdo da imagem na primeira execução.
+
+### Os 8 pacotes, e o que cada um entrega ao all-in-one
+
+O "ALL-IN-ONE WF" da AcademiaSD **não é um custom node** — o `v24` usa 45 tipos de
+nó, dos quais **24 faltavam** aqui. Medido comparando o JSON contra `/object_info`:
+
+| pacote | o que o workflow usa dele |
+|---|---|
+| `ComfyUI-MiniMax-H3-Turbo` (Larryvrh) | `MiniMaxH3TurboLoRA`, `MiniMaxH3TurboSampler` — **o único indispensável** |
+| `comfyui_AcademiaSD` | `AcademiaSD_*` (Downloader, MultiLora, ResolutionCalc, Numeric, Noise, PositivePrompt, SaveAndSend, TimeCalculator) e os próprios workflows |
+| `rgthree-comfy` | `Fast Groups Bypasser` (×11), `Image Comparer` |
+| `ComfyUI-Impact-Pack` | `ImpactSwitch` (×4) — o seletor T2V/I2V/Ref2V |
+| `ComfyUI-VideoHelperSuite` | `VHS_VideoCombine`, `VHS_LoadVideo`, `VHS_LoadAudioUpload` |
+| `ComfyUI-Frame-Interpolation` | `RIFE VFI` (24 → 48 fps) |
+| `ComfyUI-KJNodes` | `ModelPreviewOverrideKJ` (preview por TAE) e os **dois** nós de Sage Attention |
+| `ComfyUI-Easy-Use` | `easy cleanGpuUsed`, `clearCacheAll`, `showAnything` |
+
+### O nó do Larryvrh foi escrito para a base que este repo usa
+
+Não é sorte, está no fonte (`__init__.py`, 526 linhas, legível — o `node.zip` do
+repo é só cópia empacotada):
+
+- **`use_adaln_curves`**: na base *pruned* o update de adaln vive no espaço
+  `silu(t_emb)` de 2688 dim, que o pruned colapsou numa curva de 8. Não dá para
+  ser patch de peso nem adaptador de bypass, então o nó **reinjeta em tempo de
+  execução** a partir de um grid interpolado (`h3_silu_temb_grid.safetensors`).
+- **`TensorWiseINT8Layout`**: no `int8_convrot` o `comfy.ops.linear_input_act`
+  chama o kernel int8 fundido **direto no peso**, sem passar pelo `forward` do
+  módulo — então o hook de bypass nunca dispara e a LoRA daquele `fc2` sumiria
+  em silêncio. O autor mediu: *"nos 50 blocos do DiT os hooks de fc2 disparam 0
+  vezes"*. O nó desvia justamente esses para o caminho de merge.
+
+**`low_vram`** é a alavanca: `True` funde a LoRA nos pesos (menor pico de VRAM,
+mas num modelo quantizado parte do delta é arredondada fora → mais macio);
+`False` aplica em tempo de execução (mais nítido, mais VRAM). O workflow turbo
+deste repo sai com **`True`**, escolha conservadora para 12 GB — **não medida**.
+
+### ⚠️ Tudo saiu de `/var/tmp/minimax/` para `$HOME/minimax/` (2026-08-11)
+
+`/var/tmp` é diretório **temporário** por contrato — o `systemd-tmpfiles` tem o
+direito de limpá-lo, e 73 GB de pesos não são temporários. Pior: estava fora do
+exclude do Timeshift, inchando todo snapshot. `$HOME/minimax/` é gravável sem
+sudo e está coberto pelo exclude.
+
+```
+$HOME/minimax/
+├── models/          73 GB   ← MODELS_DIR
+│   ├── text_encoders/    36 GB
+│   ├── diffusion_models/ 31 GB
+│   ├── vae/             5,5 GB
+│   ├── loras/           1,5 GB   ← novo
+│   └── vae_approx/      9,4 MB   ← novo
+└── custom_nodes/   120 MB   ← CUSTOM_NODES_DIR (8 pacotes + os 2 do ComfyUI)
+```
+
+O caminho antigo estava **hardcoded em 12 lugares** (`config.sh`, `server.py`,
+`ci.yml`, `setup_whisper.sh`, `demo_aurora.sh`, `07_e2e_agent.sh`, README, AGENTS,
+3 docs). Todos passaram a `$HOME/minimax/...`, e o `ci.yml` deixou de fixar
+`MODELS_DIR`: agora **pergunta ao container** de onde vem o bind mount de
+`/comfy/ComfyUI/models`, do mesmo jeito que já fazia com o output. Isso não
+envelhece na próxima mudança de caminho.
+
+⚠️ **`CUSTOM_NODES_DIR` no `.env` não é opcional.** Se faltar, o compose monta o
+default `/opt/minimax/custom_nodes` — vazio — por cima de `/comfy/ComfyUI/custom_nodes`,
+e **todos** os nós somem de uma vez, sem erro visível.
+
+### Modelos baixados (2026-08-11)
+
+```
+models/loras/minimax_h3_turbo_v4_step600_ema.safetensors      780 MB  ✅ o recomendado
+models/loras/minimax_h3_turbo_4step_ema_ckpt850.safetensors   780 MB  ✅ alternativa p/ 4 steps
+models/vae_approx/taeh3.safetensors                            10 MB  ✅ preview
+models/text_encoders/qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors
+                                                             26,4 GB  ⏳ baixando ainda no
+                                                                      caminho ANTIGO (o curl
+                                                                      já estava aberto); mover
+                                                                      ao terminar
+```
+
+### Duas coisas que o workflow da AcademiaSD revelou
+
+1. **Ele carrega `minimax_h3_ref2va_pruned_int8_convrot`**, não a `fl2va` daqui.
+   `ref2va` é *Reference*-to-Video: consistência de personagem a partir de imagem
+   de referência. São **21 GB** e **não foi baixada** — o encadeamento de frame
+   deste repo depende de `last_frame`, que é FL2VA. Decisão em aberto, não
+   pendência.
+2. **`PathchSageAttentionKJ` já vem em BYPASS**, mas
+   `MiniMaxH3MemoryEfficientSageAttentionPatch` vem **ativo** — e exige o pacote
+   `sageattention`, que não está instalado. Ou instalar, ou desligar esse nó
+   (Ctrl+B) antes de rodar o workflow.
 
 ---
 

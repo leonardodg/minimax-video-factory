@@ -66,7 +66,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COMFYUI_URL = os.environ.get("COMFYUI_URL", "http://127.0.0.1:8188")
 WORKFLOW_PATH = Path(os.environ.get("WORKFLOW_PATH", PROJECT_ROOT / "workflows" / "minimax_h3_t2v_api.json"))
 MODELS_DIR = Path(os.environ.get("MODELS_DIR") or
-                  ("/opt/minimax/models" if os.path.isdir("/opt/minimax/models") else "/var/tmp/minimax/models"))
+                  ("/opt/minimax/models" if os.path.isdir("/opt/minimax/models")
+                   else str(Path.home() / "minimax" / "models")))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", PROJECT_ROOT / "output"))
 OUTPUT_HOST_DIR = os.environ.get("OUTPUT_HOST_DIR") or str(OUTPUT_DIR)
 OUTPUT_PREFIX = os.environ.get("OUTPUT_PREFIX", "video/factory")
@@ -181,7 +182,11 @@ def submit_scene(
     filename_prefix: str = Field(default=OUTPUT_PREFIX, description="Output filename prefix (default from OUTPUT_PREFIX env)"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
     last_frame: str | None = Field(default=None, description="Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só"),
-    steps: int | None = Field(default=None, description="Passos do sampler (default 20). Mais passos = mais detalhe e mais tempo, proporcionalmente"),
+    steps: int | None = Field(default=None, description="Passos do sampler (default 20, ou 6 com turbo=True). Mais passos = mais detalhe e mais tempo, proporcionalmente"),
+    turbo: bool = Field(default=False, description="Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/"),
+    turbo_lora: str | None = Field(default=None, description="Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True"),
+    turbo_strength: float | None = Field(default=None, description="Força da Turbo LoRA (default 1.0; o autor recomenda não mexer). Só vale com turbo=True"),
+    turbo_low_vram: bool | None = Field(default=None, description="True funde a LoRA nos pesos (menor pico de VRAM, imagem mais macia num modelo quantizado); False aplica em tempo de execução (mais nítida, mais VRAM). Default True"),
 ) -> dict[str, Any]:
     """Inject a scene prompt into the API workflow and submit it to ComfyUI.
 
@@ -190,7 +195,8 @@ def submit_scene(
     return submit_scene_core(
         prompt=prompt, duration=duration, width=width, height=height,
         seed=seed, filename_prefix=filename_prefix, first_frame=first_frame,
-        last_frame=last_frame, steps=steps,
+        last_frame=last_frame, steps=steps, turbo=turbo, turbo_lora=turbo_lora,
+        turbo_strength=turbo_strength, turbo_low_vram=turbo_low_vram,
     )
 
 
@@ -359,7 +365,11 @@ def generate_video(
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
     last_frame: str | None = Field(default=None, description="Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só"),
-    steps: int | None = Field(default=None, description="Passos do sampler (default 20). Medido: 30 e 40 não melhoram e custam 8x o tempo"),
+    steps: int | None = Field(default=None, description="Passos do sampler (default 20, ou 6 com turbo=True). Medido: 30 e 40 não melhoram e custam 8x o tempo"),
+    turbo: bool = Field(default=False, description="Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/"),
+    turbo_lora: str | None = Field(default=None, description="Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True"),
+    turbo_strength: float | None = Field(default=None, description="Força da Turbo LoRA (default 1.0; o autor recomenda não mexer). Só vale com turbo=True"),
+    turbo_low_vram: bool | None = Field(default=None, description="True funde a LoRA nos pesos (menor pico de VRAM, imagem mais macia num modelo quantizado); False aplica em tempo de execução (mais nítida, mais VRAM). Default True"),
     wait_seconds: float = Field(default=900.0, description="Quanto esperar antes de devolver só o prompt_id. Medido: 512x320 leva ~4.5min, 1024x576 ~3min com modelo quente"),
 ) -> dict[str, Any]:
     """Generate a video using the MiniMax H3 model via ComfyUI.
@@ -372,7 +382,9 @@ def generate_video(
         prompt=prompt, duration=duration, width=width, height=height, seed=seed,
         first_frame=first_frame, last_frame=last_frame,
         filename_prefix=filename_prefix,
-        steps=steps, wait_seconds=wait_seconds,
+        steps=steps, turbo=turbo, turbo_lora=turbo_lora,
+        turbo_strength=turbo_strength, turbo_low_vram=turbo_low_vram,
+        wait_seconds=wait_seconds,
     )
 
 

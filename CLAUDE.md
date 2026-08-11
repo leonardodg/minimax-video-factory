@@ -49,7 +49,8 @@ ComfyUI + MiniMax H3 (FL2VA, INT8) exposto por um servidor MCP.
 | 213 M | 1024×576 · 15 s | ❌ OOM (três vezes) |
 
 **Tempo: 12 s por megapixel-frame** (medido entre 12,0 e 13,0 em 6 resoluções),
-linear, sem termo quadrático.
+linear, sem termo quadrático — **a 20 steps**. Com a Turbo LoRA a 6 steps, divida
+por ~3,3 (ver abaixo; ainda não medido nesta máquina).
 
 ### A faixa treinada acaba em 362 frames (15,08 s), e isso é um limite à parte
 
@@ -64,7 +65,35 @@ modelo **renderiza** — e degrada de dois jeitos independentes, medidos em
 
 **Não é uma questão de VRAM.** Passar de 362 frames é fora de especificação.
 Para durar mais, é composição.
-**Steps não são alavanca** — 30 steps custam 1,51× e não melhoram nada. 20 basta.
+**Steps não são alavanca de qualidade** — 30 steps custam 1,51× e não melhoram
+nada. 20 basta. Mas são a alavanca de **tempo**: 1,51× para 1,5× de steps quer
+dizer que o termo fixo é ~zero e o render **é** o sampler.
+
+### A Turbo LoRA: 6 steps no lugar de 20
+
+Instalada em 2026-08-11, **ainda não validada com render** (o container não foi
+recriado — ver [`docs/HANDOFF.md`](docs/HANDOFF.md)).
+
+```
+submit_scene(prompt=..., turbo=True)     # 6 steps, workflow minimax_h3_t2v_turbo_api.json
+submit_scene(prompt=...)                 # 20 steps, o caminho de sempre — default inalterado
+```
+
+Três coisas que não são óbvias:
+
+- **Faixa útil é 4–8 steps.** 6–8 é visivelmente melhor que 4; acima de 8 não
+  ganha nada. `strength` fica em 1,0.
+- **`turbo_low_vram=True` (o default aqui) funde a LoRA nos pesos.** Pico de VRAM
+  menor, mas num modelo quantizado parte do delta é arredondada fora — imagem
+  mais macia. `False` aplica em tempo de execução: mais nítido, mais VRAM.
+- **O nó trata `pruned_int8_convrot` como caso especial.** Sem esse tratamento a
+  LoRA sumiria em silêncio nos `fc2` (o kernel int8 fundido não passa pelo
+  `forward` do módulo, então o hook de bypass nunca dispara).
+
+⚠️ **Nenhuma medida de qualidade foi feita.** O ganho de tempo é aritmético; se a
+6 steps o desenho degrada ou a fala perde sincronia, ninguém verificou ainda. O
+teste que decide é o de sempre: renderizar a mesma cena nas duas vias, mesma
+seed, e **assistir**.
 
 ## O que decide a qualidade de um clipe
 
@@ -192,6 +221,13 @@ retomáveis, relançar não re-renderiza o que já está no disco.
 **VRAM presa sem ninguém usando:** o ComfyUI mantém os modelos residentes depois de um
 render (~11 GB a 0% de uso). Com a fila vazia:
 `curl -X POST localhost:8188/free -d '{"unload_models":true,"free_memory":true}'`.
+
+**Custom node novo:** clonar em `$CUSTOM_NODES_DIR` (host, bind-mount rw sobre
+`/comfy/ComfyUI/custom_nodes`), instalar as deps no **python do ComfyUI**
+(`/opt/conda/bin/python`, *não* o `/opt/mcp-venv` do servidor MCP — errar aqui
+deixa o nó importável e quebrado), e recriar o container.
+`scripts/install_custom_nodes.sh` faz os três. Antes do bind-mount, `custom_nodes`
+vivia dentro da imagem e todo `build` apagava tudo sem avisar.
 
 **Tool MCP nova custa 4 lugares:** `catalog.COMMAND_NAMES`, a lista canônica de
 `unit_registry`, a tabela do `README.md`, e rodar `scripts/generate_commands.py`

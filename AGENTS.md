@@ -95,11 +95,17 @@ minimax-video-factory/
 ## 3. Models directory
 
 - **Preferred:** `/opt/minimax/models` (documented). Needs `sudo mkdir -p` + `sudo chown`.
-- **Fallback (no interactive sudo):** `/var/tmp/minimax/models` — writable, on `/`,
-  survives reboots. `config.sh` and `server.py` auto-detect this.
+- **Fallback (no interactive sudo):** `$HOME/minimax/models` — writable without
+  sudo, survives reboots, and is inside the tree snapshot tools normally exclude.
+  `config.sh` and `server.py` auto-detect this. It was `/var/tmp/minimax/models`
+  until 2026-08-11; `/var/tmp` is a *temporary* directory by contract, and 73 GB
+  of weights there was inflating every Timeshift snapshot.
+- **Custom nodes** live beside it: `$HOME/minimax/custom_nodes`, `CUSTOM_NODES_DIR`.
 
 Models go under `{MODELS_DIR}/{diffusion_models,text_encoders,vae}` with the four
-filenames from §1. Verify with `./scripts/diagnose.sh 03` (checks exact byte sizes,
+filenames from §1, plus `loras/` (Turbo LoRA) and `vae_approx/` (`taeh3.safetensors`,
+the TAE preview) since 2026-08-11.
+Verify with `./scripts/diagnose.sh 03` (checks exact byte sizes,
 ±2% tolerance). Expected sizes (bytes): diffusion `11337536776`, text encoder
 `14952506624`, video VAE `5207808496`, audio VAE `605254808`. **Gotcha:** on the HF
 repo the two VAEs live in a `vae/` subfolder, so their resolve URLs must be

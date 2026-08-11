@@ -50,7 +50,7 @@ sudo ./svc.sh status
 - Docker + docker compose plugin
 - nvidia-container-toolkit (`sudo apt install nvidia-container-toolkit && sudo systemctl restart docker`)
 - GPU NVIDIA (RTX 4080 12GB) — verificado com `nvidia-smi`
-- Modelos em `/var/tmp/minimax/models` (ou `/opt/minimax/models`) — ~32GB
+- Modelos em `$HOME/minimax/models` (ou `/opt/minimax/models`) — ~32GB
 - Container `minimax-comfyui` rodando (o job GPU espera que ele exista; se não, roda `start_comfyui.sh`)
 
 ## 6. Testar job GPU local
