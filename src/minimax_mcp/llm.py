@@ -320,18 +320,51 @@ def generate_structured(
         transcription, is_image=is_image, categories=categories
     )
     try:
-        if provider == "ollama":
-            raw = _ollama_generate(prompt, model, force_json=True)
-        elif provider == "openai-compatible":
-            raw = _openai_compatible_generate(prompt, model, force_json=True)
-        else:
-            return {"ok": False, "error": f"Unknown LLM_PROVIDER: {provider}"}
+        raw = ""
+        parsed: dict[str, Any] | None = None
+        # DUAS tentativas. O modelo é estocástico e falha de duas formas raras
+        # (~1-2% cada, medidas em 2026-08-10): JSON malformado
+        # ("Expecting ',' delimiter") e JSON válido faltando chave. Nas duas, o
+        # documento inteiro se perdia -- transcrição, leitura de tela e minutos
+        # de GPU já pagos -- por causa de um sorteio ruim. Repetir custa uma
+        # geração e resolve o que é ruído.
+        for tentativa in (1, 2):
+            if provider == "ollama":
+                raw = _ollama_generate(prompt, model, force_json=True)
+            elif provider == "openai-compatible":
+                raw = _openai_compatible_generate(prompt, model, force_json=True)
+            else:
+                return {"ok": False, "error": f"Unknown LLM_PROVIDER: {provider}"}
+            try:
+                parsed = parse_llm_json(raw)
+                break
+            except Exception as exc:
+                logger.warning(
+                    "tentativa %d: JSON inválido (%s). Resposta bruta: %.400r",
+                    tentativa, exc, raw,
+                )
+                if tentativa == 2:
+                    return {"ok": False, "error": f"LLM devolveu JSON inválido: {exc}", "raw": raw}
 
-        parsed = parse_llm_json(raw)
-        required = {"resumo", "tutorial", "objetivos", "tags"}
-        missing = required - parsed.keys()
-        if missing:
-            return {"ok": False, "error": f"LLM response missing keys: {missing}", "raw": raw}
+        assert parsed is not None
+        # `resumo` é o único campo sem o qual não existe documento. `tutorial`,
+        # `objetivos` e `tags` são enriquecimento: um documento sem tags é muito
+        # melhor que documento nenhum, e exigir os quatro fazia o post ser
+        # descartado quando o modelo simplesmente omitia as DUAS ÚLTIMAS chaves
+        # do formato -- que foi exatamente o erro observado
+        # ("missing keys: {'tags', 'objetivos'}").
+        if not str(parsed.get("resumo") or "").strip():
+            logger.warning("resposta sem resumo. Resposta bruta: %.400r", raw)
+            return {"ok": False, "error": "LLM response missing keys: {'resumo'}", "raw": raw}
+        faltando = {"tutorial", "objetivos", "tags"} - parsed.keys()
+        if faltando:
+            logger.warning(
+                "resposta sem %s -- seguindo com valor vazio em vez de descartar o documento",
+                sorted(faltando),
+            )
+        parsed.setdefault("tutorial", "")
+        parsed.setdefault("objetivos", [])
+        parsed.setdefault("tags", [])
         if categories:
             parsed["categoria"] = coerce_categoria(parsed.get("categoria"), categories)
         # A verificação vem DEPOIS do modelo, e é o que de fato segura a
