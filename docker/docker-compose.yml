@@ -33,6 +33,11 @@ services:
       # ComfyUI ships (websocket_image_save.py, example_node.py.example) vanish:
       #   docker cp minimax-comfyui:/comfy/ComfyUI/custom_nodes/. ${CUSTOM_NODES_DIR}/
       - ${CUSTOM_NODES_DIR:-/opt/minimax/custom_nodes}:/comfy/ComfyUI/custom_nodes
+      # ComfyUI's user dir: everything the browser UI saves lives here --
+      # workflows (user/default/workflows/*.json), settings, node presets.
+      # Unmounted it sits inside the image, so every recreate throws away every
+      # workflow the user ever saved, silently. Same trap as custom_nodes.
+      - ${COMFY_USER_DIR:-/opt/minimax/comfy_user}:/comfy/ComfyUI/user
       # host output dir (gitignored) -> container output dir
       - ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}:/comfy/ComfyUI/output
       # host input dir (optional; for I2V/R2V reference media)
@@ -75,9 +80,12 @@ services:
       # container means this container -- it would never have connected.
       KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@postgres:5432/${KB_POSTGRES_DB:-knowledge}
       # Ollama runs on the host, so the container needs the gateway rather than
-      # localhost. This is usually still blocked by the host firewall, which is
-      # why the /kb-* tools are documented as host-mode -- see AGENTS.md. The
-      # value is correct so that opening the firewall is all it takes.
+      # localhost.
+      # This comment used to say the host firewall blocks it. MEASURED FALSE on
+      # 2026-08-11: ollama listens on *:11434 and a throwaway container reached
+      # http://host.docker.internal:11434/api/tags with HTTP 200. The /kb-* tools
+      # can run in container mode here; AGENTS.md still documents them as
+      # host-mode, which is now a choice rather than a constraint.
       OLLAMA_URL: ${CONTAINER_OLLAMA_URL:-http://host.docker.internal:11434}
       LLM_MODEL: ${LLM_MODEL:-lfm2:24b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mxbai-embed-large}

@@ -72,6 +72,17 @@ if [ -z "${CUSTOM_NODES_DIR:-}" ]; then
     fi
 fi
 
+# --- ComfyUI user dir ---
+# Everything the browser UI saves: workflows, settings, node presets. Same
+# reasoning as custom_nodes -- unmounted it dies with the container.
+if [ -z "${COMFY_USER_DIR:-}" ]; then
+    if [ -w /opt/minimax/comfy_user ]; then
+        export COMFY_USER_DIR="/opt/minimax/comfy_user"
+    else
+        export COMFY_USER_DIR="$HOME/minimax/comfy_user"
+    fi
+fi
+
 # --- Output / input dirs ---
 export OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/output}"
 export INPUT_DIR="${INPUT_DIR:-$PROJECT_ROOT/input}"
