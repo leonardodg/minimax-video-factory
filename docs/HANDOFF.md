@@ -502,7 +502,60 @@ na avaliação do usuário. `B2_crowd` e `B3_glass` também renderizaram.
 
 ---
 
-## 🆕 2026-08-11: Turbo LoRA + os custom nodes (instalado, **ainda não validado**)
+## 🆕 2026-08-11: Turbo LoRA + os custom nodes — instalado e **validado**
+
+### O resultado
+
+```
+turbo6        6 steps   310 s    4,2 s/Mpf   output/validacao_turbo/turbo6_00001_.mp4
+baseline20   20 steps   857 s   11,7 s/Mpf   output/validacao_turbo/baseline20_00001_.mp4
+                                 ganho 2,76x
+```
+
+Mesma cena, mesma seed (20260811), 1024×576 · 124 frames. **Ordem deliberada:
+turbo primeiro (frio, pagou o carregamento), baseline depois (quente)** — o
+overhead pesou contra o turbo, então 2,76× é piso.
+
+Os 857 s batem com os 886 s históricos (3% de diferença), o que valida a
+medição de lado: a máquina não mudou.
+
+### ⚠️ Isto derrubou "o termo fixo é ~zero"
+
+Dois pontos reais dão `tempo ≈ 76 s + 39 s por step`. O experimento antigo (20
+contra 30 steps) não conseguia ver o patamar: num intervalo tão curto, 76 s se
+diluem e o resultado fica indistinguível de proporcionalidade. **Regra nova:
+extrapolação de steps só vale dentro da faixa medida.**
+
+### O áudio sobrevive (Whisper large-v3 + F0 por autocorrelação)
+
+| | ROSY (S1), aguda | BENTO (S2), grave |
+|---|---|---|
+| turbo 6 | 271 Hz | 131 Hz |
+| baseline 20 | 250 Hz | 125 Hz |
+| diferença | 1,4 semitons | 0,8 semitons |
+
+As duas falas escritas saíram palavra por palavra nos dois clipes, nos mesmos
+tempos (~0–2 s e ~2,7–5 s), sem invasão de registro — quase uma oitava separando
+os personagens. O turbo acrescentou um `"É."` de 0,2 s no início, a 250 Hz
+(coerente com a ROSY: sílaba extra, não troca de personagem).
+
+Níveis: turbo mean −28,2 / pico −11,3 dB; baseline mean −25,6 / pico −6,8 dB. O
+turbo saiu ~3 dB mais baixo. **Um clipe só — não é padrão estabelecido.**
+
+⚠️ **A imagem a 6 steps continua sem avaliação.** Tempo e áudio medidos; o
+julgamento visual é do usuário, e é de UM clipe de 5 s.
+
+### O que a instalação entregou
+
+`custom_nodes` foi de 0 para 8 pacotes; o ComfyUI de **825 para 1587 nós**.
+Contra o `AcademiaSD_MiniMax-H3_v24`, de 24 tipos faltando sobraram 2:
+`Fast Groups Bypasser (rgthree)` (nó virtual JS — funciona na UI, não consta na
+API, **não é falta**) e `AcademiaSD_Downloader` (o pack de 2026-08-11 não o
+registra mais; apagar do grafo, os pesos já estão no disco).
+
+---
+
+## Detalhamento da instalação
 
 **O que mudou no repo** (branch `worktree-turbo-lora`):
 
@@ -513,19 +566,23 @@ na avaliação do usuário. `B2_crowd` e `B3_glass` também renderizaram.
 | `docker/docker-compose.yml` | `custom_nodes` virou bind-mount rw a partir de `CUSTOM_NODES_DIR` |
 | `scripts/install_custom_nodes.sh` | clona/atualiza os 8 pacotes e instala as deps no python do ComfyUI |
 
-### ⚠️ O que ainda NÃO foi feito — e por quê
-
-O container **não foi recriado** e as dependências dos pacotes **não foram
-instaladas**. `.claude/settings.local.json` nega `Bash(docker exec:*)` e
-`Bash(docker compose:*)`, então a sessão preparou tudo no host e parou aí. Nenhum
-render turbo rodou: **os 3,3× são aritmética, não medição.**
-
-Para destravar, no host:
+### O ritual completo, na ordem que funcionou
 
 ```bash
-scripts/install_custom_nodes.sh                 # deps dentro do container
 docker compose -f docker/docker-compose.yml --project-directory . up -d
+scripts/install_custom_nodes.sh --deps-only     # deps no python do ComfyUI
+docker restart minimax-comfyui                  # imports só acontecem no startup
 ```
+
+⚠️ **O `restart` não é opcional.** Instalar as deps com o container de pé não
+carrega nada: o ComfyUI importa os custom nodes uma vez, no boot. Antes do
+restart eram 1143 nós com três pacotes em `IMPORT FAILED`; depois, 1587.
+
+⚠️ **As três falhas tinham uma causa só:** `No module named 'cv2'`. Impact-Pack,
+VideoHelperSuite e Easy-Use dependem todos de `opencv-python-headless`. Ao
+depurar import de custom node, ler o log **inteiro** antes de tratar cada pacote
+como um problema separado —
+`docker logs minimax-comfyui | grep -A3 "IMPORT FAILED\|Cannot import"`.
 
 ### custom_nodes vivia dentro da imagem
 

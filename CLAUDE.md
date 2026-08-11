@@ -49,8 +49,9 @@ ComfyUI + MiniMax H3 (FL2VA, INT8) exposto por um servidor MCP.
 | 213 M | 1024×576 · 15 s | ❌ OOM (três vezes) |
 
 **Tempo: 12 s por megapixel-frame** (medido entre 12,0 e 13,0 em 6 resoluções),
-linear, sem termo quadrático — **a 20 steps**. Com a Turbo LoRA a 6 steps, divida
-por ~3,3 (ver abaixo; ainda não medido nesta máquina).
+linear, sem termo quadrático — **a 20 steps**. Com a Turbo LoRA a 6 steps são
+**4,2 s/Mpf**, medido: 2,76× mais rápido (não os 3,3× da conta ingênua — há um
+patamar de ~76 s por render, ver abaixo).
 
 ### A faixa treinada acaba em 362 frames (15,08 s), e isso é um limite à parte
 
@@ -66,34 +67,71 @@ modelo **renderiza** — e degrada de dois jeitos independentes, medidos em
 **Não é uma questão de VRAM.** Passar de 362 frames é fora de especificação.
 Para durar mais, é composição.
 **Steps não são alavanca de qualidade** — 30 steps custam 1,51× e não melhoram
-nada. 20 basta. Mas são a alavanca de **tempo**: 1,51× para 1,5× de steps quer
-dizer que o termo fixo é ~zero e o render **é** o sampler.
+nada. 20 basta. Mas são a alavanca de **tempo**.
+
+### ⚠️ O tempo NÃO é proporcional aos steps: há ~76 s de patamar
+
+A conclusão antiga (*"1,51× para 1,5× de steps, logo o termo fixo é ~zero"*)
+estava errada, e o erro era invisível no experimento que a gerou. Comparar 20
+com 30 steps é um intervalo curto demais: um patamar de 76 s se dilui e o
+resultado fica indistinguível de proporcionalidade pura. Descer a **6** steps é
+o que o revela. Medido em 2026-08-11, mesma cena, mesma seed, 1024×576 · 124
+frames (73,1 Mpf):
+
+| steps | tempo | s/Mpf |
+|---|---|---|
+| 6 (turbo) | **310 s** | 4,2 |
+| 20 | **857 s** | 11,7 |
+
+```
+tempo ≈ 76 s + 39 s por step        (ajuste pelos dois pontos)
+```
+
+Os 857 s batem com os 886 s históricos (3%), então a máquina não mudou.
+**Consequência prática:** o ganho da Turbo LoRA é **2,76×**, não os 3,3× que a
+proporcionalidade pura previa. E quanto mais curto o clipe, mais o patamar pesa.
 
 ### A Turbo LoRA: 6 steps no lugar de 20
-
-Instalada em 2026-08-11, **ainda não validada com render** (o container não foi
-recriado — ver [`docs/HANDOFF.md`](docs/HANDOFF.md)).
 
 ```
 submit_scene(prompt=..., turbo=True)     # 6 steps, workflow minimax_h3_t2v_turbo_api.json
 submit_scene(prompt=...)                 # 20 steps, o caminho de sempre — default inalterado
 ```
 
-Três coisas que não são óbvias:
+Quatro coisas que não são óbvias:
 
 - **Faixa útil é 4–8 steps.** 6–8 é visivelmente melhor que 4; acima de 8 não
   ganha nada. `strength` fica em 1,0.
 - **`turbo_low_vram=True` (o default aqui) funde a LoRA nos pesos.** Pico de VRAM
   menor, mas num modelo quantizado parte do delta é arredondada fora — imagem
   mais macia. `False` aplica em tempo de execução: mais nítido, mais VRAM.
+  **Nunca comparado lado a lado.**
 - **O nó trata `pruned_int8_convrot` como caso especial.** Sem esse tratamento a
   LoRA sumiria em silêncio nos `fc2` (o kernel int8 fundido não passa pelo
-  `forward` do módulo, então o hook de bypass nunca dispara).
+  `forward` do módulo, então o hook de bypass nunca dispara). Conferir no log:
+  `[MiniMaxH3TurboLoRA] pruned base [merge]: ... 51 adaln injected at run time`
+  e `weight_patched=True → lora ACTIVE`.
+- **Este ComfyUI (0.30.2) não tem `ModelSamplingAV`**, então o sampler do nó pisa
+  vídeo (shift 12) e áudio (shift 3) em relógios separados por conta própria —
+  o caminho `legacy dual-schedule` do log. É o que impede o áudio de quebrar com
+  poucos steps. Ao subir a versão do ComfyUI, reconferir essa linha.
 
-⚠️ **Nenhuma medida de qualidade foi feita.** O ganho de tempo é aritmético; se a
-6 steps o desenho degrada ou a fala perde sincronia, ninguém verificou ainda. O
-teste que decide é o de sempre: renderizar a mesma cena nas duas vias, mesma
-seed, e **assistir**.
+**O áudio sobrevive a 6 steps** (medido 2026-08-11, 2 falas em 5 s):
+
+| | ROSY (S1) | BENTO (S2) |
+|---|---|---|
+| turbo 6 | 271 Hz | 131 Hz |
+| baseline 20 | 250 Hz | 125 Hz |
+| diferença | 1,4 semitons | 0,8 semitons |
+
+As duas falas saíram palavra por palavra nos dois, nos mesmos tempos, e os
+registros não se invadiram (quase uma oitava de separação). O turbo acrescentou
+um `"É."` de 0,2 s no início — a 250 Hz, coerente com a ROSY, então é sílaba
+extra, não troca de personagem. Lembrar que a **primeira fala do clipe** é
+justamente onde a rodada 3 mediu a maior fragilidade.
+
+⚠️ **A imagem a 6 steps não foi avaliada.** Tempo e áudio estão medidos; se o
+desenho degrada, só olhando. É uma amostra de **um** clipe de 5 s.
 
 ## O que decide a qualidade de um clipe
 
