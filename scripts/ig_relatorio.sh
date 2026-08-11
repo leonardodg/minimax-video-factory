@@ -4,7 +4,10 @@
 # A medida que importa aqui não é "quantos posts andaram", é GB POR POST: é ela
 # que diz se os 3606 cabem nos 51 GB livres de /home, e é a única coisa neste
 # relatório que não dá para estimar de outro jeito.
-cd /home/leodg/tools-local/minimax-video-factory || exit 1
+# A raiz sai da localização do próprio script, não de um caminho fixo: este repo
+# é público, e um /home/<usuário> commitado vaza identidade além de quebrar em
+# qualquer outra máquina. Mesmo idioma do scripts/config.sh.
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)" || exit 1
 set -a; . ./.env 2>/dev/null; set +a
 
 echo "########## RELATÓRIO $(date '+%Y-%m-%d %H:%M:%S') ##########"
