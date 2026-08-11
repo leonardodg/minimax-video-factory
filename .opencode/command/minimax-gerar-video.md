@@ -1,5 +1,5 @@
 ---
-description: Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP. Uso: /minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [steps] [turbo=False] [turbo_lora] [turbo_strength] [turbo_low_vram] [wait_seconds=900.0]
+description: Gera um vídeo no MiniMax H3 (texto→vídeo com áudio nativo estéreo) via MCP. Uso: /minimax-gerar-video <prompt> [duration=10.0] [width=1024] [height=576] [seed] [filename_prefix=studio/] [first_frame] [last_frame] [steps] [turbo=False] [turbo_lora] [turbo_strength] [turbo_low_vram] [wait_seconds=900.0]
 ---
 
 Execute a ferramenta MCP **`minimax-video-factory_generate_video`** (server `minimax-video-factory`).
@@ -16,6 +16,7 @@ Instruções obrigatórias:
    - `seed`: semente aleatória (inteiro); omita para aleatório (default `None`).
    - `filename_prefix`: prefixo do arquivo de saída (default `studio/`).
    - `first_frame`: Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso) (default `None`).
+   - `last_frame`: Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só (default `None`).
    - `steps`: Passos do sampler (default 20, ou 6 com turbo=True). Medido: 30 e 40 não melhoram e custam 8x o tempo (default `None`).
    - `turbo`: Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/ (default `False`).
    - `turbo_lora`: Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True (default `None`).

@@ -8,7 +8,7 @@ locally (no cloud).
 In this document:
 - [1. What it is / when to use](#1-what-it-is-when-to-use)
 - [2. Prerequisites & setup](#2-prerequisites-setup)
-- [3. The 7 tools (full reference + best options)](#3-the-7-tools)
+- [3. The 9 tools (full reference + best options)](#3-the-9-tools)
 - [4. Recommended flows step by step](#4-recommended-flows)
 - [5. Using it from the OpenCode chat (prompt examples)](#5-using-it-from-the-opencode-chat)
 - [6. Database structure](#6-database-structure)
@@ -20,8 +20,8 @@ In this document:
 
 ## 1. What it is / when to use
 
-The video MCP exposes **18 tools in total** (11 original MiniMax H3/Studio + 7
-knowledge base). The 7 new ones:
+The video MCP exposes **26 tools in total** (17 original MiniMax H3/Studio/IG
++ 9 knowledge base). The 9 knowledge-base tools:
 
 | Tool | What it does | Needs GPU? |
 |---|---|---|
@@ -32,6 +32,8 @@ knowledge base). The 7 new ones:
 | `knowledge_search` | Keyword + semantic search in the base | No |
 | `knowledge_ask` | Answers questions with RAG (search + LLM) about what was saved | No |
 | `knowledge_reindex` | Recomputes chunks + embeddings for all documents | No |
+| `kb_export_search` | Lists documents to export — by ids, keyword, or latest first | No |
+| `kb_export` | Writes the selected documents as readable `.md` files | No |
 
 **Typical lifecycle:** `ingest_*` → `search`/`ask` → (switched embedding
 model?) → `reindex`.
@@ -64,7 +66,7 @@ ollama list          # should show lfm2:24b and mxbai-embed-large
 
 ---
 
-## 3. The 7 tools
+## 3. The 9 tools
 
 ### `knowledge_ingest_markdown`
 
@@ -157,6 +159,62 @@ embedding model (the `model` is recorded per chunk).
 |---|---|---|---|
 | `embedding_model` | ❌ | `EMBEDDING_MODEL` from `.env` | only set it to force another one |
 
+### `kb_export_search`
+
+Lists documents **without writing anything** — confirm what you're exporting
+before calling `kb_export`. Selects by explicit ids, by a keyword query, or by
+latest first.
+
+| Parameter | Required | Default | Best option |
+|---|---|---|---|
+| `query` | ❌ | `None` | free-text filter on title/summary/content (hybrid search) |
+| `ids` | ❌ | `None` | direct `document_id` list, bypasses `query` |
+| `limit` | ❌ | `20` | cap the number of rows returned |
+
+**Returns:** `{ok, total, documents[]}` where each doc has `id`, `type`,
+`title`, `tags`, `ig_pk`, `summary_len`, `tutorial_len`, `transcription_len`,
+`created_at`.
+
+### `kb_export`
+
+Writes one **readable `.md` file per selected document** to
+`<output_dir>/Knowledge/` (the vault writer always appends `/Knowledge`, so with
+the default `output_dir` the files land in `output/kb-export/Knowledge/`; the
+same writer is used for Obsidian copies). Each
+file has YAML frontmatter (`source_url`, `platform`, `type`, `ig_pk`,
+`llm_model`, `created_at`) and sections `# title`, tags, `## Resumo`,
+`## Tutorial`, `## Objetivos`, `## Transcrição completa`, and a `## Prompt de
+geração de vídeo` placeholder (filled when the prompt schema exists).
+
+| Parameter | Required | Default | Best option |
+|---|---|---|---|
+| `ids` | ✅ | — | document ids to export; confirm first with `kb_export_search` |
+| `output_dir` | ❌ | `output/kb-export/` | where the `.md` files land (under `<output_dir>/Knowledge/`) |
+
+Missing ids are reported per-file without aborting the rest.
+
+### CTA cleanup & backfill
+
+Instagram posts often end with a call-to-action sentence (segue/curte/
+compartilha/link na bio/comenta que eu te mando). Before ingesting, the IG
+worker runs `strip_cta()` (`src/minimax_mcp/ig_worker.py`) to remove those
+sentences from the transcription text, and the summary prompt instructs the LLM
+to omit CTAs from the generated fields.
+
+`scripts/backfill_cta.py` re-applies this cleanup to **already-ingested** IG
+documents (any row with an `ig_pk`): it snapshots the current state as
+`output/kb-backup/<id>-<ig_pk>.md` plus a machine-readable
+`output/kb-backup/<id>-<ig_pk>.json`, strips CTAs, regenerates
+summary/tutorial/objectives/tags via the LLM, and updates the row (preserving
+`id`/`ig_pk`/`source_url`/`platform`/`created_at`). Re-runs skip docs that
+already have a snapshot, so the rollback artifacts are never overwritten.
+
+```bash
+uv run --directory . python scripts/backfill_cta.py            # real run
+uv run --directory . python scripts/backfill_cta.py --dry-run  # show changes, write nothing
+uv run --directory . python scripts/backfill_cta.py --restore <id>  # rollback: writes the .json snapshot fields back to Postgres
+```
+
 ---
 
 ## 4. Recommended flows
@@ -185,6 +243,14 @@ knowledge_ask(query="How did I install Docker on Ubuntu?")
 ```
 # 1. change EMBEDDING_MODEL in .env  2. then:
 knowledge_reindex()
+```
+
+**Flow F — export a Reel's knowledge to markdown:**
+```
+# 1. list what you'd export (nothing written yet):
+kb_export_search(query="Docker")
+# 2. write the selected documents as readable .md files:
+kb_export(ids=[12, 37])
 ```
 
 ---

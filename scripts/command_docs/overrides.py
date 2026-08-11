@@ -284,4 +284,22 @@ OVERRIDES: dict[str, Override] = {
             "Percorre a base inteira — pode demorar proporcionalmente ao tamanho dela.",
         ),
     ),
+    "kb_export_search": Override(
+        resumo=(
+            "Lista documentos para exportar — por IDs, por busca ou os mais "
+            "recentes. Nao grava nada; use a lista para confirmar e depois "
+            "chamar kb-export"
+        ),
+        param_notas={
+            "query": "texto para buscar em título/resumo/conteúdo",
+            "ids": "IDs diretos (ex.: 118,121,125)",
+        },
+    ),
+    "kb_export": Override(
+        resumo="Exporta os documentos selecionados como .md (os arquivos caem em <output_dir>/Knowledge/)",
+        param_notas={
+            "ids": "IDs confirmados na busca (kb-export-search)",
+            "output_dir": "diretório de destino (os .md caem em <output_dir>/Knowledge/; default output/kb-export/)",
+        },
+    ),
 }

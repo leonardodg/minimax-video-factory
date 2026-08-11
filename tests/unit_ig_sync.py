@@ -55,7 +55,10 @@ m0 = msgs[0]
 if (
     m0["ig_pk"] == "1001"
     and m0["media_type"] == "video"
-    and m0["url"] == "https://www.instagram.com/p/1001/"
+    # Shortcode, não o pk: `/p/` só resolve com o código. Esta linha afirmava
+    # `/p/1001/`, que é o formato que gravou link quebrado em todo documento e
+    # fazia o fallback de yt-dlp levar HTTP 400.
+    and m0["url"] == "https://www.instagram.com/p/Pp/"
     and m0["owner_username"] == "anajcodes"
     and m0["title"] == "Reel de teste"
     and m0["collection_name"] is None
@@ -64,6 +67,24 @@ if (
     ok("to_messages maps video Media to the message contract")
 else:
     bad(f"video message = {m0!r}")
+
+# O `code` que o Instagram manda tem de vencer o calculado -- e quando ele não
+# vem, o calculado tem de dar exatamente o mesmo. Verificado com um post real
+# em 2026-08-10: pk 3939152570070606095 -> DaqrmRXICEP pelos dois caminhos.
+if (
+    ig_sync.post_url("3939152570070606095", "DaqrmRXICEP")
+    == ig_sync.post_url("3939152570070606095")
+    == "https://www.instagram.com/p/DaqrmRXICEP/"
+):
+    ok("post_url: o code informado e o calculado do pk concordam")
+else:
+    bad(f"post_url divergiu: {ig_sync.post_url('3939152570070606095')!r}")
+
+# Um pk que não é número não pode derrubar a listagem inteira.
+if ig_sync.post_url("nao-numerico") == "https://www.instagram.com/p/nao-numerico/":
+    ok("post_url degrada sem levantar quando o pk não é numérico")
+else:
+    bad(f"post_url com lixo = {ig_sync.post_url('nao-numerico')!r}")
 
 if msgs[1]["media_type"] == "image" and msgs[2]["media_type"] == "carousel":
     ok("image and carousel media_types map correctly")
@@ -110,6 +131,26 @@ if len(collected) == 3:
     ok("saved_posts collects All posts + named collections")
 else:
     bad(f"saved_posts returned {len(collected)} entries")
+# A listagem tem de pedir TODAS as páginas.
+# Um teto silencioso é o pior modo de falha desta sincronização: devolve um lote
+# parcial que se parece com punição do Instagram, e as duas causas pedem reações
+# opostas. Medido em 2026-08-10: a catch-all guarda 3618 posts, e o teto antigo
+# de 200 teria entregado 200.
+asked = []
+
+
+class RecordingClient(FakeClient):
+    def collection_medias(self, cid, amount=200):
+        asked.append(amount)
+        return super().collection_medias(cid, amount)
+
+
+ig_sync.saved_posts(RecordingClient())
+if asked and all(a == 0 for a in asked):
+    ok("saved_posts pede todas as páginas (amount=0), sem teto por coleção")
+else:
+    bad(f"saved_posts pediu amount={asked} — um teto trunca o sync em silêncio")
+
 names = {e["collection_name"] for e in collected}
 # The catch-all maps to None, not to a name. It holds every saved post, so its
 # name says nothing about the post -- and as a tag it was landing on nearly

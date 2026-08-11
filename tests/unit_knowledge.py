@@ -514,6 +514,21 @@ if "imagem/post do Instagram" not in llm.build_summary_prompt("x", is_image=Fals
 else:
     bad("is_image=False wrongly added the image context line")
 
+print("== unit_knowledge: CTA omission instruction in summary prompt ==")
+if "call-to-action" in llm.SUMMARY_PROMPT_TEMPLATE or "CTA" in llm.SUMMARY_PROMPT_TEMPLATE:
+    ok("summary prompt instructs the LLM to omit call-to-action phrases")
+else:
+    bad("summary prompt has no CTA omission instruction")
+
+print("== unit_knowledge: export functions ==")
+from minimax_mcp import knowledge as _k
+
+for fname in ("export_search", "export_documents", "_document_to_dict"):
+    if callable(getattr(_k, fname, None)):
+        ok(f"knowledge.{fname} exists")
+    else:
+        bad(f"knowledge.{fname} missing")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

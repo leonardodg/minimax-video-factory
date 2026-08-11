@@ -35,8 +35,10 @@ NOISE_NODE_ID = "6"
 SAVE_NODE_CLASS = "SaveVideo"
 # The base workflow ships 14 nodes numbered 1..14. A LoadImage node is added
 # only when a first_frame is supplied, under an id well clear of that range so
-# it can never collide as the workflow grows.
+# it can never collide as the workflow grows. last_frame gets its own id: the
+# two anchors can be supplied together, so they cannot share a node.
 LOAD_IMAGE_NODE_ID = "90"
+LOAD_LAST_IMAGE_NODE_ID = "91"
 SCHEDULER_NODE_ID = "9"          # BasicScheduler
 TURBO_LORA_NODE_ID = "15"        # MiniMaxH3TurboLoRA, turbo workflow only
 DEFAULT_STEPS = 20               # what the workflow ships with, and what every
@@ -70,21 +72,27 @@ def duration_to_frames(duration: float, fps: int = 24) -> int:
 def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
                  width: int, height: int, seed: int, filename_prefix: str,
                  first_frame: str | None = None,
+                 last_frame: str | None = None,
                  steps: int | None = None,
                  turbo_lora: str | None = None,
                  turbo_strength: float | None = None,
                  turbo_low_vram: bool | None = None) -> dict[str, Any]:
     """Patch the API workflow for one scene.
 
-    `first_frame` is the name of an image already present in ComfyUI's input
-    directory (upload one with ComfyUIClient.upload_image). When given, a
-    LoadImage node is added and wired into the H3 node's optional first_frame
-    input, and the model animates from that picture instead of inventing the
-    whole composition from the prompt.
+    `first_frame` and `last_frame` are names of images already present in
+    ComfyUI's input directory (upload one with ComfyUIClient.upload_image).
+    Each one given adds a LoadImage node wired into the matching optional input
+    of the H3 node, and the model animates from -- and to -- those pictures
+    instead of inventing the whole composition from the prompt.
 
-    The model is `minimax_h3_fl2va` -- First-Last frame to Video+Audio -- and
-    the node is MiniMaxH3ImageToVideo, so this is what it was trained for. Text
-    only was leaving half of it unused.
+    The model is `minimax_h3_fl2va` -- **First-Last** frame to Video+Audio --
+    and the node is MiniMaxH3ImageToVideo, so this is what it was trained for.
+    Text only was leaving half of it unused; first_frame alone still left the
+    other anchor unused.
+
+    Supplying both is what makes a chapter *land* somewhere chosen: the motion
+    decelerates into a known frame instead of being cut wherever it drifted to,
+    which is the seam a viewer notices when clips are concatenated.
     """
     import copy
     wf = copy.deepcopy(workflow)
@@ -109,12 +117,17 @@ def inject_scene(workflow: dict[str, Any], *, prompt: str, duration: float,
     inputs["height"] = height
     inputs["length"] = duration_to_frames(duration)
 
-    if first_frame:
-        wf[LOAD_IMAGE_NODE_ID] = {
+    for anchor, image, node_id in (
+        ("first_frame", first_frame, LOAD_IMAGE_NODE_ID),
+        ("last_frame", last_frame, LOAD_LAST_IMAGE_NODE_ID),
+    ):
+        if not image:
+            continue
+        wf[node_id] = {
             "class_type": "LoadImage",
-            "inputs": {"image": first_frame, "upload": "image"},
+            "inputs": {"image": image, "upload": "image"},
         }
-        inputs["first_frame"] = [LOAD_IMAGE_NODE_ID, 0]
+        inputs[anchor] = [node_id, 0]
 
     if steps is not None:
         sched = wf.get(SCHEDULER_NODE_ID)
@@ -215,6 +228,7 @@ def submit_scene_core(
     seed: int | None = None,
     filename_prefix: str = "video/factory",
     first_frame: str | None = None,
+    last_frame: str | None = None,
     steps: int | None = None,
     turbo: bool = False,
     turbo_lora: str | None = None,
@@ -227,12 +241,14 @@ def submit_scene_core(
 
     # Upload before patching: ComfyUI de-duplicates names, so only it knows
     # what the image ended up being called.
-    uploaded = None
-    if first_frame:
+    uploaded: dict[str, str | None] = {"first_frame": None, "last_frame": None}
+    for anchor, path in (("first_frame", first_frame), ("last_frame", last_frame)):
+        if not path:
+            continue
         try:
-            uploaded = client.upload_image(first_frame)
+            uploaded[anchor] = client.upload_image(path)
         except Exception as e:
-            return {"ok": False, "stage": "upload", "error": str(e)}
+            return {"ok": False, "stage": "upload", "anchor": anchor, "error": str(e)}
 
     try:
         workflow = load_workflow(turbo=turbo)
@@ -240,7 +256,9 @@ def submit_scene_core(
         return {"ok": False, "stage": "workflow", "error": str(e)}
     wf = inject_scene(workflow, prompt=prompt, duration=duration,
                       width=width, height=height, seed=seed,
-                      filename_prefix=filename_prefix, first_frame=uploaded,
+                      filename_prefix=filename_prefix,
+                      first_frame=uploaded["first_frame"],
+                      last_frame=uploaded["last_frame"],
                       steps=steps, turbo_lora=turbo_lora,
                       turbo_strength=turbo_strength,
                       turbo_low_vram=turbo_low_vram)
@@ -251,7 +269,9 @@ def submit_scene_core(
     effective_steps = steps or (DEFAULT_TURBO_STEPS if turbo else DEFAULT_STEPS)
     return {"ok": True, "prompt_id": prompt_id, "seed": seed,
             "duration": duration, "width": width, "height": height,
-            "first_frame": uploaded, "steps": effective_steps, "turbo": turbo}
+            "first_frame": uploaded["first_frame"],
+            "last_frame": uploaded["last_frame"],
+            "steps": effective_steps, "turbo": turbo}
 
 
 async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[str, Any]:

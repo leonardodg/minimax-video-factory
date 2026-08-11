@@ -180,6 +180,7 @@ def submit_scene(
     seed: int | None = Field(default=None, description="Random seed (defaults to random)"),
     filename_prefix: str = Field(default=OUTPUT_PREFIX, description="Output filename prefix (default from OUTPUT_PREFIX env)"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
+    last_frame: str | None = Field(default=None, description="Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só"),
     steps: int | None = Field(default=None, description="Passos do sampler (default 20, ou 6 com turbo=True). Mais passos = mais detalhe e mais tempo, proporcionalmente"),
     turbo: bool = Field(default=False, description="Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/"),
     turbo_lora: str | None = Field(default=None, description="Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True"),
@@ -193,7 +194,7 @@ def submit_scene(
     return submit_scene_core(
         prompt=prompt, duration=duration, width=width, height=height,
         seed=seed, filename_prefix=filename_prefix, first_frame=first_frame,
-        steps=steps, turbo=turbo, turbo_lora=turbo_lora,
+        last_frame=last_frame, steps=steps, turbo=turbo, turbo_lora=turbo_lora,
         turbo_strength=turbo_strength, turbo_low_vram=turbo_low_vram,
     )
 
@@ -362,6 +363,7 @@ def generate_video(
     seed: int | None = Field(default=None, description="Random seed"),
     filename_prefix: str = Field(default="studio/", description="Output filename prefix"),
     first_frame: str | None = Field(default=None, description="Caminho de uma imagem de referência; o vídeo é animado a partir dela (o modelo é FL2VA, treinado para isso)"),
+    last_frame: str | None = Field(default=None, description="Caminho de uma imagem onde o clipe deve TERMINAR. Com os dois âncoras o movimento desacelera até um quadro escolhido, em vez de ser cortado onde derivou — é o que emenda bem quando vários clipes viram um vídeo só"),
     steps: int | None = Field(default=None, description="Passos do sampler (default 20, ou 6 com turbo=True). Medido: 30 e 40 não melhoram e custam 8x o tempo"),
     turbo: bool = Field(default=False, description="Usa a Turbo LoRA (4-8 steps em vez de 20, ~3x mais rápido). Exige o custom node ComfyUI-MiniMax-H3-Turbo e a LoRA em models/loras/"),
     turbo_lora: str | None = Field(default=None, description="Nome do arquivo da Turbo LoRA (default minimax_h3_turbo_v4_step600_ema.safetensors). Só vale com turbo=True"),
@@ -377,7 +379,8 @@ def generate_video(
     studio = AudiovisualStudio(downloads_dir=STUDIO_DOWNLOADS_DIR)
     return studio.generate_video(
         prompt=prompt, duration=duration, width=width, height=height, seed=seed,
-        first_frame=first_frame, filename_prefix=filename_prefix,
+        first_frame=first_frame, last_frame=last_frame,
+        filename_prefix=filename_prefix,
         steps=steps, turbo=turbo, turbo_lora=turbo_lora,
         turbo_strength=turbo_strength, turbo_low_vram=turbo_low_vram,
         wait_seconds=wait_seconds,
@@ -499,6 +502,27 @@ def knowledge_reindex(
     """Recalcula chunks e embeddings de todos os documentos (use após trocar de modelo de embedding)."""
     from minimax_mcp import knowledge
     return knowledge.reindex(embedding_model=embedding_model)
+
+
+@mcp.tool()
+def kb_export_search(
+    query: str | None = Field(default=None, description="Texto para buscar em título/resumo/conteúdo (opcional)"),
+    ids: list[int] | None = Field(default=None, description="IDs diretos dos documentos (opcional)"),
+    limit: int = Field(default=20, description="Número máximo de resultados"),
+) -> dict[str, Any]:
+    """Lista documentos para export — por IDs, por busca, ou os mais recentes. Nao grava nada."""
+    from minimax_mcp import knowledge
+    return knowledge.export_search(query=query, ids=ids, limit=limit)
+
+
+@mcp.tool()
+def kb_export(
+    ids: list[int] = Field(description="IDs dos documentos a exportar (confirme antes com kb-export-search)"),
+    output_dir: str = Field(default="output/kb-export/", description="Diretório de destino dos .md (os arquivos caem em <output_dir>/Knowledge/)"),
+) -> dict[str, Any]:
+    """Exporta documentos selecionados como arquivos .md legíveis."""
+    from minimax_mcp import knowledge
+    return knowledge.export_documents(ids=ids, output_dir=output_dir)
 
 
 # =============================================================================

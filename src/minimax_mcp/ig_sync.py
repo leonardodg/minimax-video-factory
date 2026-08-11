@@ -55,6 +55,30 @@ def list_categories(client: Any) -> list[str]:
         return list(FALLBACK_CATEGORIES)
 
 
+def post_url(pk: Any, code: str | None = None) -> str:
+    """O link do post. `/p/` quer o SHORTCODE, não o pk numérico.
+
+    Estava montado como `/p/{pk}/`, e isso quebrava duas coisas ao mesmo tempo:
+    o `source_url` de todo documento apontava para um link que não abre, e o
+    fallback de yt-dlp -- que recebe essa URL quando o download autenticado
+    falha -- levava HTTP 400 e nunca poderia funcionar. Medido em 2026-08-10,
+    num post cujo download travou por timeout do CDN.
+
+    Sem `code` à mão, o shortcode se CALCULA a partir do pk: é o mesmo número
+    noutra base, e o instagrapi traz o codec. Nenhuma requisição de rede -- o
+    que importa porque isso corrige em massa documentos já gravados.
+    """
+    if code:
+        return f"https://www.instagram.com/p/{code}/"
+    try:
+        from instagrapi.utils import InstagramIdCodec
+
+        return f"https://www.instagram.com/p/{InstagramIdCodec.encode(int(pk))}/"
+    except Exception:
+        # Um link torto é melhor que uma exceção no meio da listagem.
+        return f"https://www.instagram.com/p/{pk}/"
+
+
 def make_client() -> Any:
     """Build an authenticated instagrapi Client from IG_SESSIONID."""
     from instagrapi import Client
@@ -70,13 +94,25 @@ def make_client() -> Any:
     return client
 
 
-def saved_posts(client: Any, max_per_collection: int = 200) -> list[dict]:
+def saved_posts(client: Any, max_per_collection: int = 0) -> list[dict]:
     """Enumerate saved posts across the "All posts" collection + named ones.
 
     instagrapi v2 renamed saved_posts() to collections()/collection_medias();
     older versions keep saved_posts(). This prefers the modern API (which also
     carries the collection name for the message) and falls back to the legacy
     single list.
+
+    `max_per_collection=0` means "todas as páginas" -- é o padrão porque
+    qualquer teto trunca ESTA sincronização **em silêncio**, que é exatamente o
+    modo de falha que o plano manda vigiar. O padrão antigo era 200, e medido
+    em 2026-08-10 a conta que ele dava era: a catch-all "All posts" guarda
+    TODOS os posts salvos (3618) e entregaria 200; Receitas (1124), Inglês
+    (564) e Dev (287) também passam do teto. O resultado seria um lote parcial
+    indistinguível de uma punição do Instagram -- e a reação a cada um dos dois
+    é oposta (esperar horas contra mudar um parâmetro).
+
+    Vale registrar a suspeita, que não é conclusão: o incidente de 2026-08-09
+    em que uma varredura "viu 202 posts em vez de 2157" bate com 200 + 2.
 
     Returns a flat list of {"media": Media, "collection_name": str} dicts.
     """
@@ -131,7 +167,7 @@ def to_messages(items: list[dict]) -> list[dict]:
         messages.append({
             "ig_pk": str(pk),
             "media_type": media_type,
-            "url": f"https://www.instagram.com/p/{pk}/",
+            "url": post_url(pk, getattr(m, "code", None)),
             "title": title,
             "owner_username": getattr(user, "username", None),
             "collection_name": entry.get("collection_name"),

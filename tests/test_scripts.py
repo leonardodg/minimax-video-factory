@@ -97,6 +97,12 @@ def test_unit_transcriber():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.unit
+def test_unit_vault():
+    result = _run_script("unit_vault.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.integration_db
 def test_container_deps():
     """The image the README tells users to configure must be able to import
