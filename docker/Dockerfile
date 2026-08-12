@@ -35,6 +35,36 @@ RUN pip install --no-cache-dir -r ComfyUI/requirements.txt
 # install grabs 2.13 which needs torch>=2.13 -> torchaudio abi3 loader fails).
 RUN pip install --no-cache-dir "torch==2.8.0" "torchvision==0.23.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cu128
 
+# --- Python deps of the custom node packs ---
+# These MUST be in the image, not installed at runtime. custom_nodes is a bind
+# mount so the node *code* survives, but `pip install` inside a running
+# container writes to the container's writable layer -- which `docker compose
+# up -d` throws away on every recreate. Measured 2026-08-11: installing the deps
+# at runtime took ComfyUI from 1143 to 1587 nodes; the next recreate (to add an
+# unrelated mount) put it straight back to 1143, with Impact-Pack,
+# VideoHelperSuite and Easy-Use all failing on `No module named 'cv2'`.
+#
+# One opencv variant only. The packs ask for three (opencv-python,
+# opencv-python-headless, opencv-contrib-python) and they all install the same
+# `cv2` module over each other. contrib is the superset, and the non-headless
+# build is fine here because libgl1/libglib2.0-0 are installed above.
+#
+# Union of: ComfyUI-Impact-Pack, ComfyUI-VideoHelperSuite, ComfyUI-KJNodes,
+# ComfyUI-Easy-Use, ComfyUI-Frame-Interpolation. Deliberately WITHOUT:
+#   - the git+ SAM2 dependency of Impact-Pack (heavy; only its segmentation
+#     nodes need it, and the H3 workflows use ImpactSwitch, which does not)
+#   - cupy-wheel from Frame-Interpolation (compiles against local CUDA; RIFE,
+#     the only VFI model these workflows use, runs without it)
+#   - torch/torchvision, which several packs list unpinned and which must stay
+#     exactly at the versions pinned above
+RUN pip install --no-cache-dir \
+      opencv-contrib-python imageio-ffmpeg \
+      diffusers accelerate lark onnxruntime sentencepiece spandrel peft \
+      "clip_interrogator>=0.6.0" \
+      segment-anything scikit-image piexif transformers scipy dill matplotlib \
+      color-matcher mss "pillow>=10.3.0" \
+      einops kornia tqdm
+
 # --- MCP server inside the image (no host uv/Python needed) ---
 # Install uv, copy the project into the image and create a dedicated venv at
 # /opt/mcp-venv. At runtime the compose file bind-mounts the live repo to
