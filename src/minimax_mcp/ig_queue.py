@@ -25,8 +25,47 @@ MAX_ATTEMPTS = int(os.environ.get("IG_MAX_ATTEMPTS", "3"))
 REQUIRED_KEYS = {"ig_pk", "media_type", "url", "title", "owner_username", "collection_name", "status"}
 
 
+# Sem heartbeat. NAO e negligencia -- e o unico valor que funciona aqui.
+#
+# O pika negocia ~60 s por padrao, e uma BlockingConnection so responde ao
+# heartbeat quando o processo devolve o controle ao seu laco de eventos. Este
+# projeto e feito de trabalho bloqueante mais longo que isso:
+#
+#   enumerar uma colecao grande do Instagram   392 s (medido 2026-08-12)
+#   transcrever um video de 75 s com Whisper   ~120 s
+#   uma leitura de tela no modelo de visao     ~135 s
+#
+# O resultado media era o broker derrubar a conexao no meio do trabalho:
+#
+#   - a sincronizacao morria com `StreamLostError: Transport indicated EOF`
+#     aos 392 s, depois de publicar 79 de ~3600 posts
+#   - o ig-worker ficava `Up`, transcrevendo, com ZERO conexoes AMQP: a fila
+#     acumulava 79 mensagens com 0 consumidores, e o ack no fim do processamento
+#     falhava, devolvendo a mensagem para a fila
+#
+# Isso era anterior aos consertos do RABBITMQ_URL e da publicacao incremental,
+# e por baixo deles: mesmo com tudo certo, a conexao caia sozinha.
+#
+# A alternativa seria chamar `process_data_events()` periodicamente durante o
+# trabalho, o que exigiria enfiar o laco do pika dentro do Whisper e do Ollama.
+# heartbeat=0 e o que a propria documentacao do RabbitMQ recomenda para
+# consumidores de tarefa longa. A queda de conexao morta passa a ser detectada
+# pelo TCP keepalive, mais lento e suficiente: o worker ja reconecta sozinho.
+#
+# O valor pode ser sobrescrito pela URL (`?heartbeat=30`), para quem quiser.
+HEARTBEAT_PADRAO = 0
+BLOCKED_TIMEOUT = int(os.environ.get("RABBITMQ_BLOCKED_TIMEOUT", "300"))
+
+
 def connect() -> pika.BlockingConnection:
-    return pika.BlockingConnection(pika.URLParameters(RABBITMQ_URL))
+    params = pika.URLParameters(RABBITMQ_URL)
+    if params.heartbeat is None:
+        params.heartbeat = HEARTBEAT_PADRAO
+    # Sem isto, um broker sob pressao de memoria (connection.blocked) deixa o
+    # publisher pendurado para sempre em vez de levantar.
+    if params.blocked_connection_timeout is None:
+        params.blocked_connection_timeout = BLOCKED_TIMEOUT
+    return pika.BlockingConnection(params)
 
 
 def close(connection: pika.BlockingConnection | None) -> None:
