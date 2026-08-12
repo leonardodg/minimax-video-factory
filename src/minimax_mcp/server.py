@@ -531,9 +531,16 @@ def kb_export(
 # =============================================================================
 
 @mcp.tool()
-def ig_sync_saved() -> dict[str, Any]:
-    """Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
+def ig_sync_saved(
+    reprocessar: bool = Field(
+        default=False,
+        description="Reenfileira TUDO, inclusive o que já está no banco. "
+                    "O padrão (False) publica só os ig_pk novos."),
+) -> dict[str, Any]:
+    """Enfileira os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
     Nao processa nada — o daemon ig-worker consome a fila em background.
+    Publica CONFORME enumera, uma colecao por vez, entao o worker ja comeca a
+    trabalhar antes de a varredura terminar.
     Retorna {ok, published, skipped_existing, total}."""
     from minimax_mcp import db, ig_sync
 
@@ -549,9 +556,22 @@ def ig_sync_saved() -> dict[str, Any]:
         finally:
             session.close()
         client = ig_sync.make_client()
+
+        # Uma linha por coleção. Sem isto, uma varredura de ~3600 posts fica
+        # ~30 min sem dizer nada -- e foi assim que a tool morreu duas vezes,
+        # uma por SIGTERM e outra pelo corte de 1800 s do MCP.
+        def progresso(ev: dict) -> None:
+            logger.info(
+                "ig_sync: %s -> %d na coleção, %d publicados, %d pulados "
+                "(acumulado: %d)",
+                ev["collection"], ev["in_collection"], ev["published"],
+                ev["skipped"], ev["published_total"])
+
         return ig_sync.sync_saved_posts(
             client, existing_pks=existing,
             publish_fn=lambda msg: ig_queue.publish(channel, msg),
+            progress_fn=progresso,
+            reprocessar=reprocessar,
         )
     except Exception as e:
         return {"ok": False, "error": f"ig_sync_saved failed: {e}"}
