@@ -15,20 +15,28 @@ ComfyUI + MiniMax H3 (FL2VA, INT8) exposto por um servidor MCP.
 
 ## Regras que valem sempre nesta máquina
 
-1. **Não dar `git push` sem pedir.** Dispara a CI no runner self-hosted, cujo job
-   `gpu-validation` renderiza de verdade e rouba a GPU no meio dos testes — e tem
-   `if: always()`, então nem falha de lint o impede.
-2. **Não publicar os vídeos deste repo.** Várias entradas são fotos pessoais.
-3. **Nunca mexer no worktree `.worktrees/igsync`** — trabalho do usuário na branch
+1. **Não publicar os vídeos deste repo.** Várias entradas são fotos pessoais.
+2. **Nunca mexer no worktree `.worktrees/igsync`** — trabalho do usuário na branch
    `feat/ig-saved-sync`.
-4. **Um render por vez.** Dois concorrentes estouram a VRAM. Esperar a fila zerar
+3. **Um render por vez.** Dois concorrentes estouram a VRAM. Esperar a fila zerar
    (`GET /queue`) antes de submeter o próximo.
-5. **Mostrar a fila junto com todo vídeo entregue**, e avisar do que houver nela.
-6. **Worktree é obrigatório para implementação.** Commit só de documentação, não.
-7. **Nunca animar rosto de terceiro identificável.** Fotos do próprio usuário, sim.
-8. **Não mexer no `ig-worker`** — o usuário está desenvolvendo em cima dele. Ele roda
-   no host e disputa **a mesma GPU** (Whisper + `lfm2:24b`, ~6 GB): se chegar mensagem
-   do Instagram durante um render, o render morre. Avisar, não parar por conta própria.
+4. **Mostrar a fila junto com todo vídeo entregue**, e avisar do que houver nela.
+5. **Worktree é obrigatório para implementação.** Commit só de documentação, não.
+6. **Nunca animar rosto de terceiro identificável.** Fotos do próprio usuário, sim.
+7. **O `ig-worker` disputa a MESMA GPU.** Ele roda no container `minimax-ig-worker`
+   (não no host — corrigido em 2026-08-12) e carrega Whisper + um modelo de visão
+   no Ollama do host: medido **5,8 GB** com `qwen3-vl:8b` residente, de 12 GB
+   totais. Se ele pegar trabalho durante um render, o render morre por OOM —
+   aconteceu em 2026-08-12. Avisar, e pausar só se o usuário mandar.
+   **Pausar/retomar** (as tools MCP `ig_worker_stop`/`ig_worker_start` fazem isso):
+   ```bash
+   curl -s -u guest:guest -H "content-type:application/json" -X POST \
+     http://localhost:15672/api/exchanges/%2F//publish \
+     -d '{"properties":{},"routing_key":"ig.worker.command","payload":"{\"command\": \"stop\"}","payload_encoding":"string"}'
+   ```
+   A pausa é real: `basic_cancel` na fila de trabalho. Confere em
+   `/api/queues` — `ig.saved` vai a **0 consumidores** e `ig.worker.command`
+   fica em 1, que é como o `start` volta a chegar.
 
 ---
 
@@ -266,12 +274,15 @@ render (~11 GB a 0% de uso). Com a fila vazia:
 deixa o nó importável e quebrado), e **reiniciar** o container (os imports só
 acontecem no boot). `scripts/install_custom_nodes.sh` faz os três.
 
-⚠️ **`pip install` dentro do container NÃO sobrevive a um recreate.** O código
-dos nós sobrevive, porque `custom_nodes` é bind-mount; as **dependências Python**
-vão para a camada gravável do container, e `docker compose up -d` a descarta.
-Medido em 2026-08-11: instalar as deps levou de 1143 para 1587 nós; o recreate
-seguinte, para acrescentar um mount sem relação nenhuma, voltou a 1143 com
-Impact-Pack, VideoHelperSuite e Easy-Use todos em `No module named 'cv2'`.
+**Recriar o container é seguro** — as deps de custom node estão no
+`docker/Dockerfile` desde 2026-08-11, então vêm da imagem. Confirmado em
+2026-08-12: um `up -d` para acrescentar `RABBITMQ_URL` manteve os 1587 nós.
+
+⚠️ Isso vale **enquanto as deps estiverem no Dockerfile**. `pip install` dentro
+de um container em execução vai para a camada gravável e o `up -d` a descarta —
+foi assim que os nós caíram de 1587 para 1143 em 2026-08-11, com Impact-Pack,
+VideoHelperSuite e Easy-Use todos em `No module named 'cv2'`. O código dos nós
+sobrevive (é bind-mount); as dependências, não.
 
 **Deps de custom node vão para o `docker/Dockerfile`.** Depois de editar,
 `docker compose build` uma vez. O `--deps-only` é remendo até o próximo rebuild.
