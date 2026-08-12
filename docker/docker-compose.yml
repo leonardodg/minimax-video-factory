@@ -194,9 +194,10 @@ services:
     # falhava as leituras de tela, e recomecava. 7 falhas em 20 min, zero posts
     # concluidos.
     #
-    # A alternativa seria liberar a bridge no ufw, o que exige mexer no
-    # firewall da maquina. `network_mode: host` resolve sem sudo e sem regra
-    # nova: o worker passa a falar 127.0.0.1 com todo mundo.
+    # A alternativa seria liberar a bridge do Docker no ufw. **DESCARTADA pelo
+    # usuario em 2026-08-12**: nao se mexe no firewall desta maquina. Nao
+    # reabrir a discussao -- `network_mode: host` resolve sem sudo e sem regra
+    # nova, e o worker passa a falar 127.0.0.1 com todo mundo.
     #
     # ⚠️ Com rede do host, o DNS do compose NAO resolve: `rabbitmq` e
     # `postgres` deixam de existir como nomes. Por isso os dois enderecos
