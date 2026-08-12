@@ -177,16 +177,41 @@ services:
       - ${PROJECT_ROOT:-..}:/workspace:ro
       - ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}:/downloads
       - ${HF_CACHE_DIR:-${PROJECT_ROOT:-..}/.hf-cache}:/root/.cache/huggingface
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # Rede do HOST, nao a do compose. O worker precisa do Ollama, que roda no
+    # host, e nenhum caminho de container chegava la.
+    #
+    # Medido em 2026-08-12, com o ufw habilitado:
+    #   host      -> 127.0.0.1:11434   HTTP 200
+    #   host      -> 172.17.0.1:11434  HTTP 200   (gateway do docker0)
+    #   host      -> 172.18.0.1:11434  HTTP 200   (gateway desta rede)
+    #   CONTAINER -> 172.17.0.1:11434  bloqueado
+    #   CONTAINER -> 172.18.0.1:11434  bloqueado
+    #
+    # Ou seja: o Ollama escuta em tudo e responde por qualquer IP a partir do
+    # host; o que barra e o firewall, no sentido container->host. O sintoma era
+    # `screen read failed: [Errno 110] Connection timed out` a cada ~135 s, com
+    # o worker preso em laco no mesmo post -- transcrevia (2 min de GPU),
+    # falhava as leituras de tela, e recomecava. 7 falhas em 20 min, zero posts
+    # concluidos.
+    #
+    # A alternativa seria liberar a bridge no ufw, o que exige mexer no
+    # firewall da maquina. `network_mode: host` resolve sem sudo e sem regra
+    # nova: o worker passa a falar 127.0.0.1 com todo mundo.
+    #
+    # ⚠️ Com rede do host, o DNS do compose NAO resolve: `rabbitmq` e
+    # `postgres` deixam de existir como nomes. Por isso os dois enderecos
+    # abaixo viram 127.0.0.1 -- e funciona porque ambos JA publicam em
+    # 127.0.0.1 (ver a secao `ports` de cada um). O `depends_on` continua
+    # valendo para a ordem de subida.
+    network_mode: host
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
       PYTHONPATH: /workspace/src
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@127.0.0.1:5672/
       RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-ig.saved}
-      KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@postgres:5432/${KB_POSTGRES_DB:-knowledge}
-      OLLAMA_URL: http://host.docker.internal:11434
+      KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@127.0.0.1:${KB_POSTGRES_PORT:-5432}/${KB_POSTGRES_DB:-knowledge}
+      OLLAMA_URL: http://127.0.0.1:11434
       OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen2.5vl:7b}
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cuda}
