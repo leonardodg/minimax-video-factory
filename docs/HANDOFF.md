@@ -502,6 +502,30 @@ na avaliação do usuário. `B2_crowd` e `B3_glass` também renderizaram.
 
 ---
 
+## 👉 PRÓXIMO: o teste de 30 s da ROSY (preparado, **nada renderizado**)
+
+Roteiro completo, pronto para executar sem reconstruir contexto, no projeto
+ROSY (fora deste repo, que é público):
+
+**`$HOME/Documents/Projects/Rosy/docs/Identity/TESTE_30S.md`**
+
+4 cenas · 576×1024 · 175 frames cada = **29,17 s** · 6 steps turbo · ~27 min de
+GPU. Receita `recipe_004`, Smoothie Verde. Os prompts já saem expandidos em
+`Rosy/assets/prompts/teste_30s/prontos/`, montados a partir de `_persona.txt`.
+
+103,2 Mpf por clipe: é a configuração do maior render que já passou aqui
+(`1024×576 · 7,3 s`, mesmos pixels, girado). Fallback documentado se der OOM.
+
+O que ele põe à prova, e nenhuma dessas coisas foi medida ainda: turbo em
+**quatro** clipes seguidos (validado em um só, de 5 s), a persona nova (loadout
+base da folha 14, nunca renderizada), consistência entre 4 cenas **sem**
+encadeamento de frame, a resolução 512×896, e o degrau de áudio a 4 capítulos.
+
+Antes de submeter: fila zerada, **1587 nós** em `/object_info`, e avisar que o
+`ig-worker` disputa a mesma GPU.
+
+---
+
 ## 🆕 2026-08-11: Turbo LoRA + os custom nodes — instalado e **validado**
 
 ### O resultado

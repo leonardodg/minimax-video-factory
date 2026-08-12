@@ -111,6 +111,18 @@ services:
     image: pgvector/pgvector:pg16
     container_name: ${KB_POSTGRES_CONTAINER:-minimax-kb-postgres}
     restart: unless-stopped
+    # Roda como o usuário do HOST, não como o postgres da imagem (uid 999).
+    #
+    # Por quê: KB_POSTGRES_DATA_DIR fica dentro da árvore do projeto, então um
+    # `chown -R $USER` na raiz -- coisa perfeitamente razoável de fazer --
+    # tirava o data dir do uid 999 e o banco subia repetindo
+    # `could not open file "global/pg_filenode.map": Permission denied`.
+    # Devolver o dono para 999 conserta o sintoma e deixa a armadilha armada.
+    # Com o uid casando, o dono "errado" passa a ser o certo.
+    #
+    # Funciona porque a imagem deixa /var/run/postgresql como drwxrwsrwt
+    # (mundo-gravável, sticky), então um uid arbitrário cria o socket.
+    user: "${PG_UID:-1000}:${PG_GID:-1000}"
     environment:
       POSTGRES_USER: ${KB_POSTGRES_USER:-kb}
       POSTGRES_PASSWORD: ${KB_POSTGRES_PASSWORD:-kb}
