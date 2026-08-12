@@ -35,14 +35,28 @@ def fetch_object_info(url: str) -> dict:
         return json.loads(resp.read())
 
 
-def is_primitive(info: dict) -> bool:
+def is_primitive(info) -> bool:
+    """True when this input is a widget rather than a socket.
+
+    /object_info describes an input as a LIST, never a dict: [type, {options}].
+    This used to call info.get("type"), which raises AttributeError on a list --
+    i.e. it failed on every node of every workflow. Fixed 2026-08-11 while
+    building api2ui.py, whose round-trip test is what exposed it.
+
+    Two shapes coexist and both mean "widget":
+        ['INT', {'default': 20}]                 explicit primitive
+        [['a.safetensors', 'b.safetensors'], {}] implicit COMBO (the choices)
+    """
     if not info:
         return False
-    t = info.get("type", "")
-    if t in PRIMITIVE_TYPES:
+    t = info[0] if isinstance(info, list) and info else info
+    if isinstance(t, list):
         return True
-    # "INT" etc. may be wrapped: ['INT', {'default': ...}]
-    return isinstance(t, list) and bool(t) and t[0] in PRIMITIVE_TYPES
+    if not isinstance(t, str):
+        return False
+    # The V3 schema adds widget types with generated names, e.g. SaveVideo.codec
+    # is COMFY_DYNAMICCOMBO_V3. Match the family, not each new name.
+    return t in PRIMITIVE_TYPES or t.startswith("COMFY_DYNAMICCOMBO")
 
 
 def inputs_ordered(node_def: dict) -> list[dict]:
@@ -86,6 +100,15 @@ def convert(ui: dict, obj_info: dict, comfy_url: str) -> dict:
         node_def = obj_info.get(node_type, {})
         ordered = inputs_ordered(node_def)
 
+        # A link's target-slot index counts positions in the node's `inputs`
+        # array -- the SOCKETS -- not positions in the declaration order. The
+        # two differ as soon as a widget sits between two sockets: CreateVideo
+        # declares images(0), fps(1), audio(2), bit_depth(3), but only images
+        # and audio are sockets, so the link into `audio` carries to_slot=1.
+        # Using the declaration index dropped every link that came after a
+        # widget, silently -- the node just lost an input. Fixed 2026-08-11.
+        socket_pos = {inp.get("name"): i for i, inp in enumerate(node.get("inputs", []))}
+
         api_inputs: dict[str, object] = {}
         for idx, slot in enumerate(ordered):
             name = slot["name"]
@@ -93,10 +116,7 @@ def convert(ui: dict, obj_info: dict, comfy_url: str) -> dict:
             ui_inp = ui_inputs.get(name)
 
             if ui_inp and ui_inp.get("link") is not None:
-                src = link_map.get((nid, idx))
-                # Fallback: match by slot index from UI inputs
-                if src is None:
-                    src = link_map.get((nid, ui_inp["link"]))
+                src = link_map.get((nid, socket_pos.get(name, idx)))
                 if src:
                     api_inputs[name] = list(src)
                 continue
