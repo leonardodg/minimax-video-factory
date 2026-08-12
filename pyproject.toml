@@ -14,7 +14,17 @@ dependencies = [
     "yt-dlp>=2024.1.0",
     "faster-whisper>=1.0.0",
     "requests>=2.31.0",
-    "torch>=2.0.0",
+    # torch NAO entra aqui. Verificado em 2026-08-12:
+    #   - nenhum `import torch` em src/, scripts/ ou tests/
+    #   - `faster-whisper` depende de av, ctranslate2, huggingface-hub,
+    #     onnxruntime, tokenizers e tqdm -- torch nao esta na lista
+    #   - `ctranslate2` depende de numpy, pyyaml e setuptools
+    #   - no uv.lock, o unico pacote que declarava torch era este projeto
+    #   - `tests/unit_transcriber.py` chega a ASSERTAR que torch nao e importado
+    # Custava 3,8 GB dos 5,2 GB do venv (torch 1,1 GB + 2,7 GB de libs nvidia),
+    # e as libs que ele trazia eram cu13 -- versao errada: o ctranslate2 precisa
+    # de libcublas.so.12, que o Dockerfile ja instala separado por causa disso.
+    # O ComfyUI tem o torch DELE, da imagem base, e nao e afetado.
     "sqlalchemy>=2.0.30",
     "psycopg[binary]>=3.1.18",
     "pgvector>=0.3.2",

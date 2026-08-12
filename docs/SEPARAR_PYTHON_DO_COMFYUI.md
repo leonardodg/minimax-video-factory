@@ -87,9 +87,44 @@ VRAM. O que resolve é serialização, e o mecanismo já existe: o canal
 3. **`mcp_runner.sh` não foi tocado.** Ele ainda serve, mas o `command:` do
    serviço chama o módulo direto (`python -m minimax_mcp.server`), então o
    script vira legado quando o modo HTTP entrar.
-4. **`torch` continua no `pyproject.toml`** (~2,5 GB). O faster-whisper usa
-   ctranslate2, não torch. Se nada mais no Python usar, tirar derruba a imagem
-   para ~2 GB. **Não verifiquei** se algo usa — é o próximo teste.
+4. ~~`torch` continua no `pyproject.toml`~~ — **resolvido e medido**, ver abaixo.
+
+## O `torch` saiu — e era 73% do venv
+
+Verificado em 2026-08-12, com cinco evidências antes de tocar no arquivo:
+
+- **nenhum `import torch`** em `src/`, `scripts/` ou `tests/`
+- `faster-whisper` depende de `av`, `ctranslate2`, `huggingface-hub`,
+  `onnxruntime`, `tokenizers`, `tqdm` — torch não está na lista
+- `ctranslate2` depende de `numpy`, `pyyaml`, `setuptools`
+- no `uv.lock`, o **único** pacote que declarava torch era este projeto
+- `tests/unit_transcriber.py` chega a **assertar que torch não é importado**:
+  *"free() does not import torch (no CUDA context on the card it frees)"*
+
+O código já tratava o torch como algo a evitar em execução, e mesmo assim o
+declarava como dependência.
+
+**E ele trazia a versão errada.** O torch puxava a pilha **cu13**, enquanto o
+`ctranslate2` precisa de `libcublas.so.12` — por isso o Dockerfile instalava
+`nvidia-cublas-cu12` e `nvidia-cudnn-cu12` por cima. Eram 2,7 GB de libs que
+nunca seriam usadas.
+
+### Medido, não estimado
+
+| | antes | depois |
+|---|---|---|
+| venv | **5,2 GB** | **544 MB** |
+| pacotes nvidia | cu13, cudnn, cusparselt, nccl, nvshmem | **nenhum** |
+| pacotes no lock | — | **−22** (333 linhas) |
+
+Depois da mudança: `uv lock` resolveu, `uv sync` instalou 100 pacotes,
+`minimax_mcp.transcriber` e `minimax_mcp.server` importam, `torch` não aparece
+em `sys.modules`, e `tests/unit_transcriber.py` passa.
+
+O Dockerfile continua instalando as libs **cu12** que o ctranslate2 usa de
+verdade — essas ficam. O ComfyUI tem o torch dele, da imagem base, e não é
+afetado: a mudança só encolhe o `/opt/mcp-venv`, inclusive dentro da imagem
+do ComfyUI.
 
 ## Como validar quando decidir aplicar
 
