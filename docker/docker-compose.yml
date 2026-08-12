@@ -72,6 +72,22 @@ services:
       OLLAMA_URL: ${CONTAINER_OLLAMA_URL:-http://host.docker.internal:11434}
       LLM_MODEL: ${LLM_MODEL:-lfm2:24b}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mxbai-embed-large}
+      # --- fila -----------------------------------------------------------
+      # O servidor MCP roda DENTRO deste container (scripts/mcp_runner.sh via
+      # `docker exec`), e as tools ig_* falam com o RabbitMQ. Sem esta linha o
+      # codigo cai no default `amqp://guest:guest@localhost:5672/` -- que no
+      # host acerta a porta publicada, mas aqui dentro aponta para este proprio
+      # container, onde nao ha broker.
+      #
+      # O sintoma era desconcertante: `ig_queue_status`, `ig_worker_stop` e
+      # `ig_sync_saved` falhavam com erro VAZIO, enquanto as tools kb_*
+      # funcionavam -- porque `KB_DATABASE_URL` acima ja vinha reescrito para a
+      # rede do compose e o RABBITMQ_URL nunca foi. Medido em 2026-08-12.
+      #
+      # Mesmos valores do servico ig-worker, que prova que `rabbitmq:5672`
+      # resolve a partir de um container desta rede.
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
+      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-ig.saved}
       # Remote MCP transport settings
       MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
