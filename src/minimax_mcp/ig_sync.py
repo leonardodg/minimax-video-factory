@@ -116,31 +116,59 @@ def saved_posts(client: Any, max_per_collection: int = 0) -> list[dict]:
 
     Returns a flat list of {"media": Media, "collection_name": str} dicts.
     """
-    if hasattr(client, "collection_medias"):
-        results: list[dict] = []
-        cols = list(client.collections())
-        for col in cols:
-            if getattr(col, "type", "") == "ALL_MEDIA_AUTO_COLLECTION":
-                # The catch-all holds every saved post, so its name carries no
-                # information -- but it was being written as a tag on almost
-                # every document, diluting tag search for nothing. None means
-                # "no collection", and the worker then adds no tag.
-                name = None
-            else:
-                name = getattr(col, "name", "") or None
-            try:
-                medias = list(client.collection_medias(col.id, amount=max_per_collection))
-            except Exception as exc:
-                # One unreadable collection must not abort the whole sync, but
-                # silence here means a collection can go missing from every run
-                # with nothing to show for it.
-                logger.warning("skipping collection %r: %s", name, exc)
-                continue
-            for m in medias:
-                results.append({"media": m, "collection_name": name})
-        return results
-    # Legacy API
-    return [{"media": m, "collection_name": None} for m in client.saved_posts()]
+    return [entry for _, entries in saved_posts_by_collection(client, max_per_collection)
+            for entry in entries]
+
+
+def saved_posts_by_collection(client: Any, max_per_collection: int = 0):
+    """Igual a `saved_posts`, mas rende UMA coleção por vez.
+
+    Existe para que a sincronização publique conforme enumera, em vez de
+    acumular tudo e publicar no fim. A coleção "All posts" tinha 3618 posts na
+    medição de 2026-08-10; enumerar tudo antes de publicar a primeira mensagem
+    é o que fazia o `ig_sync_saved` ser morto por silêncio -- 1800 s sem emitir
+    nada, e o MCP corta.
+
+    ⚠️ **A ordem importa, e não é a que o Instagram devolve.** As coleções
+    NOMEADAS vêm primeiro e a catch-all por último. O `dedupe_by_pk` prefere a
+    mensagem que nomeia uma coleção, mas essa preferência só funciona quando as
+    duas estão no mesmo lote -- publicando incrementalmente, quem sai primeiro
+    ganha. Como a catch-all guarda TODOS os posts com `collection_name=None`,
+    enumerá-la primeiro faria cada post ser publicado sem coleção, e o
+    "Dev"/"Receitas" chegaria depois, tarde demais. É a mesma falha que o
+    docstring do `dedupe_by_pk` descreve, só que causada pela ordem.
+
+    Rende `(collection_name, [{"media": ..., "collection_name": ...}, ...])`.
+    """
+    if not hasattr(client, "collection_medias"):
+        # Legacy API: uma "coleção" só, sem nome.
+        yield None, [{"media": m, "collection_name": None} for m in client.saved_posts()]
+        return
+
+    cols = list(client.collections())
+
+    def eh_catch_all(col) -> bool:
+        return getattr(col, "type", "") == "ALL_MEDIA_AUTO_COLLECTION"
+
+    # nomeadas primeiro, catch-all por último
+    for col in sorted(cols, key=eh_catch_all):
+        if eh_catch_all(col):
+            # The catch-all holds every saved post, so its name carries no
+            # information -- but it was being written as a tag on almost
+            # every document, diluting tag search for nothing. None means
+            # "no collection", and the worker then adds no tag.
+            name = None
+        else:
+            name = getattr(col, "name", "") or None
+        try:
+            medias = list(client.collection_medias(col.id, amount=max_per_collection))
+        except Exception as exc:
+            # One unreadable collection must not abort the whole sync, but
+            # silence here means a collection can go missing from every run
+            # with nothing to show for it.
+            logger.warning("skipping collection %r: %s", name, exc)
+            continue
+        yield name, [{"media": m, "collection_name": name} for m in medias]
 
 
 def to_messages(items: list[dict]) -> list[dict]:
@@ -222,20 +250,60 @@ def sync_saved_posts(
     *,
     existing_pks: set[str],
     publish_fn: Callable[[dict], None],
+    progress_fn: Callable[[dict], None] | None = None,
+    reprocessar: bool = False,
 ) -> dict:
-    """Enumerate saved posts, filter to new ig_pks, publish each. Returns counts.
+    """Enumera os salvos e publica CONFORME enumera. Devolve as contagens.
 
-    `publish_fn` is injected so the tool can wire it to ig_queue.publish with a
-    real channel while tests pass a recorder.
+    `publish_fn` é injetado para a tool ligá-lo ao `ig_queue.publish` com um
+    canal real enquanto os testes passam um gravador.
+
+    **Publica por coleção, não no fim.** A versão anterior acumulava tudo antes
+    da primeira mensagem, e com 3618 posts na catch-all isso significava ~30 min
+    sem emitir nada -- o `ig_sync_saved` foi morto duas vezes assim
+    (SIGTERM e o corte de 1800 s do MCP). Publicando por coleção:
+
+      - o worker começa a consumir enquanto a enumeração ainda corre
+      - uma interrupção no meio preserva o que já foi enfileirado
+      - `progress_fn` recebe um resumo por coleção, então há sinal de vida
+
+    `reprocessar=True` ignora `existing_pks` e reenfileira tudo. O worker
+    ainda pula o que já está no banco (`document_exists`), então isso só faz
+    sentido junto com uma limpeza -- ou para reprocessar de propósito.
     """
-    posts = saved_posts(client)
-    messages = to_messages(posts)
-    new, skipped = split_new(messages, existing_pks)
-    for msg in new:
-        publish_fn(msg)
+    publicados = 0
+    pulados = 0
+    total = 0
+    vistos: set[str] = set()
+
+    for nome, entradas in saved_posts_by_collection(client):
+        mensagens = to_messages(entradas)
+        total += len(mensagens)
+
+        # `vistos` faz o papel que o `dedupe_by_pk` fazia dentro de um lote só:
+        # sem ele, um post salvo em três coleções seria publicado três vezes,
+        # agora que os lotes são separados.
+        conhecidos = vistos if reprocessar else (vistos | existing_pks)
+        novas, pulou = split_new(mensagens, conhecidos)
+
+        for msg in novas:
+            publish_fn(msg)
+            vistos.add(msg["ig_pk"])
+
+        publicados += len(novas)
+        pulados += pulou
+        if progress_fn:
+            progress_fn({
+                "collection": nome or "(todos os salvos)",
+                "in_collection": len(mensagens),
+                "published": len(novas),
+                "skipped": pulou,
+                "published_total": publicados,
+            })
+
     return {
         "ok": True,
-        "published": len(new),
-        "skipped_existing": skipped,
-        "total": len(messages),
+        "published": publicados,
+        "skipped_existing": pulados,
+        "total": total,
     }
