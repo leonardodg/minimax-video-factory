@@ -1,5 +1,25 @@
 #!/usr/bin/env python3
-"""Unit tests for ig_sync.py — duck-typed Media objects, injected client."""
+"""Unit tests for ig_sync.py — duck-typed Media objects, injected client.
+
+Rode com o ambiente do projeto:
+
+    uv run pytest -m unit                    (a suíte)
+    uv run python tests/unit_ig_sync.py      (só este)
+
+⚠️ **Não rode com o `python3` do sistema.** Ele não tem `instagrapi`, e a
+ausência dela NÃO quebra o import deste arquivo -- ela troca silenciosamente o
+resultado de `post_url`, que calcula o shortcode com o `InstagramIdCodec` e cai
+num fallback quando o import falha:
+
+    com instagrapi   post_url(3939152570070606095) -> .../p/DaqrmRXICEP/
+    sem instagrapi   post_url(3939152570070606095) -> .../p/3939152570070606095/
+
+Duas asserções passam a falhar, e a saída é indistinguível de um bug de código.
+Aconteceu em 2026-08-12: as duas falhas foram diagnosticadas como defeito real
+do `post_url` e reportadas como pendência, inclusive numa nota de commit. Rodar
+o mesmo teste na `main` "confirmou" -- com o mesmo python errado. A guarda
+abaixo existe para que isso pare de ser possível.
+"""
 from __future__ import annotations
 
 import sys
@@ -7,6 +27,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+
+try:
+    import instagrapi  # noqa: F401
+except ImportError:
+    sys.exit(
+        "\n  ERRO: instagrapi não está instalado neste interpretador.\n"
+        f"  ({sys.executable})\n\n"
+        "  Este teste não roda sem ela: `post_url` cairia num fallback e duas\n"
+        "  asserções falhariam por motivo de ambiente, parecendo bug de código.\n\n"
+        "  Rode assim:  uv run python tests/unit_ig_sync.py\n"
+        "         ou:   uv run pytest -m unit\n"
+    )
 
 FAIL = 0
 
