@@ -566,6 +566,31 @@ registra mais; apagar do grafo, os pesos já estão no disco).
 | `docker/docker-compose.yml` | `custom_nodes` virou bind-mount rw a partir de `CUSTOM_NODES_DIR` |
 | `scripts/install_custom_nodes.sh` | clona/atualiza os 8 pacotes e instala as deps no python do ComfyUI |
 
+### ⚠️ A armadilha que mordeu duas vezes no mesmo dia
+
+`custom_nodes` é bind-mount, então o **código** dos nós sobrevive. As
+**dependências Python**, não: `pip install` dentro do container grava na camada
+gravável, e `docker compose up -d` a descarta.
+
+Sequência real de 2026-08-11:
+
+```
+1143 nós   container recém-criado, 3 pacotes em IMPORT FAILED (cv2)
+1587 nós   depois de install_custom_nodes.sh --deps-only + restart
+1143 nós   depois de um up -d para acrescentar o mount do user dir
+           -- os mesmos 3 pacotes, o mesmo cv2
+```
+
+O segundo recreate não tinha nada a ver com custom nodes. **Qualquer** mudança
+no compose derruba as deps. Por isso elas foram para o `docker/Dockerfile`
+(bloco *Python deps of the custom node packs*), que é o único lugar que
+sobrevive. `--deps-only` continua existindo como remendo até o rebuild.
+
+**Uma variante de opencv só.** Os pacotes pedem três (`opencv-python`,
+`opencv-python-headless`, `opencv-contrib-python`) e todas instalam o mesmo
+módulo `cv2` por cima uma da outra. O Dockerfile fixa `opencv-contrib-python`,
+que é o superconjunto.
+
 ### O ritual completo, na ordem que funcionou
 
 ```bash

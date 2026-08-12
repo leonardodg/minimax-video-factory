@@ -263,9 +263,24 @@ render (~11 GB a 0% de uso). Com a fila vazia:
 **Custom node novo:** clonar em `$CUSTOM_NODES_DIR` (host, bind-mount rw sobre
 `/comfy/ComfyUI/custom_nodes`), instalar as deps no **python do ComfyUI**
 (`/opt/conda/bin/python`, *não* o `/opt/mcp-venv` do servidor MCP — errar aqui
-deixa o nó importável e quebrado), e recriar o container.
-`scripts/install_custom_nodes.sh` faz os três. Antes do bind-mount, `custom_nodes`
-vivia dentro da imagem e todo `build` apagava tudo sem avisar.
+deixa o nó importável e quebrado), e **reiniciar** o container (os imports só
+acontecem no boot). `scripts/install_custom_nodes.sh` faz os três.
+
+⚠️ **`pip install` dentro do container NÃO sobrevive a um recreate.** O código
+dos nós sobrevive, porque `custom_nodes` é bind-mount; as **dependências Python**
+vão para a camada gravável do container, e `docker compose up -d` a descarta.
+Medido em 2026-08-11: instalar as deps levou de 1143 para 1587 nós; o recreate
+seguinte, para acrescentar um mount sem relação nenhuma, voltou a 1143 com
+Impact-Pack, VideoHelperSuite e Easy-Use todos em `No module named 'cv2'`.
+
+**Deps de custom node vão para o `docker/Dockerfile`.** Depois de editar,
+`docker compose build` uma vez. O `--deps-only` é remendo até o próximo rebuild.
+
+**Três coisas moram na imagem e precisam de mount para persistir:**
+`custom_nodes` (✅ montado), `user` — workflows salvos pela UI, settings
+(✅ montado) — e as **deps Python**, que não dá para montar: vão no Dockerfile.
+Diagnóstico rápido de "sumiram nós": comparar a contagem de `/object_info` e ler
+`docker logs minimax-comfyui | grep -A3 "IMPORT FAILED"`.
 
 **Tool MCP nova custa 4 lugares:** `catalog.COMMAND_NAMES`, a lista canônica de
 `unit_registry`, a tabela do `README.md`, e rodar `scripts/generate_commands.py`
