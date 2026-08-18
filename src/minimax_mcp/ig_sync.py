@@ -6,15 +6,27 @@ yt-dlp, so IG_SESSIONID is only needed for enumeration. Business logic
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from collections.abc import Callable
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 IG_SESSIONID = os.environ.get("IG_SESSIONID", "")
 SESSIONID_MISSING = "IG_SESSIONID not configured"
+
+# Onde ficam os posts que a listagem não conseguiu converter. Um por linha, com
+# o payload cru: é a única cópia que sobra deles, e sem ela "descartei 3" é uma
+# afirmação que não dá para conferir depois.
+DESCARTADOS_FILE = os.environ.get("IG_DESCARTADOS_FILE", "output/ig-descartados.jsonl")
+
+# Os campos que o `Media` do instagrapi exige. Registrar QUAL faltou é o que
+# transforma o descarte em diagnóstico -- em 2026-08-10 era o `code`.
+CAMPOS_OBRIGATORIOS = ("pk", "id", "code", "taken_at", "media_type", "user")
 
 # instagrapi MediaType values: 1 = image, 2 = video, 8 = album/carousel
 MEDIA_TYPES = {1: "image", 2: "video", 8: "carousel"}
@@ -79,9 +91,134 @@ def post_url(pk: Any, code: str | None = None) -> str:
         return f"https://www.instagram.com/p/{pk}/"
 
 
+def parse_items_tolerant(
+    raw_items: list[dict],
+    extract: Callable[[dict], Any],
+    on_discard: Callable[[dict, Exception], None] | None = None,
+) -> list:
+    """Converte item a item, e um item podre não leva os outros junto.
+
+    **É esta função que conserta o buraco de 2026-08-10.** O instagrapi monta a
+    página inteira numa list comprehension (`mixins/collection.py:131`):
+
+        items = [extract_media_v1(m.get("media", m)) for m in result["items"]]
+
+    Um post salvo voltou sem o campo `code`; `Media.code` é obrigatório no
+    modelo (`types.py:518`), o pydantic levantou, e a perda cascateou por três
+    níveis: o item derrubou a PÁGINA (~20-50 posts), a exceção subiu pelo laço
+    de paginação do `collection_medias_v1` -- onde `total_items` é local, então
+    TODAS as páginas já lidas foram descartadas -- e o `except` de coleção do
+    `saved_posts_by_collection` engoliu o resto. A catch-all "All posts" morreu
+    inteira aos 14 min, e com ela os ~500 posts que não estão em nenhuma pasta
+    nomeada: eles nunca chegaram a virar mensagem, então nunca chegaram a ser
+    "um download independente" que se pode retentar.
+
+    Por que a tolerância mora AQUI e não no `saved_posts_by_collection`: quando
+    a exceção chega lá em cima, o instagrapi já jogou a lista fora. Um
+    try/except por item só funciona no ponto em que o item ainda existe.
+
+    O `except Exception` é largo de propósito. O que se sabe é que um payload
+    degradado não deve custar a coleção; adivinhar de antemão QUAIS tipos de
+    exceção o pydantic e os extratores levantam é justamente o palpite que
+    deixaria o buraco aberto para a próxima variação do defeito. Em troca,
+    nada é engolido em silêncio: todo descarte vira WARNING e vira linha no
+    `DESCARTADOS_FILE`.
+    """
+    parsed = []
+    for raw in raw_items:
+        try:
+            parsed.append(extract(raw))
+        except Exception as exc:
+            faltando = [c for c in CAMPOS_OBRIGATORIOS if c not in (raw or {})]
+            logger.warning(
+                "post descartado na listagem (pk=%s, faltando=%s): %s",
+                (raw or {}).get("pk") or (raw or {}).get("id"), faltando or "-", exc,
+            )
+            if on_discard is not None:
+                try:
+                    on_discard(raw, exc)
+                except Exception as reg:
+                    # Falhar ao ARQUIVAR o descarte não pode custar a listagem
+                    # -- seria trocar 500 posts por um arquivo de log.
+                    logger.warning("não consegui registrar o descarte: %s", reg)
+    return parsed
+
+
+def registrar_descarte(raw: dict, exc: Exception, caminho: str | None = None) -> None:
+    """Grava o post que não converteu, em JSONL, para inspeção depois.
+
+    Escreve na hora (modo append), não no fim: uma varredura que morre no meio
+    ainda deixa a evidência do que já descartou.
+    """
+    destino = Path(caminho or DESCARTADOS_FILE)
+    registro = {
+        "quando": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ig_pk": str((raw or {}).get("pk") or (raw or {}).get("id") or ""),
+        "erro": f"{type(exc).__name__}: {exc}",
+        "faltando": [c for c in CAMPOS_OBRIGATORIOS if c not in (raw or {})],
+        "raw": raw,
+    }
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    with destino.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(registro, ensure_ascii=False, default=str) + "\n")
+
+
+def tolerant_client_class() -> type:
+    """Subclasse do `Client` que sobrescreve SÓ a montagem de cada página.
+
+    A paginação, o `amount=0` e o resto continuam sendo código do instagrapi;
+    o único ponto trocado é a list comprehension que não tolera item ruim.
+    A classe é criada aqui dentro, e não no topo do módulo, porque o import do
+    instagrapi é preguiçoso de propósito -- os testes puros rodam sem ela.
+    """
+    from instagrapi import Client
+    from instagrapi.extractors import extract_media_v1
+
+    class TolerantClient(Client):
+        """`collection_medias_v1_chunk` que pula o post malformado."""
+
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.descartados: list[dict] = []
+
+        def collection_medias_v1_chunk(self, collection_pk, max_id: str = ""):
+            # Mesma escolha de endpoint do instagrapi (mixins/collection.py:120).
+            if isinstance(collection_pk, int) or collection_pk.isdigit():
+                endpoint = f"feed/collection/{collection_pk}/"
+            elif collection_pk.lower() == "liked":
+                endpoint = "feed/liked/"
+            else:
+                endpoint = "feed/saved/posts/"
+
+            params = {"include_igtv_preview": "false"}
+            if max_id:
+                params["max_id"] = max_id
+            # Fora do try de propósito: erro de REQUISIÇÃO (429, sessão morta,
+            # rede) não é item podre, e engolir isso aqui esconderia justamente
+            # a punição do Instagram que a operação precisa enxergar.
+            result = self.private_request(endpoint, params=params)
+
+            def anotar(raw: dict, exc: Exception) -> None:
+                self.descartados.append({
+                    "ig_pk": str((raw or {}).get("pk") or (raw or {}).get("id") or ""),
+                    "colecao_pk": str(collection_pk),
+                    "erro": f"{type(exc).__name__}: {exc}",
+                })
+                registrar_descarte(raw, exc)
+
+            items = parse_items_tolerant(
+                [m.get("media", m) for m in result["items"]],
+                extract_media_v1,
+                on_discard=anotar,
+            )
+            return items, result.get("next_max_id", "") or result.get("max_id", "")
+
+    return TolerantClient
+
+
 def make_client() -> Any:
     """Build an authenticated instagrapi Client from IG_SESSIONID."""
-    from instagrapi import Client
+    Client = tolerant_client_class()
 
     client = Client()
     client.delay_range = [1, 3]  # avoid Instagram checkpoint/rate-limit
@@ -166,7 +303,13 @@ def saved_posts_by_collection(client: Any, max_per_collection: int = 0):
             # One unreadable collection must not abort the whole sync, but
             # silence here means a collection can go missing from every run
             # with nothing to show for it.
-            logger.warning("skipping collection %r: %s", name, exc)
+            #
+            # ERROR, não WARNING: com o `parse_items_tolerant` embaixo, um post
+            # malformado não chega mais até aqui. Cair neste except passou a
+            # significar falha de REQUISIÇÃO -- 429, sessão expirada, rede --
+            # e o custo continua sendo a coleção inteira. Quando isso acontece
+            # com a catch-all, some o único lugar que lista TODOS os salvos.
+            logger.error("coleção %r PERDIDA INTEIRA, nenhum post listado: %s", name, exc)
             continue
         yield name, [{"media": m, "collection_name": name} for m in medias]
 
@@ -270,11 +413,19 @@ def sync_saved_posts(
     `reprocessar=True` ignora `existing_pks` e reenfileira tudo. O worker
     ainda pula o que já está no banco (`document_exists`), então isso só faz
     sentido junto com uma limpeza -- ou para reprocessar de propósito.
+
+    **`descartados` existe para a perda não ser invisível.** Antes, um retorno
+    `{ok, published, skipped_existing, total}` era idêntico entre "você tem
+    3111 posts" e "você acabou de perder 507": a diferença aparecia só num
+    `total` menor, que ninguém tem com o que comparar. O contador vem do
+    cliente tolerante (`tolerant_client_class`); com um cliente qualquer -- os
+    testes, o caminho legado -- ele é 0 e nada muda.
     """
     publicados = 0
     pulados = 0
     total = 0
     vistos: set[str] = set()
+    descartados_antes = len(getattr(client, "descartados", []))
 
     for nome, entradas in saved_posts_by_collection(client):
         mensagens = to_messages(entradas)
@@ -299,11 +450,20 @@ def sync_saved_posts(
                 "published": len(novas),
                 "skipped": pulou,
                 "published_total": publicados,
+                "discarded_total": len(getattr(client, "descartados", [])) - descartados_antes,
             })
+
+    descartados = len(getattr(client, "descartados", [])) - descartados_antes
+    if descartados:
+        logger.warning(
+            "%d post(s) descartado(s) na listagem; o payload cru está em %s",
+            descartados, DESCARTADOS_FILE,
+        )
 
     return {
         "ok": True,
         "published": publicados,
         "skipped_existing": pulados,
+        "descartados": descartados,
         "total": total,
     }

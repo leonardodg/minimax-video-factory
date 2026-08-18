@@ -541,7 +541,9 @@ def ig_sync_saved(
     Nao processa nada — o daemon ig-worker consome a fila em background.
     Publica CONFORME enumera, uma colecao por vez, entao o worker ja comeca a
     trabalhar antes de a varredura terminar.
-    Retorna {ok, published, skipped_existing, total}."""
+    Retorna {ok, published, skipped_existing, descartados, total}.
+    `descartados` sao os posts que a listagem nao conseguiu converter e pulou;
+    o payload cru de cada um fica em output/ig-descartados.jsonl."""
     from minimax_mcp import db, ig_sync
 
     if not ig_sync.IG_SESSIONID:

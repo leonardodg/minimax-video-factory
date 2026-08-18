@@ -305,6 +305,98 @@ if len(new) == 2:
 else:
     bad(f"split_new published {len(new)} messages for 2 distinct posts")
 
+print("== unit_ig_sync: um post podre não leva a página junto ==")
+
+# O defeito de 2026-08-10, reduzido ao osso: o instagrapi monta a página numa
+# list comprehension, então UM item que não converte derruba os outros -- e a
+# exceção ainda sobe pelo laço de paginação e apaga as páginas anteriores. Foi
+# assim que a catch-all inteira (3618 posts) sumiu e ~500 posts que só existem
+# nela nunca chegaram a virar mensagem na fila.
+
+
+class MediaFake:
+    """Só o que `to_messages` usa, mais o `code` que o modelo real exige."""
+
+    def __init__(self, raw):
+        self.pk = raw["pk"]
+        self.code = raw["code"]        # KeyError se faltar -- é o defeito real
+        self.media_type = raw.get("media_type", 2)
+        self.caption_text = raw.get("caption", "")
+        self.user = User()
+
+
+PAGINA = [
+    {"pk": "1", "code": "AAA"},
+    {"pk": "2"},                        # ← o post degradado, sem `code`
+    {"pk": "3", "code": "CCC"},
+]
+
+descartes = []
+sobreviventes = ig_sync.parse_items_tolerant(
+    PAGINA, MediaFake, on_discard=lambda raw, exc: descartes.append((raw, exc))
+)
+
+if [m.pk for m in sobreviventes] == ["1", "3"]:
+    ok("os posts sadios da página sobrevivem ao item malformado")
+else:
+    bad(
+        f"sobraram {[m.pk for m in sobreviventes]}, esperado ['1', '3']. "
+        "Um item ruim ainda está derrubando a página inteira."
+    )
+
+if len(descartes) == 1 and descartes[0][0]["pk"] == "2":
+    ok("o descarte é contado e entrega o payload cru de quem falhou")
+else:
+    bad(f"descartes = {descartes!r}. Perda silenciosa é o modo de falha a evitar.")
+
+# A ordem importa: o item ruim está no MEIO. Se a implementação parasse no
+# primeiro erro em vez de seguir, o post "3" sumiria e o teste acima passaria
+# por acidente numa página de dois itens.
+if len(sobreviventes) == 2 and sobreviventes[-1].pk == "3":
+    ok("a listagem continua DEPOIS do item ruim, não para nele")
+else:
+    bad("a conversão parou no primeiro erro em vez de seguir a página")
+
+
+def registrador_quebrado(raw, exc):
+    raise OSError("disco cheio")
+
+
+try:
+    ainda = ig_sync.parse_items_tolerant(PAGINA, MediaFake, on_discard=registrador_quebrado)
+    if [m.pk for m in ainda] == ["1", "3"]:
+        ok("um registrador que falha não custa a página")
+    else:
+        bad(f"sobraram {[m.pk for m in ainda]} com o registrador quebrado")
+except Exception as exc:
+    bad(f"o registrador quebrado derrubou a listagem: {exc!r} — trocar 500 posts por um log")
+
+print("== unit_ig_sync: o descarte vai para o disco, com o payload cru ==")
+
+import json as _json
+import tempfile as _tempfile
+
+with _tempfile.TemporaryDirectory() as _tmp:
+    _alvo = str(Path(_tmp) / "sub" / "descartados.jsonl")
+    ig_sync.registrar_descarte({"pk": "2", "id": "2_9"}, KeyError("code"), caminho=_alvo)
+    ig_sync.registrar_descarte({"pk": "7"}, ValueError("outro"), caminho=_alvo)
+    _linhas = [_json.loads(x) for x in Path(_alvo).read_text(encoding="utf-8").splitlines()]
+
+    if len(_linhas) == 2:
+        ok("cada descarte é uma linha JSONL, escrita na hora (append)")
+    else:
+        bad(f"gravou {len(_linhas)} linhas, esperado 2")
+
+    if _linhas[0]["ig_pk"] == "2" and _linhas[0]["raw"] == {"pk": "2", "id": "2_9"}:
+        ok("o payload cru é preservado — é a única cópia que sobra do post")
+    else:
+        bad(f"registro = {_linhas[0]!r}")
+
+    if "code" in _linhas[0]["faltando"]:
+        ok("o registro diz QUAL campo obrigatório faltou")
+    else:
+        bad(f"faltando = {_linhas[0]['faltando']!r}, esperado conter 'code'")
+
 print("== unit_ig_sync: a coleção guarda-chuva não vira tag ==")
 
 if ig_sync.to_messages([{"media": Media("2002", 2), "collection_name": None}])[0][
