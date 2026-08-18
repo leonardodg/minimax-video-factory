@@ -11,7 +11,7 @@ Os comandos `kb-*` só funcionam contra o servidor **host** (`minimax-knowledge-
 |---|---|---|
 | `/ig-progress` | `ig_get_progress` | Mostra os últimos N posts do Instagram processados pelo ig-worker (state em downloads/ig) |
 | `/ig-status` | `ig_queue_status` | Mostra o tamanho da fila ig.saved (ready/dead) e quantos consumidores ativos |
-| `/ig-sync` | `ig_sync_saved` | Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved |
+| `/ig-sync` | `ig_sync_saved` | Enfileira os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved |
 | `/ig-worker` | `ig_worker_start` | Envia o comando 'start' ao daemon ig-worker (retoma o consumo da fila) |
 | `/ig-worker-stop` | `ig_worker_stop` | Envia o comando 'stop' ao daemon ig-worker (pausa o consumo da fila) |
 | `/kb-buscar` | `knowledge_search` | Busca na base de conhecimento (palavra-chave + semântica) |
@@ -442,11 +442,15 @@ Mostra o tamanho da fila ig.saved (ready/dead) e quantos consumidores ativos.
 
 ### `/ig-sync`
 
-Enfileira todos os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
+Enfileira os posts salvos do Instagram (via IG_SESSIONID) na fila ig.saved.
 
 ```
-/ig-sync
+/ig-sync [reprocessar=False]
 ```
+
+| Parâmetro | Obrigatório | Default | Descrição |
+|---|---|---|---|
+| `reprocessar` | não | `False` | Reenfileira TUDO, inclusive o que já está no banco. O padrão (False) publica só os ig_pk novos. |
 
 ### `/ig-worker`
 
