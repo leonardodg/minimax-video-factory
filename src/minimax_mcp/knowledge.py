@@ -339,9 +339,14 @@ def _ingest_markdown_file(
             llm_provider="frontmatter", llm_model="none",
         )
 
+    # A segunda tentativa era `generate_structured(body[:4000])` -- cortar a
+    # nota pela metade e torcer. Isso existia porque a primeira chamada
+    # estourava o contexto do Ollama sem avisar, e encurtar "resolvia". Agora o
+    # `generate_structured` mede o orçamento, corta só o que não cabe e
+    # REGISTRA quanto perdeu, além de já repetir duas vezes por conta própria.
+    # Um corte fixo em 4000 aqui só jogaria fora nota boa: o orçamento real com
+    # num_ctx=8192 passa de 20.000 caracteres.
     gen = llm.generate_structured(body)
-    if not gen.get("ok"):
-        gen = llm.generate_structured(body[:4000])
     if not gen.get("ok"):
         return {"ok": False, "stage": "llm", "error": gen.get("error")}
 

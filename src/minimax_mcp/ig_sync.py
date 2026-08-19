@@ -340,6 +340,15 @@ def to_messages(items: list[dict]) -> list[dict]:
             "media_type": media_type,
             "url": post_url(pk, getattr(m, "code", None)),
             "title": title,
+            # A legenda INTEIRA, não só a primeira linha. Ela já está aqui, de
+            # graça: o `Media` da enumeração traz `caption_text` completo e a
+            # gente usava 80 caracteres dele para o título e jogava o resto
+            # fora. O worker então dependia do `media_info` para reavê-la -- e
+            # quando a mídia vem reaproveitada do disco não há `media_info`
+            # nenhum, então a legenda sumia. Medido em 2026-08-19: em 21 de 24
+            # documentos de vídeo mudo a legenda nunca chegou ao modelo, e os
+            # 21 eram exatamente os reaproveitados do disco.
+            "caption": caption or None,
             "owner_username": getattr(user, "username", None),
             "collection_name": entry.get("collection_name"),
             "status": "queued",

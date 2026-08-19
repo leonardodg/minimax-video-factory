@@ -104,6 +104,12 @@ def test_unit_vault():
 
 
 @pytest.mark.unit
+def test_unit_cortes():
+    result = _run_script("unit_cortes.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
 def test_unit_midia_degradada():
     result = _run_script("unit_midia_degradada.py")
     assert result.returncode == 0, result.stdout + result.stderr
