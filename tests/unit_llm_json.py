@@ -34,13 +34,22 @@ COMPLETO = '{"resumo":"r","tutorial":"t","objetivos":["o"],"tags":["a"]}'
 
 
 def com_respostas(*respostas):
-    """Troca o gerador do ollama por uma fila de respostas fixas."""
+    """Troca o gerador do ollama por uma fila de respostas fixas.
+
+    Esgotada a fila, REPETE a última. O `fila[-1]` de antes estourava com
+    `IndexError` numa lista já vazia -- só não aparecia porque nenhum teste
+    chamava mais vezes do que havia respostas. Passou a aparecer quando a
+    retentativa cobriu também o JSON válido de esquema errado.
+    """
     fila = list(respostas)
+    ultima = {"valor": respostas[-1] if respostas else ""}
     chamadas = []
 
     def falso(prompt, model, *, force_json=False):
         chamadas.append(prompt)
-        return fila.pop(0) if fila else fila[-1]
+        if fila:
+            ultima["valor"] = fila.pop(0)
+        return ultima["valor"]
 
     return falso, chamadas
 
@@ -90,6 +99,38 @@ try:
             ok(f"sem resumo utilizável -> falha ({resposta[:28]}...)")
         else:
             bad(f"deveria falhar sem resumo: {r!r}")
+
+    print("== unit_llm_json: esquema errado também merece a segunda chance ==")
+
+    # A outra metade da MESMA falha estocástica, medida em 2026-08-18: o modelo
+    # devolve JSON perfeitamente válido, mas com as chaves do CONTEÚDO em vez
+    # das pedidas -- posts de captura de tela, onde a entrada já chega
+    # estruturada e ele se ancora nela. Foram 39 ingestões perdidas com uma só
+    # tentativa, enquanto o JSON quebrado ganhava duas.
+    ESQUEMA_ERRADO = '{"transacao":{"status":"Pendente","prazo_estimado":"15-60 min"}}'
+
+    llm._ollama_generate, chamadas = com_respostas(ESQUEMA_ERRADO, COMPLETO)
+    r = llm.generate_structured("material")
+    if r.get("ok") and r.get("resumo") == "r" and len(chamadas) == 2:
+        ok("esquema errado na 1ª, formato certo na 2ª -> documento sai")
+    else:
+        bad(f"não repetiu com esquema errado: {r!r} chamadas={len(chamadas)}")
+
+    llm._ollama_generate, chamadas = com_respostas(ESQUEMA_ERRADO, ESQUEMA_ERRADO)
+    r = llm.generate_structured("material")
+    if not r.get("ok") and "resumo" in r.get("error", "") and len(chamadas) == 2:
+        ok("esquema errado nas duas -> falha, e só depois de DUAS tentativas")
+    else:
+        bad(f"deveria falhar após 2 tentativas: {r!r} chamadas={len(chamadas)}")
+
+    # A retentativa não pode virar imposto sobre o caminho feliz: uma resposta
+    # boa continua custando UMA geração.
+    llm._ollama_generate, chamadas = com_respostas(COMPLETO, COMPLETO)
+    r = llm.generate_structured("material")
+    if r.get("ok") and len(chamadas) == 1:
+        ok("resposta boa de primeira -> uma geração só, sem custo novo")
+    else:
+        bad(f"gerou {len(chamadas)} vezes para uma resposta que já servia")
 finally:
     llm._ollama_generate = _real
 

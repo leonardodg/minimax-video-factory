@@ -103,6 +103,27 @@ def test_unit_vault():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.unit
+def test_unit_midia_degradada():
+    result = _run_script("unit_midia_degradada.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# Os dois abaixo existiam desde sempre e NUNCA rodaram por aqui: sem uma entrada
+# neste arquivo, `pytest -m unit` não os enxerga, e um teste que ninguém executa
+# é documentação, não guarda. Descoberto em 2026-08-19, ao acrescentar o de cima.
+@pytest.mark.unit
+def test_unit_llm_json():
+    result = _run_script("unit_llm_json.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_unit_ig_sync_incremental():
+    result = _run_script("unit_ig_sync_incremental.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.integration_db
 def test_container_deps():
     """The image the README tells users to configure must be able to import

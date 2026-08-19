@@ -14,6 +14,27 @@ except ImportError:
     WhisperModel = None  # type: ignore
 
 
+def tem_faixa_de_audio(video_path: str | Path) -> bool | None:
+    """O arquivo tem faixa de áudio? `None` quando não deu para saber.
+
+    Três estados, e o terceiro importa: "não tem áudio" e "não consegui abrir
+    o arquivo" pedem reações opostas -- a primeira segue sem transcrever, a
+    segunda deixa o Whisper tentar e falhar com o erro dele, que é informativo.
+    Colapsar as duas em `False` faria um arquivo corrompido virar,
+    silenciosamente, um post "sem fala".
+
+    `av` vem junto com o faster-whisper, então não é dependência nova.
+    """
+    try:
+        import av
+
+        with av.open(str(video_path)) as container:
+            return bool(container.streams.audio)
+    except Exception as exc:
+        logger.debug("não consegui inspecionar as faixas de %s: %s", video_path, exc)
+        return None
+
+
 class AudioTranscriber:
     """Transcribes audio from video files using faster-whisper (local, GPU)."""
 
@@ -95,6 +116,31 @@ class AudioTranscriber:
         video_path = Path(video_path)
         if not video_path.exists():
             return {"ok": False, "error": f"File not found: {video_path}"}
+
+        # Vídeo SEM faixa de áudio não é falha, é ausência de fala -- e a
+        # diferença decidia se o post existia. O faster-whisper pede a faixa de
+        # áudio pelo índice, e num arquivo que só tem vídeo o PyAV levanta
+        # `IndexError: tuple index out of range` (av/container/streams.py:118).
+        # Isso subia como "Transcription failed", e o `process_message` aborta
+        # em transcrição falha (ig_worker.py:243) -- ANTES da cadeia que já
+        # existe logo abaixo dele, que faz um vídeo mudo virar documento pela
+        # tela e pela legenda. Resultado: 72 falhas e ~36 posts na DLQ na
+        # corrida de 2026-08-18, sendo que o caminho para salvá-los já estava
+        # escrito seis linhas depois.
+        #
+        # Devolver ok=True com texto vazio é o que entrega o post a essa
+        # cadeia: é o mesmo estado de um reel de música, que ela já trata.
+        if tem_faixa_de_audio(video_path) is False:
+            logger.info("%s não tem faixa de áudio; sem fala a transcrever", video_path)
+            return {
+                "ok": True,
+                "text": "",
+                "segments": [],
+                "language": language,
+                "language_probability": 0.0,
+                "duration": 0.0,
+                "sem_audio": True,
+            }
 
         logger.info("Transcribing %s with %s model", video_path, self.model_size)
 
