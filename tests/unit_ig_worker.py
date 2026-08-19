@@ -988,6 +988,102 @@ if _w.IG_DELETE_AFTER_INGEST is False:
 else:
     bad("IG_DELETE_AFTER_INGEST ligado por padrão apagaria a mídia preservada")
 
+print("== unit_ig_worker: carrossel misto (foto + vídeo) ==")
+
+# Os 9 posts que sobraram na DLQ de 2026-08-18 eram todos assim: fotos E vídeos
+# no mesmo post, `kind` decidido pelo PRIMEIRO arquivo. Começando por foto, o
+# post entrava como imagem e mandava os `.mp4` para o modelo de visão, que
+# devolvia `Failed to load image or audio file` -- e uma descrição falha
+# abortava o carrossel inteiro, com as fotos boas ao lado.
+
+MISTO = ["/tmp/a.jpg", "/tmp/b.mp4", "/tmp/c.jpg", "/tmp/d.mp4"]
+
+
+# Receptor permissivo: aqui o que se testa é QUAIS arquivos chegam ao modelo de
+# visão, não o texto final -- o `ingest_img` de cima trava num texto fixo.
+textos = []
+
+
+def ingest_qualquer(text, **kw):
+    textos.append(text)
+    return {"ok": True, "document_id": 99}
+
+
+def dl_misto(msg):
+    return {"ok": True, "filepaths": list(MISTO), "filepath": MISTO[0]}
+
+
+vistos = []
+
+
+def describe_so_imagem(path):
+    vistos.append(path)
+    if path.endswith(".mp4"):
+        # O que o Ollama de verdade devolve para um vídeo.
+        return {"ok": False, "error": "vision failed: Client error '400 Bad Request'"}
+    return {"ok": True, "conteudo_principal": f"desc {path}", "categoria": "receita"}
+
+
+res = ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=dl_misto, transcribe=None, describe=describe_so_imagem,
+    read_screen=None, ingest=ingest_qualquer,
+)
+
+if res["status"] == "done":
+    ok("carrossel misto vira documento em vez de morrer no primeiro .mp4")
+else:
+    bad(f"carrossel misto = {res!r}")
+
+if vistos == ["/tmp/a.jpg", "/tmp/c.jpg"]:
+    ok("só as imagens vão para o modelo de visão; os vídeos nem são tentados")
+else:
+    bad(f"mandou {vistos!r} -- um .mp4 no modelo de imagem é 400 na certa")
+
+# Uma foto ruim no meio não pode custar as outras -- é o mesmo erro estrutural
+# que fazia um post malformado derrubar a coleção inteira na listagem.
+def describe_uma_ruim(path):
+    if path == "/tmp/a.jpg":
+        return {"ok": False, "error": "vision failed: 400"}
+    return {"ok": True, "conteudo_principal": "sobrevivi", "categoria": "receita"}
+
+
+res = ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=dl_misto, transcribe=None, describe=describe_uma_ruim,
+    read_screen=None, ingest=ingest_qualquer,
+)
+if res["status"] == "done":
+    ok("uma foto que falha não derruba as outras do carrossel")
+else:
+    bad(f"uma falha derrubou o carrossel inteiro: {res!r}")
+
+# Mas se NENHUMA descreve, não há post -- e o erro tem de dizer isso.
+res = ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=dl_misto, transcribe=None,
+    describe=lambda p: {"ok": False, "error": "vision failed: 400"},
+    read_screen=None, ingest=ingest_qualquer,
+)
+if res["status"] == "error" and "todas" in res.get("error", ""):
+    ok("nenhuma imagem descreveu -> erro claro, não documento vazio")
+else:
+    bad(f"deveria falhar com todas as imagens ruins: {res!r}")
+
+# Carrossel só de vídeo entra como vídeo pelo `kind`; o caso que chega aqui é o
+# post cujo primeiro arquivo é imagem mas nenhum outro é -- não pode virar
+# documento sem nada descrito.
+res = ig_worker.process_message(
+    {**MESSAGE, "media_type": "carousel"},
+    download=lambda m: {"ok": True, "filepaths": ["/tmp/x.jpg"], "filepath": "/tmp/x.jpg"},
+    transcribe=None, describe=lambda p: {"ok": False, "error": "vision failed: 400"},
+    read_screen=None, ingest=ingest_qualquer,
+)
+if res["status"] == "error":
+    ok("imagem única que não descreve continua sendo falha")
+else:
+    bad(f"imagem única ruim passou como sucesso: {res!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")

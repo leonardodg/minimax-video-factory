@@ -217,9 +217,17 @@ def process_message(
     """Download -> transcribe/describe -> ingest. Pure; all IO injected.
 
     Videos transcribe the first downloaded file. Images/carousels describe
-    EVERY downloaded file and join their conteudo_principal into one text so
-    content spread across carousel photos is captured. The first photo's
-    categoria becomes a `categoria:<name>` tag.
+    cada arquivo de IMAGEM e juntam os `conteudo_principal` num texto só, para
+    o conteúdo espalhado pelas fotos do carrossel não se perder. A categoria da
+    primeira foto vira a tag `categoria:<nome>`.
+
+    **Carrossel misto tem foto E vídeo, e o `kind` é decidido pelo primeiro
+    arquivo.** Um post que começa com foto entrava aqui como imagem e mandava
+    os `.mp4` junto para o modelo de visão, que devolvia o mesmo
+    `Failed to load image or audio file` do WebP -- 9 posts na DLQ de
+    2026-08-18, todos carrosséis mistos. Descrever só as imagens é o que faz
+    sentido: o modelo de visão não lê vídeo, e a foto do carrossel carrega o
+    conteúdo que interessa.
     """
     from minimax_mcp import ig_sync
 
@@ -313,10 +321,29 @@ def process_message(
             return {"status": "error", "error": "no describe provided for image", "filepaths": filepaths}
         pieces: list[str] = []
         escritos: list[str] = []
-        for fp in filepaths:
+        # Só as imagens. O modelo de visão não lê vídeo, e mandar um `.mp4`
+        # para ele devolvia HTTP 400 -- que, pela linha de baixo, matava o post
+        # inteiro mesmo com as fotos boas do lado.
+        imagens = [fp for fp in filepaths if classify_file(fp) == "image"]
+        if not imagens:
+            return {"status": "error", "error": "carrossel sem nenhuma imagem para descrever",
+                    "filepaths": filepaths}
+        if len(imagens) < len(filepaths):
+            logger.info(
+                "ig_pk=%s: carrossel misto, descrevendo %d imagem(ns) e ignorando %d vídeo(s)",
+                message.get("ig_pk"), len(imagens), len(filepaths) - len(imagens),
+            )
+        falhas: list[str] = []
+        for fp in imagens:
             de = describe(fp)
             if not de.get("ok"):
-                return {"status": "error", "error": de.get("error", "describe failed"), "filepaths": filepaths}
+                # Uma foto que não descreve não pode custar as outras. É o mesmo
+                # erro estrutural que fazia um post malformado derrubar a
+                # coleção inteira na listagem: o item ruim leva junto tudo o que
+                # já estava pago. Só falha o post se NENHUMA imagem descrever.
+                falhas.append(str(de.get("error", "describe failed")))
+                logger.warning("descrição falhou em %s: %s", Path(fp).name, de.get("error"))
+                continue
             pieces.append(de.get("conteudo_principal") or de.get("text") or "")
             if categoria is None:
                 categoria = de.get("categoria")
@@ -332,6 +359,13 @@ def process_message(
                     escritos.append(rs["text"].strip())
                 elif not rs.get("ok"):
                     logger.warning("leitura de texto da imagem falhou: %s", rs.get("error"))
+        if falhas and not pieces:
+            # NENHUMA imagem descreveu -- aí não há post. Devolve o primeiro
+            # erro, que é o que o diagnóstico precisa; contar as falhas diz se
+            # foi um azar ou o post todo.
+            return {"status": "error",
+                    "error": f"describe falhou em todas as {len(falhas)} imagem(ns): {falhas[0]}",
+                    "filepaths": filepaths}
         descricao = "\n\n".join(p for p in pieces if p)
         lido = merge_screen_text(escritos)
         # REGRA: post só de imagem, sem fala nenhuma -> o TEXTO DA IMAGEM é o
