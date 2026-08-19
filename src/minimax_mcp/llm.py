@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import os
@@ -328,6 +329,20 @@ def generate_structured(
         # documento inteiro se perdia -- transcrição, leitura de tela e minutos
         # de GPU já pagos -- por causa de um sorteio ruim. Repetir custa uma
         # geração e resolve o que é ruído.
+        # A retentativa cobria só o JSON malformado, e ficava de fora a outra
+        # metade da MESMA falha: JSON válido com o esquema errado. Medido em
+        # 2026-08-18, nas respostas que mataram 39 ingestões, o modelo não
+        # "perdia uma chave" -- ele descartava o formato pedido e devolvia uma
+        # estrutura espelhando o conteúdo do post:
+        #
+        #     {"transacao": {"status": "Pendente", "prazo_estimado": ...}}
+        #     {"descricao_imagem": {"titulo": ..., "conteudo": [...]}}
+        #
+        # São posts de captura de tela, onde a entrada já chega estruturada e o
+        # modelo local se ancora nela em vez de no formato. É tão estocástico
+        # quanto o JSON quebrado, e o argumento escrito acima -- "repetir custa
+        # uma geração e resolve o que é ruído" -- vale igual. Não valia só
+        # porque o `break` acontecia antes de alguém olhar o conteúdo.
         for tentativa in (1, 2):
             if provider == "ollama":
                 raw = _ollama_generate(prompt, model, force_json=True)
@@ -336,8 +351,7 @@ def generate_structured(
             else:
                 return {"ok": False, "error": f"Unknown LLM_PROVIDER: {provider}"}
             try:
-                parsed = parse_llm_json(raw)
-                break
+                candidato = parse_llm_json(raw)
             except Exception as exc:
                 logger.warning(
                     "tentativa %d: JSON inválido (%s). Resposta bruta: %.400r",
@@ -345,6 +359,15 @@ def generate_structured(
                 )
                 if tentativa == 2:
                     return {"ok": False, "error": f"LLM devolveu JSON inválido: {exc}", "raw": raw}
+                continue
+
+            parsed = candidato
+            if str(candidato.get("resumo") or "").strip():
+                break
+            logger.warning(
+                "tentativa %d: JSON válido mas sem 'resumo' (chaves: %s). Resposta bruta: %.400r",
+                tentativa, sorted(candidato)[:8], raw,
+            )
 
         assert parsed is not None
         # `resumo` é o único campo sem o qual não existe documento. `tutorial`,
@@ -354,7 +377,7 @@ def generate_structured(
         # do formato -- que foi exatamente o erro observado
         # ("missing keys: {'tags', 'objetivos'}").
         if not str(parsed.get("resumo") or "").strip():
-            logger.warning("resposta sem resumo. Resposta bruta: %.400r", raw)
+            logger.warning("resposta sem resumo nas duas tentativas. Resposta bruta: %.400r", raw)
             return {"ok": False, "error": "LLM response missing keys: {'resumo'}", "raw": raw}
         faltando = {"tutorial", "objetivos", "tags"} - parsed.keys()
         if faltando:
@@ -486,13 +509,60 @@ def parse_vision_reply(raw: str) -> dict:
     return parsed
 
 
+# Os formatos que o decodificador de imagem do Ollama aceita direto. O resto
+# passa pelo `imagem_para_b64`, que reencoda antes de mandar.
+FORMATOS_ACEITOS = {"JPEG", "PNG", "GIF", "BMP"}
+
+
+def imagem_para_b64(image_path: str) -> str:
+    """Le a imagem e devolve base64 que o Ollama consegue decodificar.
+
+    **O `.webp` do Instagram era 400 na hora.** Medido em 2026-08-19 com a
+    mesma imagem nos dois formatos:
+
+        webp -> HTTP 400  {"error":"Failed to load image or audio file"}
+        jpeg -> HTTP 200  "A imagem mostra um mousse de limão com chia..."
+
+    O Instagram serve boa parte dos posts de imagem em WebP, e o decodificador
+    do Ollama nao le esse formato: a resposta vinha em ~200 ms, que e' o tempo
+    de recusar a requisicao, nao o de olhar a imagem. Foram 117 falhas e 23
+    posts na DLQ -- o segundo maior motivo de perda da corrida de 2026-08-18.
+
+    A decisao e' pelo FORMATO QUE O PIL DETECTA, nao pela extensao: entre os
+    posts que falharam havia um `.heic` cujo conteudo era JPEG. Extensao e'
+    palpite do servidor; `Image.open` le os bytes.
+
+    Reencodar so' quando precisa mantem o caminho comum sem custo -- a maioria
+    ja' e' JPEG e sai daqui como os mesmos bytes que entraram.
+    """
+    dados = Path(image_path).read_bytes()
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(dados)) as im:
+            if im.format in FORMATOS_ACEITOS:
+                return base64.b64encode(dados).decode("ascii")
+            logger.info("convertendo %s de %s para JPEG", Path(image_path).name, im.format)
+            # RGBA/P nao existem em JPEG; sem isto o save levanta OSError.
+            alvo = im.convert("RGB")
+            buf = io.BytesIO()
+            alvo.save(buf, format="JPEG", quality=90)
+            return base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as exc:
+        # Melhor mandar os bytes originais e deixar o Ollama decidir do que
+        # falhar aqui: se o formato ja' servia, nada muda; se nao servia, o
+        # erro continua sendo o mesmo de antes, nao um novo.
+        logger.warning("nao consegui normalizar %s (%s); mandando como esta'", image_path, exc)
+        return base64.b64encode(dados).decode("ascii")
+
+
 def describe_image(
     image_path: str, *, model: str | None = None, categories: list[str] | None = None
 ) -> dict:
     """Describe an image with a local vision LLM via Ollama /api/generate."""
     model = model or VISION_MODEL
     try:
-        b64 = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
+        b64 = imagem_para_b64(image_path)
     except OSError as e:
         return {"ok": False, "error": f"read image failed: {e}"}
 
@@ -552,7 +622,7 @@ def read_screen(image_path: str, *, model: str | None = None) -> dict:
     """
     model = model or VISION_MODEL
     try:
-        b64 = base64.b64encode(Path(image_path).read_bytes()).decode("ascii")
+        b64 = imagem_para_b64(image_path)
     except OSError as e:
         return {"ok": False, "error": f"read image failed: {e}"}
 
