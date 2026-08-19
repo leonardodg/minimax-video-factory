@@ -32,6 +32,29 @@ LLM_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "900.0"))
 OLLAMA_KEEP_ALIVE = os.environ.get("OLLAMA_KEEP_ALIVE", "0")
 EMBED_TIMEOUT = float(os.environ.get("EMBED_TIMEOUT", "120.0"))
 
+# **A janela de contexto tem de ser declarada.** Sem `num_ctx`, o Ollama usa o
+# padrão dele -- medido em 2026-08-19: 2048 tokens, num modelo que suporta
+# 32768. E o que ele faz ao estourar é o pior comportamento possível:
+#
+#     enviados 7206 tokens, num_ctx padrão -> LEU 2051, HTTP 200, sem aviso
+#       pergunta: "qual é o MARCADOR-INICIO e qual é o MARCADOR-FIM?"
+#       resposta: "O marcador início é JABUTICABA e o marcador fim é JABUTICABA"
+#                  (JABUTICABA era o do FIM; o do início foi descartado)
+#     mesmos 7206 tokens, num_ctx=8192      -> leu 7768, acertou os dois
+#
+# Ele descarta pela FRENTE e responde com confiança usando o que sobrou. Como o
+# molde do prompt (regras + formato JSON) vem no começo e o material no fim, o
+# que se perdia num documento longo eram as INSTRUÇÕES -- o modelo recebia texto
+# cru sem saber o que fazer com ele. 76 documentos (2,2%) passam de 5.000
+# caracteres, e o maior tem 21.715.
+LLM_NUM_CTX = int(os.environ.get("LLM_NUM_CTX", "8192"))
+# A janela da visão é menor porque a imagem já é a maior parte do prompt dela,
+# e o texto que a acompanha é curto.
+VISION_NUM_CTX = int(os.environ.get("VISION_NUM_CTX", "4096"))
+# Caracteres por token em português. Conservador de propósito: subestimar o
+# token faz o corte chegar tarde demais, que é o defeito que estamos matando.
+CHARS_POR_TOKEN = 3
+
 # Um prompt, TRÊS regras. Ele já teve seis, cada uma acrescentada por um caso
 # que falhou -- código, CTA, meme, "a tela é cenário" com o exemplo do AWS,
 # antes/depois, contrato de citação -- e chegou a 3655 caracteres. Foi o mesmo
@@ -126,6 +149,39 @@ def build_summary_prompt(
     )
 
 
+def orcamento_de_material(*, num_ctx: int, num_predict: int, molde: str) -> int:
+    """Quantos CARACTERES de material cabem, descontando molde e resposta.
+
+    O molde e a resposta são inegociáveis: sem as regras o modelo não sabe o
+    formato, e sem espaço de saída ele para no meio. O que sobra é do material.
+    """
+    reserva = num_predict + len(molde) // CHARS_POR_TOKEN + 64  # 64 = folga
+    return max(0, (num_ctx - reserva) * CHARS_POR_TOKEN)
+
+
+def cortar_material(material: str, limite: int) -> tuple[str, int]:
+    """Corta o material no limite e devolve (texto, caracteres perdidos).
+
+    **Cortar aqui é melhor que deixar o Ollama cortar**, por três razões que o
+    experimento de 2026-08-19 mostrou:
+
+      1. ele corta pela FRENTE, levando as instruções; nós cortamos o material,
+         que é o único pedaço de que se pode abrir mão;
+      2. ele corta em silêncio -- HTTP 200, resposta confiante e errada; nós
+         registramos quanto se perdeu;
+      3. mantendo o começo do material, o assunto sobrevive: é o fim de uma
+         transcrição que costuma ser CTA e despedida.
+
+    Corta na fronteira de palavra mais próxima, para não partir uma no meio.
+    """
+    if limite <= 0 or len(material) <= limite:
+        return material, 0
+    corte = material.rfind(" ", 0, limite)
+    if corte < limite // 2:  # texto sem espaços (URL gigante, base64)
+        corte = limite
+    return material[:corte], len(material) - corte
+
+
 def parse_llm_json(raw: str) -> dict[str, Any]:
     """Parse a JSON object out of an LLM response, tolerating ```json fences."""
     raw = raw.strip()
@@ -181,7 +237,11 @@ def _ollama_payload(prompt: str, model: str, *, force_json: bool) -> dict[str, A
         "model": model,
         "messages": _build_messages(prompt, force_json=force_json),
         "stream": False,
-        "options": {"num_predict": 2048, "temperature": 0.2},
+        # `num_ctx` explícito: o padrão do Ollama é 2048 e ele estoura calado.
+        # `num_predict` subiu de 2048 porque resumo + tutorial + objetivos +
+        # tags dividem a mesma cota, e 111 tutoriais terminavam sem pontuação
+        # final -- assinatura de texto cortado no meio.
+        "options": {"num_ctx": LLM_NUM_CTX, "num_predict": 3072, "temperature": 0.2},
         "keep_alive": OLLAMA_KEEP_ALIVE,
     }
     if force_json:
@@ -317,6 +377,22 @@ def generate_structured(
     """
     provider = provider or LLM_PROVIDER
     model = model or LLM_MODEL
+
+    # Se algo tem de ser cortado, que seja O MATERIAL, aqui, e com registro.
+    # Deixar para o Ollama significa perder as REGRAS (ele descarta pela frente)
+    # e não saber que aconteceu -- ele devolve 200 e responde com confiança
+    # usando o pedaço que sobrou.
+    molde = build_summary_prompt("", is_image=is_image, categories=categories)
+    limite = orcamento_de_material(num_ctx=LLM_NUM_CTX, num_predict=3072, molde=molde)
+    transcription, perdidos = cortar_material(transcription, limite)
+    if perdidos:
+        logger.warning(
+            "material cortado por caber em num_ctx=%d: %d de %d caracteres "
+            "descartados (%.0f%%). O documento sai incompleto.",
+            LLM_NUM_CTX, perdidos, len(transcription) + perdidos,
+            100 * perdidos / (len(transcription) + perdidos),
+        )
+
     prompt = build_summary_prompt(
         transcription, is_image=is_image, categories=categories
     )
@@ -571,7 +647,10 @@ def describe_image(
         "prompt": build_vision_prompt(categories),
         "images": [b64],
         "stream": False,
-        "options": {"num_predict": 512, "temperature": 0.2},
+        # `num_ctx` explícito: a imagem sozinha já ocupa mais de mil tokens
+        # no qwen2.5vl, e o padrão de 2048 do Ollama deixava pouco para o
+        # prompt -- estourando calado, como todo o resto.
+        "options": {"num_ctx": VISION_NUM_CTX, "num_predict": 1024, "temperature": 0.2},
     }
     try:
         resp = httpx.post(
@@ -632,7 +711,10 @@ def read_screen(image_path: str, *, model: str | None = None) -> dict:
         "images": [b64],
         "stream": False,
         "keep_alive": 0,
-        "options": {"num_predict": 512, "temperature": 0},
+        # A tarefa aqui é COPIAR o texto da tela, então o teto de saída é o
+        # teto do que se consegue ler: num print denso de código ou
+        # infográfico, 512 tokens paravam no meio da tela.
+        "options": {"num_ctx": VISION_NUM_CTX, "num_predict": 2048, "temperature": 0},
     }
     try:
         resp = httpx.post(

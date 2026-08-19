@@ -277,7 +277,14 @@ def process_message(
             # Sem fala, a tela É o conteúdo -- e vem antes da legenda, que é
             # material de divulgação. É o caso dos posts de dica sobre imagem
             # parada com música, que o usuário apontou em 2026-08-10.
-            legenda = (dl.get("caption") or "").strip()
+            # A MESMA cadeia de reserva do ramo de baixo. Ela existia lá e
+            # faltava aqui, e a diferença custou 21 documentos: quando a
+            # mídia vem do disco não há `media_info`, `dl["caption"]` volta
+            # vazio, e a legenda era descartada em silêncio. A mensagem da
+            # fila agora carrega a legenda inteira; o título é o último
+            # reserva, para as mensagens antigas que não a têm.
+            legenda = (dl.get("caption") or message.get("caption")
+                       or message.get("title") or "").strip()
             text = f"--- texto na tela ---\n{tela}"
             if legenda:
                 text = f"{text}\n\n--- legenda ---\n{legenda}"
@@ -301,7 +308,8 @@ def process_message(
             # título da mensagem é o reserva, e é pior (primeira linha, 80
             # caracteres) -- só serve quando a mídia veio reaproveitada do disco
             # e não houve `media_info`.
-            text = (dl.get("caption") or message.get("title") or "").strip()
+            text = (dl.get("caption") or message.get("caption")
+                    or message.get("title") or "").strip()
             lang = "pt"
             if not text:
                 # Sem fala e sem legenda não existe documento possível: não há
