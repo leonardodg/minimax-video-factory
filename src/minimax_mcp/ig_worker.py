@@ -263,65 +263,75 @@ def process_message(
         # 10,8 GB dos 12,3 GB da placa, sobrando 1,4 GB. O modelo de visão pede
         # ~6 GB. Dois processos disputando a GPU colidiriam -- um de cada vez, não.
         tela = ""
+        descricao_video = ""
         if read_screen is not None:
             rs = read_screen(filepaths[0])
             if rs.get("ok"):
                 tela = (rs.get("text") or "").strip()
+                descricao_video = (rs.get("descricao") or "").strip()
             else:
                 # Ler a tela é ganho, não requisito: a falha não pode custar a
                 # transcrição que já foi paga.
                 logger.warning("leitura de tela falhou: %s", rs.get("error"))
-        if tela and (text or "").strip():
-            text = f"{text}\n\n--- texto na tela ---\n{tela}"
-        elif tela:
-            # Sem fala, a tela É o conteúdo -- e vem antes da legenda, que é
-            # material de divulgação. É o caso dos posts de dica sobre imagem
-            # parada com música, que o usuário apontou em 2026-08-10.
-            # A MESMA cadeia de reserva do ramo de baixo. Ela existia lá e
-            # faltava aqui, e a diferença custou 21 documentos: quando a
-            # mídia vem do disco não há `media_info`, `dl["caption"]` volta
-            # vazio, e a legenda era descartada em silêncio. A mensagem da
-            # fila agora carrega a legenda inteira; o título é o último
-            # reserva, para as mensagens antigas que não a têm.
-            legenda = (dl.get("caption") or message.get("caption")
-                       or message.get("title") or "").strip()
-            text = f"--- texto na tela ---\n{tela}"
-            if legenda:
-                text = f"{text}\n\n--- legenda ---\n{legenda}"
+
+        # **A legenda entra SEMPRE, tenha havido fala ou não.** Antes ela só
+        # era usada quando não havia fala nenhuma, com o argumento de que é
+        # material de divulgação. O argumento vale para o CTA, não para a
+        # legenda inteira: em receita e tutorial é nela que estão os
+        # ingredientes e as medidas que a narração não diz. O `strip_cta`
+        # adiante tira a divulgação; jogar a legenda fora tirava junto o
+        # conteúdo. Decidido com o usuário em 2026-08-19.
+        #
+        # A cadeia de reserva: o `media_info` do download, senão a legenda que
+        # a mensagem carrega desde a enumeração, senão o título. Quando a mídia
+        # vem reaproveitada do disco não há `media_info`, e sem essa cadeia a
+        # legenda sumia -- 21 documentos em 2026-08-19.
+        legenda = (dl.get("caption") or message.get("caption")
+                   or message.get("title") or "").strip()
+
+        # A ordem é a da confiabilidade: a fala é o conteúdo, o que está escrito
+        # na tela vem logo atrás, a descrição visual é apoio e a legenda fecha
+        # -- ela é a que mais mistura conteúdo com divulgação.
+        fala = (text or "").strip()
+        partes = []
+        if fala:
+            partes.append(fala)
+        if tela:
+            partes.append(f"--- texto na tela ---\n{tela}")
+        if descricao_video:
+            partes.append(f"--- descrição do vídeo ---\n{descricao_video}")
+        if legenda:
+            partes.append(f"--- legenda ---\n{legenda}")
+        text = "\n\n".join(partes)
+
+        if not fala:
+            # Sem fala o idioma não vem do Whisper; o material é texto na tela,
+            # descrição e legenda, todos em português nesta base.
             lang = "pt"
-            logger.info(
-                "ig_pk=%s sem fala; usando a tela (%d caracteres)",
-                message.get("ig_pk"), len(tela),
-            )
-        if not (text or "").strip():
-            # Vídeo sem fala nenhuma -- reel de música. Medido no piloto de
-            # 2026-08-10: 4 dos 40 primeiros posts (10%), com o VAD do Whisper
-            # removendo 100% do áudio ("VAD filter removed 00:10.613" num clipe
-            # de 00:10.613). O `ingest_text` recusa texto vazio, então isso
-            # falhava e ia para a DLQ depois de TRÊS tentativas.
+        logger.info(
+            "ig_pk=%s: fala=%d tela=%d descrição=%d legenda=%d caracteres",
+            message.get("ig_pk"), len(fala), len(tela),
+            len(descricao_video), len(legenda),
+        )
+        if not text.strip():
+            # Chegar aqui agora significa NADA: sem fala, sem texto na tela,
+            # sem descrição e sem legenda. Antes este bloco também servia de
+            # último resgate pela legenda -- deixou de precisar, porque ela
+            # entra sempre lá em cima.
             #
-            # As três tentativas eram desperdício garantido: transcrever o mesmo
-            # arquivo dá o mesmo vazio, sempre. Na escala da corrida, ~15 h de
-            # GPU para re-falhar.
-            #
-            # A legenda completa vem do `media_info` que o download já fez; o
-            # título da mensagem é o reserva, e é pior (primeira linha, 80
-            # caracteres) -- só serve quando a mídia veio reaproveitada do disco
-            # e não houve `media_info`.
-            text = (dl.get("caption") or message.get("caption")
-                    or message.get("title") or "").strip()
-            lang = "pt"
-            if not text:
-                # Sem fala e sem legenda não existe documento possível: não há
-                # texto nenhum para resumir. `permanent` manda direto para a
-                # DLQ, sem gastar as duas tentativas restantes num resultado
-                # que já se sabe.
-                return {
-                    "status": "error", "error": "sem fala e sem legenda",
-                    "permanent": True, "filepaths": filepaths,
-                }
+            # O caso original continua existindo: reel de música, medido no
+            # piloto de 2026-08-10 em 4 dos 40 primeiros posts (10%), com o VAD
+            # do Whisper removendo 100% do áudio. `permanent` manda direto para
+            # a DLQ, sem gastar as duas tentativas restantes: transcrever o
+            # mesmo arquivo dá o mesmo vazio, sempre, e na escala da corrida
+            # isso eram ~15 h de GPU para re-falhar.
+            return {
+                "status": "error", "error": "sem fala, sem tela e sem legenda",
+                "permanent": True, "filepaths": filepaths,
+            }
+        if not fala:
             logger.info(
-                "ig_pk=%s sem fala; usando a legenda (%d caracteres)",
+                "ig_pk=%s sem fala; documento montado com %d caracteres de tela/descrição/legenda",
                 message.get("ig_pk"), len(text),
             )
     else:
@@ -381,12 +391,18 @@ def process_message(
         # modelo lia primeiro era "Como adicionar aspas automáticas em um bloco
         # de citação usando HTML e CSS" -- a descrição do que o post ensina, com
         # o CSS de verdade relegado ao fim.
+        partes = []
         if lido:
-            text = f"--- texto na imagem ---\n{lido}"
-            if descricao:
-                text = f"{text}\n\n--- descrição da imagem ---\n{descricao}"
-        else:
-            text = descricao
+            partes.append(f"--- texto na imagem ---\n{lido}")
+        if descricao:
+            partes.append(f"--- descrição da imagem ---\n{descricao}")
+        # A legenda também aqui, pelo mesmo motivo do ramo de vídeo: num post de
+        # receita em carrossel são os ingredientes e as medidas que ela carrega.
+        legenda = (dl.get("caption") or message.get("caption")
+                   or message.get("title") or "").strip()
+        if legenda:
+            partes.append(f"--- legenda ---\n{legenda}")
+        text = "\n\n".join(partes)
         lang = "pt"
         doc_type = "image"
 
@@ -784,7 +800,29 @@ def _default_read_screen(video_path: str) -> dict:
                 pedacos.append(r["text"])
             elif not r.get("ok"):
                 logger.warning("leitura de tela falhou em %s: %s", q, r.get("error"))
-        return {"ok": True, "text": merge_screen_text(pedacos), "capa": capa}
+
+        # LER não é DESCREVER, e num vídeo mudo a diferença é o documento
+        # inteiro. Até 2026-08-19 o caminho de vídeo só LIA o texto da tela --
+        # `describe_image` nunca rodava em vídeo. Num vídeo de receita sem
+        # narração isso significava mandar ao modelo o título e mais nada,
+        # enquanto o preparo inteiro estava ali, nos quadros, sem ninguém
+        # olhar. Foi assim que "Faça seu presunto cozido" (80 caracteres) virou
+        # um passo a passo inventado.
+        #
+        # Um quadro só, o da capa: descrever todos multiplicaria a chamada de
+        # visão por vídeo e a capa é escolhida justamente por ser
+        # representativa. É ganho, não requisito -- falhar aqui não pode custar
+        # o texto que já foi lido.
+        descricao = ""
+        try:
+            de = llm.describe_image(quadros[len(quadros) // 2])
+            if de.get("ok"):
+                descricao = (de.get("conteudo_principal") or de.get("text") or "").strip()
+        except Exception as exc:
+            logger.warning("descrição do vídeo falhou: %s", exc)
+
+        return {"ok": True, "text": merge_screen_text(pedacos),
+                "descricao": descricao, "capa": capa}
     finally:
         # Os quadros são descartáveis (0,15 s para refazer); a capa já foi
         # copiada para fora daqui.

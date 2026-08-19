@@ -210,6 +210,52 @@ if res["status"] == "done" and "titulo curto" in recebido.get("text", ""):
 else:
     bad(f"mensagem antiga perdeu tudo: {recebido.get('text')!r}")
 
+
+print("== unit_cortes: a legenda entra SEMPRE, com fala ou sem ==")
+
+COM_FALA = dict(MSG)
+recebido.clear()
+res = ig_worker.process_message(
+    COM_FALA,
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4"},
+    transcribe=lambda p: {"ok": True, "text": "a narracao do video", "language": "pt"},
+    describe=None,
+    read_screen=lambda p: {"ok": True, "text": "TEXTO NA TELA",
+                           "descricao": "uma panela no fogao"},
+    ingest=ingest,
+)
+t = recebido.get("text", "")
+if res["status"] == "done" and "LEGENDA COMPLETA" in t:
+    ok("vídeo COM fala agora também recebe a legenda")
+else:
+    bad(f"legenda ausente quando há fala: {t!r}")
+
+if "uma panela no fogao" in t:
+    ok("a descrição visual do vídeo entra no documento")
+else:
+    bad("a descrição do vídeo não chegou ao texto")
+
+# A ordem importa: fala primeiro, legenda por último -- ela é a que mais
+# mistura conteúdo com divulgação.
+if t.index("a narracao") < t.index("TEXTO NA TELA") < t.index("LEGENDA COMPLETA"):
+    ok("ordem: fala, tela, descrição, legenda")
+else:
+    bad(f"ordem errada no documento: {t[:120]!r}")
+
+# Sem NADA (nem fala, nem tela, nem legenda) continua sendo falha permanente.
+recebido.clear()
+vazia = {k: v for k, v in MSG.items() if k not in ("caption", "title")}
+res = ig_worker.process_message(
+    vazia,
+    download=lambda m: {"ok": True, "filepath": "/tmp/x.mp4"},
+    transcribe=lambda p: {"ok": True, "text": "", "language": "pt"},
+    describe=None, read_screen=None, ingest=ingest,
+)
+if res["status"] == "error" and res.get("permanent"):
+    ok("sem material nenhum -> falha permanente, direto para a DLQ")
+else:
+    bad(f"deveria falhar permanente sem material: {res!r}")
+
 print()
 if FAIL:
     print(f"FAIL: {FAIL}")
