@@ -51,7 +51,12 @@ def tr(path):
 
 
 def ingest_ok(text, **kw):
-    assert text == "transcrito"
+    # Era `text == "transcrito"`. Mudou de propósito em 2026-08-19: a legenda
+    # passou a entrar SEMPRE, com fala ou sem -- em receita e tutorial é nela
+    # que estão os ingredientes e as medidas que a narração não diz. Aqui a
+    # MESSAGE não tem `caption`, então o título ("t") entra como reserva.
+    assert text.startswith("transcrito"), text
+    assert "--- legenda ---" in text, text
     assert kw["doc_type"] == "video" and kw["ig_pk"] == "1001"
     return {"ok": True, "document_id": 42}
 
@@ -77,7 +82,10 @@ def describe(path):
 
 
 def ingest_img(text, **kw):
-    assert text == "descrição da foto"
+    # Mesma mudança do `ingest_ok`: a legenda entra sempre, também no ramo de
+    # imagem -- num carrossel de receita são os ingredientes que ela carrega.
+    assert "descrição da foto" in text, text
+    assert "--- legenda ---" in text, text
     assert kw["doc_type"] == "image"
     return {"ok": True, "document_id": 43}
 
@@ -339,7 +347,12 @@ def describe_structured(path):
     }
 
 def ingest_carousel(text, **kw):
-    assert text == "conteudo /tmp/c1.jpg\n\nconteudo /tmp/c2.jpg", f"text={text!r}"
+    # Duas mudanças deliberadas de 2026-08-19: a descrição passou a vir sempre
+    # rotulada (antes só ganhava cabeçalho quando havia texto lido junto), e a
+    # legenda entra sempre -- aqui pelo reserva do título, já que a MESSAGE não
+    # traz `caption`.
+    assert "conteudo /tmp/c1.jpg" in text and "conteudo /tmp/c2.jpg" in text, f"text={text!r}"
+    assert "--- legenda ---" in text, f"text={text!r}"
     assert kw["doc_type"] == "image"
     assert "categoria:courses" in (kw.get("extra_tags") or []), f"tags={kw.get('extra_tags')!r}"
     return {"ok": True, "document_id": 70}
@@ -362,7 +375,9 @@ def describe_legacy(path):
     return {"ok": True, "text": "descrição da foto"}
 
 def ingest_legacy(text, **kw):
-    assert text == "descrição da foto"
+    # Mesma mudança de 2026-08-19: descrição rotulada + legenda sempre.
+    assert "descrição da foto" in text, text
+    assert "--- legenda ---" in text, text
     assert kw["doc_type"] == "image"
     return {"ok": True, "document_id": 71}
 
@@ -824,7 +839,9 @@ r = ig_worker.process_message(
     read_screen=lambda f: {"ok": False, "error": "ollama caiu"},
     ingest=_ing_v,
 )
-if r["status"] == "done" and _v["text"] == "a fala sobreviveu":
+# A legenda agora acompanha a fala (mudança de 2026-08-19), então a
+# asserção olha se a FALA sobreviveu, não se o texto é só ela.
+if r["status"] == "done" and _v["text"].startswith("a fala sobreviveu"):
     ok("falha na leitura de tela não descarta a transcrição")
 else:
     bad(f"falha de tela contaminou: {r!r} / {_v.get('text')!r}")
@@ -878,7 +895,7 @@ r = ig_worker.process_message(
     describe=None,
     ingest=_ing_captura,
 )
-if r["status"] == "done" and _visto["text"].startswith("A legenda inteira"):
+if r["status"] == "done" and "A legenda inteira" in _visto["text"]:
     ok("sem fala, o documento nasce da legenda COMPLETA do media_info")
 else:
     bad(f"fallback de legenda não usou o caption: {r!r} / {_visto.get('text')!r}")
@@ -891,7 +908,7 @@ r = ig_worker.process_message(
     describe=None,
     ingest=_ing_captura,
 )
-if r["status"] == "done" and _visto["text"] == "Só o título sobrou aqui":
+if r["status"] == "done" and "Só o título sobrou aqui" in _visto["text"]:
     ok("sem caption, o título da mensagem é o reserva")
 else:
     bad(f"reserva de título falhou: {r!r} / {_visto.get('text')!r}")
