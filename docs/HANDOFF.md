@@ -1,4 +1,4 @@
-# minimax-video-factory — handoff, atualizado 2026-08-09 14:20
+# minimax-video-factory — handoff, atualizado 2026-08-19 22:00
 
 **Este arquivo agora vive no repositório.** Antes ele estava em
 `~/bkp/minimax-night/HANDOFF.md`, fora do git — e por isso toda sessão nova
@@ -13,61 +13,181 @@ regras antigas deste arquivo eram do INT4 e **metade caiu**. O que está abaixo
 
 ---
 
-## 👉 EM ANDAMENTO desde 2026-08-10 08:30: o sync do Instagram
+## ✅ CONCLUÍDO em 2026-08-19: o sync do Instagram e cinco defeitos de conteúdo
 
-**Plano:** [`docs/superpowers/plans/2026-08-10-ig-sync-completo-2145-posts.md`](superpowers/plans/2026-08-10-ig-sync-completo-2145-posts.md).
-⚠️ **O número no nome do arquivo está errado.** Eram 2145 na estimativa antiga;
-a contagem da própria API do Instagram, medida em 2026-08-10, é **3618 posts
-salvos em 52 coleções** — não 2157 em 46. O plano continua valendo em tudo o
-mais (ritmo de 90 s, janela dedicada, Whisper `small`).
+**A catch-all está resolvida.** A seção anterior deste arquivo dizia que ela
+morria inteira e que faltavam "~495 posts"; os dois fatos mudaram.
 
-### Estado agora
+### Onde a base está
 
 ```
-listagem   ✅ 2026-08-10 07:56→08:28, 32 min, 354 requisições, TODAS [200]
-           3123 posts distintos de 3618 = 86,3%  ·  12 já no banco
-publicado  ✅ 3111 mensagens na fila ig.saved (DLQ 0)
-daemon     ✅ de pé desde 08:30, pid em output/ig-sync-2026-08-10/worker.pid
-           log em output/ig-sync-2026-08-10/worker.log
-projeção   3111 × 90 s ≈ 78 h de janela dedicada, sem nenhum render
+catch-all "All posts"   3375 posts sadios (+1 que não converte, ver abaixo)
+processados             3366  =  99,7%
+fora                       9
+DLQ                       10  (nenhum com conserto de código)
 ```
 
-### ⚠️ Faltam ~495 posts, e NÃO foi bloqueio
+O número "~507 perdidos" que este arquivo trazia era **subtração de dados
+velhos**, não medição. Medido em 2026-08-19, os posts que só a correção
+alcançava eram **219** — o usuário dessalvou posts no intervalo e as coleções
+nomeadas passaram a cobrir mais.
 
-A coleção catch-all ("All posts", que guarda os 3618) **morreu inteira num erro
-de modelo de dados**, aos 14 min da varredura:
+### O defeito da catch-all: um post derrubava 3375
+
+Um post salvo volta sem o campo `code`. `Media.code` é obrigatório no modelo do
+instagrapi (`types.py:518`), o pydantic levanta dentro da list comprehension de
+`mixins/collection.py:131`, e a perda **cascateia por quatro níveis**: o item
+derruba a página (~20-50 posts) → a exceção sobe pelo laço de paginação, onde
+`total_items` é local, levando **todas as páginas já lidas** → o `except` de
+coleção do `saved_posts_by_collection` engole o resto.
+
+Reproduzido ao vivo às 11:13 de 2026-08-19, oito dias depois do primeiro
+incidente: paginou 15min22 e jogou os 3375 fora no último trecho. Não era
+azar — era determinístico.
+
+**Corrigido** (`daa8515`): `parse_items_tolerant` converte item a item, abaixo
+do `collection_medias` — que é o único lugar onde o item ruim ainda existe.
+Depois da correção: 0 → **3375 enumerados, 1 descartado**
+(`ig_pk=2546806014584256281`, netshoes, sem `code`), com o payload cru em
+`output/ig-descartados.jsonl`.
+
+### Os cinco cortes silenciosos de conteúdo
+
+Achados ao investigar por que os resumos inventavam. **O pior não estava no
+nosso código:**
+
+| # | corte | medida | commit |
+|---|---|---|---|
+| 1 | **`num_ctx` do Ollama = 2048** e ele corta **pela frente** | enviados 7206 tokens → leu 2051, HTTP 200, sem aviso | `b0139e7` |
+| 2 | Legenda descartada ao reaproveitar mídia do disco | 21 de 24 documentos, correlação 21/21 | `b0139e7` |
+| 3 | Só 80 caracteres da legenda entravam na fila | `caption.splitlines()[0][:80]` | `b0139e7` |
+| 4 | `body[:4000]` na ingestão de markdown | nota longa entrava pela metade | `b0139e7` |
+| 5 | `num_predict` 512 na leitura de tela, 2048 no resumo | 111 tutoriais terminavam sem pontuação | `b0139e7` |
+
+O experimento que decide o item 1, e que vale repetir se alguém duvidar:
 
 ```
-WARNING skipping collection None: 1 validation error for Media
-code
-  Field required [type=missing, ...]
+enviados 7206 tokens, num_ctx padrão -> leu 2051
+  pergunta: "qual é o MARCADOR-INICIO e qual é o MARCADOR-FIM?"
+  resposta: "O marcador início é JABUTICABA e o fim é JABUTICABA"
+             (JABUTICABA era o do FIM)
+mesmos 7206 tokens, num_ctx=8192     -> leu 7768, acertou os dois
 ```
 
-Um post do feed voltou sem o campo `code`; o `Media` do instagrapi exige esse
-campo; o pydantic levantou. Como `saved_posts` protege **cada coleção** com
-try/except, a exceção descartou tudo o que a catch-all já havia paginado e
-seguiu adiante. As 3111 mensagens vieram todas das 51 coleções nomeadas —
-confirmado: nenhuma tem `collection_name` vazio.
+**Ele não falha, responde com confiança usando o que sobrou.** E como o molde do
+prompt vem no começo e o material no fim, o que se perdia num documento longo
+eram as **instruções**. Subir o teto não bastava — o precipício só muda de
+lugar —, então `orcamento_de_material` + `cortar_material` fazem o corte ser
+nosso: do material, na fronteira de palavra, preservando o começo, com WARNING
+dizendo quanto se perdeu.
 
-**Não confundir com punição do Instagram.** A prova: 354 requisições, **354
-respostas 200**, zero `public_request`, zero HTML de login. Um 429 não se parece
-com isso.
+### Legenda e descrição visual agora entram sempre (`6a1c657`)
 
-Os ~495 que faltam são os que existem **só** na catch-all — nunca arquivados
-numa pasta. Para recuperá-los sem relistar tudo:
+Decidido com o usuário. A legenda era usada **só** quando não havia fala, com o
+argumento de que é divulgação — mas em receita e tutorial é nela que estão os
+ingredientes e as medidas. O `strip_cta` tira a divulgação; jogar a legenda
+fora tirava junto o conteúdo.
 
-1. consertar a enumeração para tolerar item inválido (pular o item, não a
-   coleção) — hoje um post malformado derruba 3618;
-2. listar **só** a catch-all;
-3. filtrar contra o banco **e** contra `output/ig-sync-2026-08-10/mensagens.json`.
-   O segundo filtro não é opcional: `existing_pks` só conhece o que já está no
-   banco, e enquanto a fila tiver milhares pendentes eles ainda não estão lá —
-   sem esse filtro, republicaria duplicado.
+E **LER não é DESCREVER**: o caminho de vídeo só lia o texto da tela;
+`describe_image` nunca rodava em vídeo. Num vídeo de receita sem narração isso
+mandava ao modelo o título e mais nada, com o preparo inteiro nos quadros sem
+ninguém olhar. Foi assim que "Faça seu presunto cozido" (80 caracteres) virou
+um passo a passo inventado, e o post de um **cachorro** virou conselho de
+paternidade.
 
-⚠️ Não fazer isso na mesma hora de uma varredura completa. É exatamente o padrão
-"duas varreduras numa hora" que a noite de 2026-08-09 culpou pelo 429.
+Ordem do documento, por confiabilidade: **fala → texto na tela → descrição
+visual → legenda**.
 
-### O que mudou no código nesta sessão (`cf5d080`)
+### As outras três correções da mesma rodada
+
+| commit | o quê |
+|---|---|
+| `e406714` | `.webp` (Ollama devolvia 400: `Failed to load image or audio file`), vídeo sem faixa de áudio (`IndexError` do PyAV), e o retry passou a cobrir JSON válido de esquema errado |
+| `79db6dd` | Carrossel misto: `.mp4` ia para o modelo de imagem, e **uma** descrição falha abortava o carrossel inteiro |
+
+### Reprocessamento: o que foi e o que falta
+
+- **Grupo A** (76 documentos afetados pelo `num_ctx`): **59 refeitos**, 17
+  pulados por não terem mais mídia no disco, zero falhas. Backups em
+  `output/kb-backup-reprocess/`.
+- **Grupo B** (21 documentos sem legenda): **PENDENTE**, bloqueado pelo
+  Instagram.
+
+⚠️ **Rodar o grupo B só com o Instagram acessível.** Provado em 2026-08-19: sem
+a legenda, reprocessar só troca uma invenção por outra — o doc 3633 saiu de
+"como nomear um novo filho" para "guia para apresentar seu recém-nascido", com
+tutorial mandando os convidados se ajoelharem. É desperdício de GPU.
+
+### ⛔ O Instagram bloqueou por excesso de requisições
+
+Causa raiz desembrulhada, não suposta:
+
+```
+RetryError  ->  ResponseError: too many 429 error responses
+```
+
+Não é sessão inválida (a nova está no `.env` e no container, hashes conferidos),
+não é rede (o host alcança `i.instagram.com`). É a conta apanhando pelo volume
+de 2026-08-19: duas varreduras completas de ~350 requisições, mais as
+tempestades de 30 redirecionamentos que o sessionid expirado provocava.
+
+**Só o tempo resolve.** Renovar sessionid não ajuda, e insistir piora — cada
+tentativa conta contra o mesmo teto. Testar com **uma** chamada antes de
+qualquer lote.
+
+### Os 9 que continuam fora, e por quê
+
+| causa | posts | tem conserto? |
+|---|---|---|
+| LLM insiste no esquema errado | 4 | talvez — salvar o `resumo` do JSON que ele devolve |
+| Indisponível no Instagram | 2 | **não** — o post não existe mais |
+| Download vazio | 1 | não |
+| Sem texto nenhum | 1 | não |
+| Bug `psycopg` (dict cru indo ao Postgres) | 1 | sim, mas é outro assunto |
+
+Sobre os 4 do LLM: eu havia concluído que era comportamento **estável** do
+modelo, não sorteio. **Um deles voltou** no segundo reprocessamento, o que
+enfraquece a conclusão — é estocástico com probabilidade baixa. Duas tentativas
+não bastam para esses posts.
+
+### Ferramentas que nasceram nesta rodada
+
+| script | para quê |
+|---|---|
+| `scripts/ig_sync_bg.py` | varredura completa em background, com log por coleção |
+| `scripts/ig_catchall_check.py` | enumera **só** a catch-all, salva tudo em JSON, não publica nada |
+| `scripts/ig_replay_dlq.py` | devolve a DLQ para a fila, deduplicando, com cópia em disco antes |
+
+⚠️ **`ig_replay_dlq.py`: nunca dar `nack(requeue=True)` dentro do laço.** A
+mensagem volta na hora e o `basic_get` seguinte a repega — laço infinito,
+medido: 2 min e 341 MB de log da mesma dúzia de posts. Segurar tudo sem ack até
+a fila esvaziar, e só então decidir o destino.
+
+### Coisas menores, verdadeiras, que vão morder
+
+- **`downloads/ig/<pk>/` é do `root`** (o container escreve lá). Script rodando
+  no host não consegue gravar — aparece como `Permission denied: capa.jpg`.
+- **O nome do projeto do compose vem da pasta do arquivo**, não do cwd. Com
+  `-f docker/docker-compose.yml` a partir da raiz, o projeto vira `docker` e ele
+  tenta recriar tudo. Use
+  `docker compose -p minimax-video-factory -f docker/docker-compose.yml --env-file .env up -d --no-deps ig-worker`.
+- **`docker restart` não relê o `.env`**, e reboot também não: volta o mesmo
+  container com a mesma variável. Para trocar o `IG_SESSIONID` é `up -d`.
+- **A API de filas do RabbitMQ atrasa alguns segundos.** Logo depois de
+  publicar, `ready=0` pode ser mentira — esperar e reconsultar antes de concluir
+  que algo se perdeu. Quase virou relatório de perda que não houve.
+- **5 documentos ainda passam do orçamento** de 13.293 caracteres com
+  `num_ctx=8192`. Agora com WARNING dizendo quanto se perdeu, em vez de silêncio.
+
+### Uma decisão de projeto que ficou em aberto
+
+3277 documentos (96%) não têm seção de legenda — mas **não são 3277 defeitos**:
+foram ingeridos quando a legenda só entrava sem fala. A partir de `6a1c657` todo
+post novo recebe. Reprocessar os antigos em massa custaria a legenda de cada um
+via `media_info`, ou seja, ~3300 requisições ao Instagram. **Não fazer sem
+decidir se vale.**
+
+### Histórico: o que mudou no código em 2026-08-10 (`cf5d080`)
 
 | | |
 |---|---|
@@ -200,7 +320,8 @@ systemd-run --user --unit=ig-worker --collect \
   haverá): ~68 s cada. Falta um caminho de **atualizar** documento — só existem
   `save_document` e `delete_documents`, então é apagar e recriar, com snapshot
   em JSON antes.
-- **Os ~495 posts da catch-all**, ver acima.
+- ~~**Os ~495 posts da catch-all**~~ — **RESOLVIDO em 2026-08-19** (`daa8515`).
+  O número real era 219, e eles já estão na base. Ver a seção no topo.
 - **Visão às vezes lê errado**: um quadro deu `ToastNotification` e outro
   `ToastNotifier`; como nenhuma contém a outra, as duas ficaram no documento.
 
