@@ -1436,3 +1436,97 @@ processando a fila real; já validado na Task 3.
   confirmação porque o worker está processando a fila real agora; o
   mutex de GPU (seção acima) serializa automaticamente, mas um render
   de verdade ainda atrasa o worker por até 1800s enquanto segura o lock.
+
+### Step 5 executado — e um incidente real que prova por que o mutex importa
+
+Render turbo (seed 42, 512×320, 5s) submetido via `submit_scene`/`wait_for_video`
+da instância MCP **do host** (`minimax-video-factory-uv`). Completou OK
+(`task6/turbo_val_00001_.mp4`). **Mas o mutex não pegou essa chamada**: essa
+instância é um processo de longa duração, rodando desde antes das mudanças
+desta sessão em `core.py` — nunca reimportou `gpu_lock`. `GET /gpu/status`
+mostrou `free` durante o render inteiro (confirmado via curl nos dois
+lados). Isso só se resolve com o reload do OpenCode (Task 5, pendente) ou
+reiniciando essa instância especificamente.
+
+**Consequência real, não hipotética:** com o lock não aplicado, o worker do
+insta_kb pegou o próximo item da fila *durante* o render (11,4 GB/12,3 GB,
+81% util). Um post falhou: `processing failed ig_pk=...: LLM generation
+failed: [Errno 110] Connection timed out` — a chamada ao Ollama (descrição
+de imagem) não conseguiu VRAM. Pausei o worker manualmente assim que vi
+(`ig_worker_stop` MCP falhou sem detalhe; fallback funcionou: publish direto
+na exchange, **porta 15673** — não 15672, que é a porta interna do
+container; a docs antiga do CLAUDE.md usa 15672 porque foi escrita antes da
+containerização do RabbitMQ). Retomei (`start`) depois que o render
+terminou.
+
+**Segundo problema, encadeado:** mesmo com VRAM livre depois do render, o
+worker continuou preso em retry de "screen read failed" (backoff crescente:
+~2min15s → ~7min) — porque **o ComfyUI mantém os modelos residentes depois
+do render** (10,5 GB a 0% de uso, exatamente o comportamento já documentado
+na seção "Operação" deste arquivo). `POST :8188/free
+{"unload_models":true,"free_memory":true}` liberou (10,5 GB→1 GB), mas o
+worker ainda não tinha voltado a progredir no momento deste registro —
+monitorando.
+
+**Conclusão prática:** o mutex de GPU (feature desta sessão) teria evitado
+esse incidente inteiro, SE a instância MCP que fez a chamada tivesse o
+código novo carregado. Isso é a evidência mais forte até agora de que o
+reload pendente da Task 5 não é cosmético — é uma lacuna de segurança real
+enquanto não acontece.
+
+**Causa raiz de verdade do "screen read failed" (não era só VRAM):**
+investigando por que o worker não voltou a progredir mesmo com VRAM livre,
+achei que `host.docker.internal:11434` **não é alcançável a partir da rede
+`insta-kb-net`** (testado de dentro do container `devcontainer-worker-1`:
+timeout; e comparando um container solto na bridge padrão do Docker — que
+funciona, 200 OK — contra um na `insta-kb-net` — timeout sempre). O
+firewall do host deixa passar a bridge padrão mas bloqueia a rede
+customizada. **É exatamente o que o `.env` antigo descrevia** ("containers
+não alcançam Ollama, worker tem que rodar no host") — eu tinha avaliado
+esse comentário como desatualizado cedo demais, validando só com um
+container solto na bridge padrão, não na rede real do compose. Decisão do
+usuário: **containerizar o Ollama** na própria `insta-kb-net` (sem sudo
+disponível pra mexer no firewall) — container-pra-container na mesma rede
+nunca cruza essa regra. Serviço `ollama` novo no
+`.devcontainer/docker-compose.yml`, montando **read-only** o diretório de
+modelos que o `ollama serve` do host já usa (`/home/ollama_models/.ollama`,
+133 GB) — sem duplicar nem rebaixar nada. `OLLAMA_URL` dos 3 serviços
+trocado de `http://host.docker.internal:11434` pra `http://ollama:11434`;
+`extra_hosts` removido (não serve mais pra nada); `ollama` adicionado ao
+`depends_on` dos 3. **Ainda em teste no momento deste registro** (imagem
+`ollama/ollama` baixando — é uma imagem grande, suporte CUDA).
+
+---
+
+## 📍 Status consolidado desta sessão (2026-10-07, fim de tarde)
+
+Visão rápida de onde as coisas estão, pros próximos passos:
+
+| Task | Estado real | Pendência |
+|---|---|---|
+| 0-3 | ✅ fechadas, commitadas, revisadas | nenhuma |
+| 4 (Docker insta_kb) | ✅ fechada, mas **Ollama estava errado** (host.docker.internal não funciona na rede real) — corrigido agora, containerizando | confirmar que o `ollama` novo sobe e o worker volta a funcionar (build ainda rodando) |
+| 5 (MCPs OpenCode) | 🔶 parcial | **você precisa reiniciar a sessão do OpenCode** pra `insta-kb` (agora HTTP) e a instância `minimax-video-factory-uv` (agora com o mutex de GPU) recarregarem. Sem isso, o mutex não protege renders feitos por essa instância — já causou um incidente real (acima) |
+| 6 (matriz de testes) | 🔶 parcial | Steps 1/2/4 feitos; Step 3 (tools insta-kb) bloqueado até o reload; Step 5 (render) feito, com o incidente acima como efeito colateral |
+| 7 (fila insta_kb) | ✅ parada proposital (322 ready) | retomar quando quiser — `ig_worker_start` ou `POST /ig/worker/start` |
+| 8 (documentação) | ⏳ não iniciada | |
+| 9 (diagramas) | ⏳ não iniciada | |
+| 10 (auditoria SOLID) | ⏳ não iniciada (adicionada por outra sessão, design em `docs/superpowers/specs/2026-10-07-solid-audit-task-design.md`) | não é minha pra decidir escopo |
+
+**Trabalho fora do plano original, mas crítico, feito nesta sessão:**
+- Mutex de GPU compartilhado insta_kb↔minimax (arquivo+flock, endpoints
+  HTTP nos dois, 1 bug de vazamento corrigido com review)
+- Bug real do venv do devcontainer (`/app/.venv` quebrava o do host) —
+  corrigido, revisado
+- Containerização do Ollama (ainda em teste) — substituindo a tentativa
+  via `host.docker.internal` que não funcionava na rede real
+
+**Pendências reais, em ordem de urgência:**
+1. Confirmar que o `ollama` containerizado sobe e o worker volta a
+   processar (build em andamento)
+2. **Reiniciar a sessão do OpenCode** (ação sua) — destrava Task 5 Step 4/5
+   e Task 6 Step 3, e faz o mutex de GPU proteger TODAS as chamadas,
+   incluindo as desta sessão
+3. Depois do reload: handshake + contagem de tools (Task 5), tools
+   insta-kb via MCP (Task 6 Step 3)
+4. Tasks 8/9/10 nem começaram
