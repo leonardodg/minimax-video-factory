@@ -129,7 +129,8 @@ Transcribe audio from a video file using faster-whisper (local, GPU-accelerated)
 
 Block until the prompt finishes rendering; returns path to the generated .mp4.
 
-On timeout: ok=false with timed_out=true and the prompt_id — the render may still be running; call again with the same prompt_id to collect it.
+On timeout: ok=false with timed_out=true and the prompt_id — the render may
+still be running; call again with the same prompt_id to collect it.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|

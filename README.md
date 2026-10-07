@@ -69,7 +69,7 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 | Technology | Role |
 |---|---|
 | **yt-dlp** | Downloads Reels, YouTube and friends using your browser's cookies |
-| **faster-whisper** | Local, GPU-accelerated transcription with timestamps |
+| **faster-whisper** + **av 18.1.0** | Local, GPU-accelerated transcription with timestamps |
 | **ffmpeg** | Scene concatenation and output inspection |
 
 ### Infrastructure

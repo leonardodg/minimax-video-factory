@@ -27,12 +27,12 @@ versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
 | 1 | Deps insta_kb | ✅ | no repo `insta_kb` (`58e8093`+`d034fd0`); ver HANDOFF de lá |
 | 2 | Deps minimax | ✅ | `fastmcp>=4.0.11`+`av==18.1.0`+`requires-python>=3.11`; commits `715216e`+`83c8454` |
 | 3 | ComfyUI v0.39.1 + nodes + pesos | ✅ | `ae944c1`+`d9c6f18`+`760006b` + review "with fixes" (commit desta linha); 6 nodes ff-only; 3+3 pesos; render turbo validado |
-| 4 | Docker insta_kb (Parte B) | ⏳ | |
-| 5 | MCPs do OpenCode | ⏳ | |
-| 6 | Matriz de testes | ⏳ | |
-| 7 | Fila do insta_kb (329 msgs) | ⏳ | |
-| 8 | Documentação | ⏳ | |
-| 9 | Diagramas | ⏳ | |
+| 4 | Docker insta_kb (Parte B) | ✅ (Ollama corrigido) | venv isolado `/opt/venv`, rede `insta-kb-net` + api/worker/mcp, Ollama CONTAINERIZADO (pin `0.32.9`), `.mcp.json`→HTTP, mutex de GPU compartilhado; detalhes no `insta_kb/docs/HANDOFF.md` |
+| 5 | MCPs do OpenCode | ✅ | inventário + testes reais: insta-kb 7 tools + **remote (8848) 3** (`health_check`/`queue_status`/`list_outputs`) + **uv stdio 2**; `MODELS_DIR` stale corrigido no `opencode.json` (restart do OpenCode pendente, ação do usuário) |
+| 6 | Matriz de testes | ✅ | baselines 168+9 → **206+11**; suítes ×2 (pytest/ruff/pyright/bandit/pip-audit + `unit_privacy`); tools MCP exercitadas de verdade; incidente de render (mutex) documentado abaixo |
+| 7 | Fila do insta_kb | ✅ (drenando) | 322→193 ready (snapshot com 1 consumer ativo), 0 dead; retomável/pausável via `ig_worker_start`/`stop`; ver HANDOFF do insta_kb |
+| 8 | Documentação | ✅ | `MCP_TOOLS.md` regenerado (`scripts/generate_mcp_docs.py`); README (ComfyUI ≥ 0.39.1, FastMCP 4.x, av 18.1.0) + `docs/INSTALLATION.md` sweep v0.30.2→v0.39.1; apêndice no `REVISAO_2026-10-07.md`; `mkdocs build --strict` verdes; commits `53a92ae` (insta_kb) + `fe4fc82`+docs desta sessão |
+| 9 | Diagramas | ✅ | `docs/ARQUITETURA.md` (3 Mermaid: estrutura/stack/fluxo) + nav/`superfences` no `mkdocs.yml` + link "Arquitetura Diagrams" no README; render `<pre class="mermaid">` ×3 verificado no build; graphify não solicitado |
 | 10 | Auditoria SOLID (avaliação) | ✅ | relatório `docs/SOLID_AUDIT.md` (231 l., só avaliação); 1 crítico = bug de contrato `state=rendering` + 6 importantes; veredito **ciclo futura**; ver seção abaixo |
 
 Regra de GPU durante toda a execução: 1 job (render/transcrição/Ollama) por
@@ -1507,12 +1507,12 @@ Visão rápida de onde as coisas estão, pros próximos passos:
 | Task | Estado real | Pendência |
 |---|---|---|
 | 0-3 | ✅ fechadas, commitadas, revisadas | nenhuma |
-| 4 (Docker insta_kb) | ✅ fechada, mas **Ollama estava errado** (host.docker.internal não funciona na rede real) — corrigido agora, containerizando | confirmar que o `ollama` novo sobe e o worker volta a funcionar (build ainda rodando) |
-| 5 (MCPs OpenCode) | 🔶 parcial | **você precisa reiniciar a sessão do OpenCode** pra `insta-kb` (agora HTTP) e a instância `minimax-video-factory-uv` (agora com o mutex de GPU) recarregarem. Sem isso, o mutex não protege renders feitos por essa instância — já causou um incidente real (acima) |
-| 6 (matriz de testes) | 🔶 parcial | Steps 1/2/4 feitos; Step 3 (tools insta-kb) bloqueado até o reload; Step 5 (render) feito, com o incidente acima como efeito colateral |
-| 7 (fila insta_kb) | ✅ parada proposital (322 ready) | retomar quando quiser — `ig_worker_start` ou `POST /ig/worker/start` |
-| 8 (documentação) | ⏳ não iniciada | |
-| 9 (diagramas) | ⏳ não iniciada | |
+| 4 (Docker insta_kb) | ✅ fechada — Ollama containerizado (pin `0.32.9`), worker com ingests reais | nenhuma |
+| 5 (MCPs OpenCode) | ✅ fechada — testes reais: insta-kb 7 tools + remote 3 + uv stdio 2 verdes; `MODELS_DIR` stale corrigido | **reiniciar a sessão do OpenCode (ação sua)** — recarrega as instâncias MCP e faz o mutex valer pra TODAS as chamadas; já causou um incidente real (acima) |
+| 6 (matriz de testes) | ✅ fechada — baselines 168+9 → 206+11, suites ×2 verdes, tools MCP exercitadas; skip documentado (worker ativo, reindex custosa) | nenhuma |
+| 7 (fila insta_kb) | ✅ drenando — 322→193 ready (snapshot), 0 dead, 1 consumer | retomar/pausar quando quiser — `ig_worker_start`/`ig_worker_stop` |
+| 8 (documentação) | ✅ fechada — READMEs sweep (v0.39.1/206/4.x/8084), MCP_TOOLS regenerado, REVISAO apêndice, mkdocs --strict ×2, Pages workflow novo no insta_kb | nenhuma |
+| 9 (diagramas) | ✅ fechada — `docs/ARQUITETURA.md` ×2 (3 Mermaid cada) + links nos READMEs | nenhuma |
 | 10 (auditoria SOLID) | ✅ fechada nesta sessão — `docs/SOLID_AUDIT.md` (avaliação, veredito **ciclo futura**; 1 bug de contrato `state=rendering` pra tratar como bugfix) | ver §5 do relatório (backlog severidade × esforço) |
 
 **Trabalho fora do plano original, mas crítico, feito nesta sessão:**
@@ -1527,12 +1527,13 @@ Visão rápida de onde as coisas estão, pros próximos passos:
 1. ~~Confirmar que o `ollama` containerizado sobe e o worker volta a
    processar (build em andamento)~~ ✅ confirmado ~18:02 — worker com
    ingests reais (docs 3720+), exigiu pin da imagem em `0.32.9`
-2. **Reiniciar a sessão do OpenCode** (ação sua) — destrava Task 5 Step 4/5
-   e Task 6 Step 3, e faz o mutex de GPU proteger TODAS as chamadas,
-   incluindo as desta sessão
-3. Depois do reload: handshake + contagem de tools (Task 5), tools
-   insta-kb via MCP (Task 6 Step 3)
-4. Tasks 8/9 nem começaram (a 10 fechou — ver seção Task 10 abaixo)
+2. **Reiniciar a sessão do OpenCode (ação sua)** — único resíduo da
+   Task 5: recarrega as instâncias MCP (valores novos de `MODELS_DIR`,
+   mutex de GPU em todas as chamadas)
+3. Commits/PR da branch `update/deps-2026-10` (suítes finais antes)
+4. **Último passo do plano (pedido do usuário): testes reais de criação
+   de vídeo** — GPU livre, worker parado
+5. graphify (Task 9 Step 4, opcional) — não solicitado; Mermaid cobre
 
 ---
 
