@@ -46,13 +46,12 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 ## 📋 Features
 
 - 🎬 **Text → video + audio in one pass** — H3 generates native stereo sound with the picture, not a soundtrack pasted on afterwards
-- 🔌 **18 MCP tools** — drive the whole pipeline from an AI agent, no CLI to memorise
-- ⌨️ **24 slash commands, for OpenCode and Claude Code** — generated from the code, so they can never drift from what the tools actually accept
-- 📥 **Ingest what you already watch** — download Instagram Reels and YouTube with browser cookies, transcribe locally with Whisper
-- 🧠 **Personal knowledge base** — Postgres + pgvector, hybrid search and RAG, all with a local LLM
-- 🔒 **Fully local** — models, inference, database and transcription run on your machine
+- 🔌 **12 MCP tools** — drive the whole pipeline from an AI agent, no CLI to memorise
+- ⌨️ **12 slash commands, for OpenCode and Claude Code** — generated from the code, so they can never drift from what the tools actually accept
+- 📥 **Build a reference → prompt pipeline** — download a Reel or YouTube video with browser cookies, transcribe locally with Whisper, turn the transcript into a cinematic prompt
+- 🔒 **Fully local** — models, inference and transcription run on your machine
 - 🖥️ **12 GB VRAM is enough** — INT4 ConvRot weights tuned for consumer cards
-- ✅ **Validated end to end** — 9 unit suites plus an 8-step GPU pipeline check in CI
+- ✅ **Validated end to end** — a pure-logic unit suite plus a multi-step GPU pipeline check in CI
 
 ---
 
@@ -72,13 +71,6 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 | **yt-dlp** | Downloads Reels, YouTube and friends using your browser's cookies |
 | **faster-whisper** | Local, GPU-accelerated transcription with timestamps |
 | **ffmpeg** | Scene concatenation and output inspection |
-
-### Knowledge base
-| Technology | Role |
-|---|---|
-| **Postgres 16 + pgvector** | Source of truth; documents, chunks and embeddings |
-| **SQLAlchemy 2 + Alembic** | ORM access and schema migrations |
-| **Ollama** (`lfm2:24b`, `mxbai-embed-large`) | Local summarisation and embeddings |
 
 ### Infrastructure
 | Technology | Role |
@@ -209,14 +201,6 @@ This is the single biggest quality lever in the project. Text-only generation as
 the model to invent framing, lighting, subject and motion at once; a first frame
 hands it everything but the motion.
 
-### Save what you learn, then ask about it later
-
-```
-/kb-ingest-video https://www.instagram.com/p/XXXXXXXX/
-/kb-perguntar "what did I save about docker volumes?"
-```
-
-The answer comes only from your own knowledge base, with the sources cited.
 
 ---
 
@@ -364,7 +348,7 @@ The first render of a session is slower: it includes loading ~32 GB of weights.
 | 05 | Smoke render — a real 5 s clip with video **and** stereo audio |
 | 06 | MCP stdio initialize handshake, in-container |
 | 07 | End to end — health → submit → wait → list → compose |
-| 08 | Knowledge base over MCP (skips cleanly when Postgres is absent) |
+| 09 | The `comfyui` image actually imports every module `server.py` needs |
 
 Plus `uv run pytest -m unit` for the pure-logic suites, which need no GPU, no container and no network.
 
@@ -385,11 +369,6 @@ MCP_TRANSPORT=streamable-http  MCP_HOST=0.0.0.0  MCP_PORT=8848
 STUDIO_DOWNLOADS_DIR=.../downloads
 WHISPER_MODEL=small           # tiny/base/small/medium/large-v3
 WHISPER_DEVICE=cuda           # cuda/cpu
-
-# Knowledge base
-KB_DATABASE_URL=postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge
-LLM_MODEL=lfm2:24b            # measured: qwen2.5:32b took 15+ min per ingest here
-EMBEDDING_MODEL=mxbai-embed-large
 ```
 
 See **[Installation](https://leonardodg.github.io/minimax-video-factory/INSTALLATION/)** for every variable.
@@ -403,12 +382,12 @@ minimax-video-factory/
 ├── .github/workflows/
 │   ├── ci.yml                    # cloud lint/tests + self-hosted GPU suite
 │   └── docs.yml                  # builds and publishes the docs site
-├── .claude/commands/             # 24 generated slash commands (Claude Code)
+├── .claude/commands/             # 12 generated slash commands (Claude Code)
 ├── .mcp.json                     # MCP servers, for Claude Code
-├── .opencode/command/            # 24 generated slash commands (OpenCode)
+├── .opencode/command/            # 12 generated slash commands (OpenCode) + 2 non-tool (compress, search-sessions)
 ├── docker/
 │   ├── Dockerfile                # ComfyUI + in-image MCP venv
-│   └── docker-compose.yml        # GPU passthrough, Postgres for the KB
+│   └── docker-compose.yml        # comfyui (GPU) + mcp, two services
 ├── scripts/
 │   ├── diagnose.sh               # the validation suite runner
 │   ├── start_comfyui.sh
@@ -417,17 +396,13 @@ minimax-video-factory/
 │   ├── generate_mcp_docs.py      # tool reference, generated from the registry
 │   └── command_docs/             # parser · catalog · overrides · renderer
 ├── src/minimax_mcp/
-│   ├── server.py                 # the 18 @mcp.tool() definitions
+│   ├── server.py                 # the 12 @mcp.tool() definitions
 │   ├── core.py                   # workflow injection, submission, output resolution
 │   ├── comfyui_client.py         # HTTP + WebSocket client
 │   ├── orchestrator.py           # the studio pipeline
 │   ├── downloader.py             # yt-dlp
-│   ├── transcriber.py            # faster-whisper
-│   ├── knowledge.py              # knowledge base use cases
-│   ├── db.py                     # Postgres + pgvector via SQLAlchemy
-│   ├── llm.py                    # Ollama / OpenAI-compatible client
-│   └── vault.py                  # optional Obsidian markdown export
-├── tests/                        # 00–08 shell suites + unit_*.py
+│   └── transcriber.py            # faster-whisper
+├── tests/                        # 00–07, 09 shell suites + unit_*.py
 ├── docs/                         # MkDocs site sources
 └── workflows/                    # the H3 API workflow JSON
 ```
@@ -498,16 +473,17 @@ them up on trust:
 }
 ```
 
-The other two hardcode absolute host paths, so they are not versioned — add them per
-machine:
+`minimax-video-factory-uv` (host `uv`, no docker) hardcodes an absolute host
+path, so it's not versioned — add it per machine:
 
 ```bash
-claude mcp add-json minimax-knowledge-base --scope local '{ ... }'   # host: Postgres + Ollama
 claude mcp add-json minimax-video-factory-uv --scope local '{ ... }' # host uv, no docker
 ```
 
-`minimax-knowledge-base` is not optional if you want the `/kb-*` commands: the
-container has no route to Postgres.
+Looking for the knowledge-base commands (`/kb-*`) or Instagram sync
+(`/ig-*`)? They — and the `minimax-knowledge-base` server that answered
+them — moved to [`insta_kb`](https://github.com/leonardodg/insta_kb) in
+2026-10-06.
 
 ---
 
@@ -557,3 +533,4 @@ LeoDG — [@leodg](https://leodg.dev)
 
 - **Repository:** https://github.com/leonardodg/minimax-video-factory
 - **Documentation:** https://leonardodg.github.io/minimax-video-factory/
+- **Related project:** [insta_kb](https://github.com/leonardodg/insta_kb) — the knowledge-base/Instagram-sync sibling this repo was split from

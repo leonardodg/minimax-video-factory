@@ -1,9 +1,13 @@
 # MiniMax Video Factory
 
-Local "video factory" MCP server: MiniMax H3 text-to-video generation,
-Instagram/YouTube download + Whisper transcription, and a personal
-**knowledge base** (Postgres + pgvector + local LLM) that turns saved
-videos/audio/text into searchable, askable, documented knowledge.
+Local "video factory" MCP server: MiniMax H3 text-to-video generation, plus
+an Audiovisual Studio that downloads a reference video (Instagram/YouTube),
+transcribes it locally with Whisper, and turns the transcript into a
+cinematic prompt.
+
+> The personal knowledge base (Postgres + pgvector + local LLM) that used to
+> live here moved whole — code and production data — to
+> [`insta_kb`](https://github.com/leonardodg/insta_kb) in 2026-10-06.
 
 - **New here?** Start with the [MCP Tools Reference](MCP_TOOLS.md) for the
   full list of available tools, or the [Installation](INSTALLATION.md) guide
