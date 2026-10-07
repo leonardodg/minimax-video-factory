@@ -1353,6 +1353,19 @@ totalmente separado) reportou `held=true` com o holder certo → `POST
 :8848/gpu/release` → insta_kb viu `free=true` de novo. Suíte unit completa
 (9 scripts) passou depois de ajustar `unit_core.py`/`unit_orchestrator.py`
 (que chamavam `submit_scene_core` de verdade e, sem mock do lock, faziam
-deadlock entre chamadas sucessivas do mesmo teste). Commit `c92ffee`,
-review disparado (resultado pendente no momento deste HANDOFF). Commit
-irmão no insta_kb: `a2d391f`.
+deadlock entre chamadas sucessivas do mesmo teste). Commit `c92ffee`.
+Commit irmão no insta_kb: `a2d391f`.
+
+**Review (`c92ffee`): aprovado com ressalvas, 1 bug real corrigido.**
+`client.submit(wf)` faz POST via httpx -- um erro de conexão/timeout de
+rede não vira `ComfyUIError` (só status HTTP/corpo de erro viram), então
+um glitch de rede simples travava o lock pra sempre, com nada de fato
+rodando na GPU. Fix em `ffeadae`: `except Exception` genérico libera o
+token antes de repropagar, + teste de regressão (`ConnectionError` no
+lugar de `ComfyUIError`, confirma `gpu_release` chamado). Ressalvas não
+bloqueantes registradas pelo reviewer: `"Timed out" not in str(e)` é
+string-match frágil a refactor futuro de `comfyui_client.py` (sem teste
+que pegaria isso, já que `ComfyUIClient` é mockado nos testes); rotas
+HTTP de diagnóstico devolvem 500 feio em corpo vazio/inválido em vez de
+400 (aceitável, são manuais); sem detector de lock órfão (processo
+morto = lock preso até apagar `~/.gpu-lock/gpu.lock`/`gpu.holder` à mão).
