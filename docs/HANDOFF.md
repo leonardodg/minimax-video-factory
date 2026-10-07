@@ -33,7 +33,7 @@ versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
 | 7 | Fila do insta_kb (329 msgs) | ⏳ | |
 | 8 | Documentação | ⏳ | |
 | 9 | Diagramas | ⏳ | |
-| 10 | Auditoria SOLID (avaliação) | ⏳ | design aprovado no spec do insta_kb (`docs/superpowers/specs/2026-10-07-solid-audit-task-design.md`) |
+| 10 | Auditoria SOLID (avaliação) | ✅ | relatório `docs/SOLID_AUDIT.md` (231 l., só avaliação); 1 crítico = bug de contrato `state=rendering` + 6 importantes; veredito **ciclo futura**; ver seção abaixo |
 
 Regra de GPU durante toda a execução: 1 job (render/transcrição/Ollama) por
 vez; `av==18.1.0` fixo nos 2 repos; nenhum download de peso sem OK.
@@ -1489,8 +1489,8 @@ usuário: **containerizar o Ollama** na própria `insta-kb-net` (sem sudo
 disponível pra mexer no firewall) — container-pra-container na mesma rede
 nunca cruza essa regra. Serviço `ollama` novo no
 `.devcontainer/docker-compose.yml`, montando **read-only** o diretório de
-modelos que o `ollama serve` do host já usa (`/home/ollama_models/.ollama`,
-133 GB) — sem duplicar nem rebaixar nada. `OLLAMA_URL` dos 3 serviços
+modelos que o `ollama serve` do host já usa (`.ollama` de
+`/home/ollama_models`, 133 GB) — sem duplicar nem rebaixar nada. `OLLAMA_URL` dos 3 serviços
 trocado de `http://host.docker.internal:11434` pra `http://ollama:11434`;
 `extra_hosts` removido (não serve mais pra nada); `ollama` adicionado ao
 `depends_on` dos 3. **Ainda em teste no momento deste registro** (imagem
@@ -1511,7 +1511,7 @@ Visão rápida de onde as coisas estão, pros próximos passos:
 | 7 (fila insta_kb) | ✅ parada proposital (322 ready) | retomar quando quiser — `ig_worker_start` ou `POST /ig/worker/start` |
 | 8 (documentação) | ⏳ não iniciada | |
 | 9 (diagramas) | ⏳ não iniciada | |
-| 10 (auditoria SOLID) | ⏳ não iniciada (adicionada por outra sessão, design em `docs/superpowers/specs/2026-10-07-solid-audit-task-design.md`) | não é minha pra decidir escopo |
+| 10 (auditoria SOLID) | ✅ fechada nesta sessão — `docs/SOLID_AUDIT.md` (avaliação, veredito **ciclo futura**; 1 bug de contrato `state=rendering` pra tratar como bugfix) | ver §5 do relatório (backlog severidade × esforço) |
 
 **Trabalho fora do plano original, mas crítico, feito nesta sessão:**
 - Mutex de GPU compartilhado insta_kb↔minimax (arquivo+flock, endpoints
@@ -1529,4 +1529,31 @@ Visão rápida de onde as coisas estão, pros próximos passos:
    incluindo as desta sessão
 3. Depois do reload: handshake + contagem de tools (Task 5), tools
    insta-kb via MCP (Task 6 Step 3)
-4. Tasks 8/9/10 nem começaram
+4. Tasks 8/9 nem começaram (a 10 fechou — ver seção Task 10 abaixo)
+
+---
+
+## 2026-10-07 — Task 10 ✅: auditoria SOLID (só avaliação)
+
+Entregável: **`docs/SOLID_AUDIT.md`** (231 linhas) — nenhum código
+alterado, conforme design (`insta_kb:docs/superpowers/specs/2026-10-07-solid-audit-task-design.md`).
+
+Método: radon cc/mi + vulture (0 dead code) + grafo AST (8 módulos,
+**0 ciclos**) + checklist S/O/L/I/D manual. Piores métricas:
+`inject_scene` cc=**20** (`core.py:74`), `wait_for_execution` cc=15
+(`comfyui_client.py:237`); MI todos rank A.
+
+Achados (10): **1 crítico que é BUG, não dívida** — o contrato
+*documentado* `state=rendering` é inalcançável: `wait_for_video_core`
+**retorna** dict no timeout (`core.py:307-328`) mas
+`orchestrator.py:139-166` trata como se **lançasse** `ComfyUIError`;
+`tests/unit_orchestrator.py:178-185` mascara o problema mockando a
+assinatura antiga. + 6 importantes (server.py polyglot; core.py com 5–6
+responsabilidades; `ComfyUIClient` concreto em 5 pontos (DIP);
+string-match `"Timed out" in str(e)` em 2 camadas; `inject_scene` com 7
+concerns; dispatch if/elif de eventos ws embutido no poll).
+
+**Veredito go/no-go: `ciclo futura`.** Repo estruturalmente saudável
+(0 ciclos, MI A, testes verdes) — mas o bug do `state=rendering` entra
+no próximo ciclo **como bugfix, antes** do resto do backlog (§5 do
+relatório, severidade × esforço).
