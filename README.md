@@ -46,90 +46,12 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 ## 📋 Features
 
 - 🎬 **Text → video + audio in one pass** — H3 generates native stereo sound with the picture, not a soundtrack pasted on afterwards
-- 🔌 **18 MCP tools** — drive the whole pipeline from an AI agent, no CLI to memorise
-- ⌨️ **24 slash commands, for OpenCode and Claude Code** — generated from the code, so they can never drift from what the tools actually accept
-- 📥 **Ingest what you already watch** — download Instagram Reels and YouTube with browser cookies, transcribe locally with Whisper
-- 🧠 **Personal knowledge base** — Postgres + pgvector, hybrid search and RAG, all with a local LLM
-- 🔒 **Fully local** — models, inference, database and transcription run on your machine
+- 🔌 **12 MCP tools** — drive the whole pipeline from an AI agent, no CLI to memorise
+- ⌨️ **12 slash commands, for OpenCode and Claude Code** — generated from the code, so they can never drift from what the tools actually accept
+- 📥 **Build a reference → prompt pipeline** — download a Reel or YouTube video with browser cookies, transcribe locally with Whisper, turn the transcript into a cinematic prompt
+- 🔒 **Fully local** — models, inference and transcription run on your machine
 - 🖥️ **12 GB VRAM is enough** — INT4 ConvRot weights tuned for consumer cards
-- ✅ **Validated end to end** — 9 unit suites plus an 8-step GPU pipeline check in CI
-
----
-
-## 📥 Instagram saved-posts → Knowledge Base
-
-Auto-ingest every post you save on Instagram into the personal knowledge base:
-download, transcribe/describe, summarize, and index — with zero manual steps.
-
-### How it works
-
-```
-Instagram saved posts
-   │  ig_sync.py  (instagrapi, IG_SESSIONID)
-   ▼
-ig.saved (RabbitMQ durable queue)
-   │  ig_worker.py  (daemon, runs on the HOST via uv)
-   ▼
-download (instagrapi auth → yt-dlp fallback)
-   │
-   ├─ video  → Whisper GPU  → LLM summary + tutorial
-   ├─ image  → LLM vision   → LLM summary + tutorial
-   └─ carousel → first video (or first image) resource
-   │
-   ▼
-knowledge.ingest_text → Postgres (documents + chunks + embeddings)
-   │
-   └─ ack ✔  /  retry ×3 → ig.saved.dead (DLQ)
-```
-
-### The moving parts
-
-| Component | File | Role |
-|---|---|---|
-| **Enumeration** | `src/minimax_mcp/ig_sync.py` | Lists saved posts via instagrapi (collections → medias), maps them to queue messages, filters out already-ingested `ig_pk`s. MCP tools: `ig_sync`, `ig_get_progress`. |
-| **Queue** | `src/minimax_mcp/ig_queue.py` | RabbitMQ abstraction: declares `ig.saved` (durable) + DLQ `ig.saved.dead` + control queue, publishes, validates the message contract, and implements the attempts/DLQ retry policy. |
-| **Worker daemon** | `src/minimax_mcp/ig_worker.py` | Consumes one message at a time (prefetch=1, Whisper and ComfyUI share the GPU): download → transcribe/describe → ingest → ack. Reconnects automatically if the broker drops the connection. |
-| **Download** | `src/minimax_mcp/ig_worker.py` `_default_download` | Authenticated instagrapi first (`IG_SESSIONID`, works for private/saved posts), yt-dlp fallback for public content. Carousels pick the first video (or first image) resource. |
-| **KB ingest** | `src/minimax_mcp/knowledge.py` | Splits the transcript into chunks, embeds with `mxbai-embed-large`, and writes the document + summary/tutorial to Postgres. |
-
-### What was validated (real posts, 12 GB GPU)
-
-- ✅ Authenticated download of private/saved posts (instagrapi with `IG_SESSIONID`)
-- ✅ Video pipeline: download → Whisper small (GPU) → LLM summary → KB document
-- ✅ Image/carousel pipeline: download first resource → LLM vision → KB document
-- ✅ Dedup: an already-ingested `ig_pk` is acked without re-processing
-- ✅ Retry ×3 → DLQ on failures; a corrupted body goes straight to the DLQ
-- ✅ Worker survives broker disconnects (reconnect loop with backoff)
-- ✅ 10-post batch ingested back-to-back on one GPU
-
-### Running it
-
-```bash
-# 1. One-time setup (see docs/KNOWLEDGE_BASE.md §7.1 for IG_SESSIONID)
-export IG_SESSIONID=$(grep '^IG_SESSIONID' .env | cut -d= -f2-)
-
-# 2. The worker MUST run on the HOST (uv), not in a container: it needs
-#    Ollama (localhost:11434) and Postgres (127.0.0.1:5432), both blocked
-#    from containers by the host firewall.
-uv run --directory <project> python -m minimax_mcp.ig_worker
-
-# 3. Publish saved posts to the queue (limit = only sync ~10 for a first test)
-uv run python - <<'PY'
-from minimax_mcp import ig_sync, ig_queue, db
-client = ig_sync.make_client()
-items = ig_sync.saved_posts(client, max_per_collection=200)
-msgs = ig_sync.to_messages(items)
-new, _ = ig_sync.split_new(msgs, db.list_ig_pks(db.get_session()))
-conn = ig_queue.connect(); ch = conn.channel(); ig_queue.declare(ch)
-for m in new[:10]:
-    ig_queue.publish(ch, m)
-print(ig_queue.queue_status(ch))
-PY
-```
-
-> ⚠️ **Only sync a handful for a first test.** A full sync of every saved post
-> takes ~1–2 min per item on a 12 GB GPU (Whisper + LLM). The auto-collection
-> "All posts" can hold thousands.
+- ✅ **Validated end to end** — a pure-logic unit suite plus a multi-step GPU pipeline check in CI
 
 ---
 
@@ -149,13 +71,6 @@ PY
 | **yt-dlp** | Downloads Reels, YouTube and friends using your browser's cookies |
 | **faster-whisper** | Local, GPU-accelerated transcription with timestamps |
 | **ffmpeg** | Scene concatenation and output inspection |
-
-### Knowledge base
-| Technology | Role |
-|---|---|
-| **Postgres 16 + pgvector** | Source of truth; documents, chunks and embeddings |
-| **SQLAlchemy 2 + Alembic** | ORM access and schema migrations |
-| **Ollama** (`lfm2:24b`, `mxbai-embed-large`) | Local summarisation and embeddings |
 
 ### Infrastructure
 | Technology | Role |
@@ -286,14 +201,6 @@ This is the single biggest quality lever in the project. Text-only generation as
 the model to invent framing, lighting, subject and motion at once; a first frame
 hands it everything but the motion.
 
-### Save what you learn, then ask about it later
-
-```
-/kb-ingest-video https://www.instagram.com/p/XXXXXXXX/
-/kb-perguntar "what did I save about docker volumes?"
-```
-
-The answer comes only from your own knowledge base, with the sources cited.
 
 ---
 
@@ -382,15 +289,14 @@ be correct out of the frame.
 
 ## ⌨️ Slash commands
 
-Every MCP tool has a matching command. `/minimax-*` drives the video pipeline, `/kb-*` the knowledge base.
+Every MCP tool has a matching `/minimax-*` command, driving the video pipeline.
+The knowledge-base/Instagram-sync commands (`/kb-*`, `/ig-*`) moved to the
+`insta_kb` project in 2026-10-06, along with the tools and modules behind them
+— see `insta_kb/docs/HANDOFF.md`.
 
 Generated for both clients: `.opencode/command/` for OpenCode and `.claude/commands/`
 for Claude Code. The two differ in how they name an MCP tool — Claude Code uses
 `mcp__server__tool` — so each gets its own file from the same source.
-
-The `/kb-*` commands only answer against the **host** server
-(`minimax-knowledge-base`): the `knowledge_*` tools need direct Postgres and Ollama,
-which the container cannot reach. Everything else runs in the container.
 
 ### Render pipeline
 
@@ -413,30 +319,6 @@ which the container cannot reach. Everything else runs in the container.
 | `transcribe_video` | `/minimax-transcrever` | Local Whisper transcription with timestamps |
 | `create_cinematic_prompt` | `/minimax-prompt-cinematico` | Turn a transcript into a structured H3 prompt |
 | `studio_pipeline` | `/minimax-studio` | The whole chain: URL → download → transcribe → prompt → render |
-
-### Knowledge base
-
-| Tool | Command | What it does |
-|---|---|---|
-| `knowledge_ingest_text` | `/kb-ingest-texto` | Summarise and store a text you already have |
-| `knowledge_ingest_video` | `/kb-ingest-video` | Download, transcribe and document a video |
-| `knowledge_ingest_audio` | `/kb-ingest-audio` | Transcribe and document a podcast |
-| `knowledge_ingest_markdown` | `/kb-ingest-markdown` | Import `.md` files; reuses `## Summary` and skips the LLM |
-| `knowledge_search` | `/kb-buscar` | Hybrid search — keyword and semantic, fused with RRF |
-| `knowledge_ask` | `/kb-perguntar` | Answer from your own base only, citing the sources |
-| `knowledge_reindex` | `/kb-reindex` | Recompute chunks and embeddings for everything |
-| `kb_export_search` | `/kb-export-search` | List documents to export — by ids, query, or latest first |
-| `kb_export` | `/kb-export` | Write the selected documents as readable `.md` files (land under `<output_dir>/Knowledge/`, e.g. `output/kb-export/Knowledge/`) |
-
-### Instagram sync
-
-| Tool | Command | What it does |
-|---|---|---|
-| `ig_sync_saved` | `/ig-sync` | Enqueue every Instagram saved post (via IG_SESSIONID) onto the RabbitMQ queue |
-| `ig_queue_status` | `/ig-status` | RabbitMQ queue depth and active consumers |
-| `ig_worker_start` | `/ig-worker` | Send 'start' to the ig-worker daemon |
-| `ig_worker_stop` | `/ig-worker-stop` | Send 'stop' to the ig-worker daemon |
-| `ig_get_progress` | `/ig-progress` | Last processed Instagram items + KB document count |
 
 The command files are **generated from the tool signatures** — `uv run python scripts/generate_commands.py`. A test fails if a tool ever lacks one. Full reference: **[docs/COMMANDS.md](https://leonardodg.github.io/minimax-video-factory/COMMANDS/)**.
 
@@ -466,7 +348,7 @@ The first render of a session is slower: it includes loading ~32 GB of weights.
 | 05 | Smoke render — a real 5 s clip with video **and** stereo audio |
 | 06 | MCP stdio initialize handshake, in-container |
 | 07 | End to end — health → submit → wait → list → compose |
-| 08 | Knowledge base over MCP (skips cleanly when Postgres is absent) |
+| 09 | The `comfyui` image actually imports every module `server.py` needs |
 
 Plus `uv run pytest -m unit` for the pure-logic suites, which need no GPU, no container and no network.
 
@@ -487,11 +369,6 @@ MCP_TRANSPORT=streamable-http  MCP_HOST=0.0.0.0  MCP_PORT=8848
 STUDIO_DOWNLOADS_DIR=.../downloads
 WHISPER_MODEL=small           # tiny/base/small/medium/large-v3
 WHISPER_DEVICE=cuda           # cuda/cpu
-
-# Knowledge base
-KB_DATABASE_URL=postgresql+psycopg://kb:kb@127.0.0.1:5432/knowledge
-LLM_MODEL=lfm2:24b            # measured: qwen2.5:32b took 15+ min per ingest here
-EMBEDDING_MODEL=mxbai-embed-large
 ```
 
 See **[Installation](https://leonardodg.github.io/minimax-video-factory/INSTALLATION/)** for every variable.
@@ -505,12 +382,12 @@ minimax-video-factory/
 ├── .github/workflows/
 │   ├── ci.yml                    # cloud lint/tests + self-hosted GPU suite
 │   └── docs.yml                  # builds and publishes the docs site
-├── .claude/commands/             # 24 generated slash commands (Claude Code)
+├── .claude/commands/             # 12 generated slash commands (Claude Code)
 ├── .mcp.json                     # MCP servers, for Claude Code
-├── .opencode/command/            # 24 generated slash commands (OpenCode)
+├── .opencode/command/            # 12 generated slash commands (OpenCode) + 2 non-tool (compress, search-sessions)
 ├── docker/
 │   ├── Dockerfile                # ComfyUI + in-image MCP venv
-│   └── docker-compose.yml        # GPU passthrough, Postgres for the KB
+│   └── docker-compose.yml        # comfyui (GPU) + mcp, two services
 ├── scripts/
 │   ├── diagnose.sh               # the validation suite runner
 │   ├── start_comfyui.sh
@@ -519,17 +396,13 @@ minimax-video-factory/
 │   ├── generate_mcp_docs.py      # tool reference, generated from the registry
 │   └── command_docs/             # parser · catalog · overrides · renderer
 ├── src/minimax_mcp/
-│   ├── server.py                 # the 18 @mcp.tool() definitions
+│   ├── server.py                 # the 12 @mcp.tool() definitions
 │   ├── core.py                   # workflow injection, submission, output resolution
 │   ├── comfyui_client.py         # HTTP + WebSocket client
 │   ├── orchestrator.py           # the studio pipeline
 │   ├── downloader.py             # yt-dlp
-│   ├── transcriber.py            # faster-whisper
-│   ├── knowledge.py              # knowledge base use cases
-│   ├── db.py                     # Postgres + pgvector via SQLAlchemy
-│   ├── llm.py                    # Ollama / OpenAI-compatible client
-│   └── vault.py                  # optional Obsidian markdown export
-├── tests/                        # 00–08 shell suites + unit_*.py
+│   └── transcriber.py            # faster-whisper
+├── tests/                        # 00–07, 09 shell suites + unit_*.py
 ├── docs/                         # MkDocs site sources
 └── workflows/                    # the H3 API workflow JSON
 ```
@@ -600,16 +473,17 @@ them up on trust:
 }
 ```
 
-The other two hardcode absolute host paths, so they are not versioned — add them per
-machine:
+`minimax-video-factory-uv` (host `uv`, no docker) hardcodes an absolute host
+path, so it's not versioned — add it per machine:
 
 ```bash
-claude mcp add-json minimax-knowledge-base --scope local '{ ... }'   # host: Postgres + Ollama
 claude mcp add-json minimax-video-factory-uv --scope local '{ ... }' # host uv, no docker
 ```
 
-`minimax-knowledge-base` is not optional if you want the `/kb-*` commands: the
-container has no route to Postgres.
+Looking for the knowledge-base commands (`/kb-*`) or Instagram sync
+(`/ig-*`)? They — and the `minimax-knowledge-base` server that answered
+them — moved to [`insta_kb`](https://github.com/leonardodg/insta_kb) in
+2026-10-06.
 
 ---
 
@@ -659,3 +533,4 @@ LeoDG — [@leodg](https://leodg.dev)
 
 - **Repository:** https://github.com/leonardodg/minimax-video-factory
 - **Documentation:** https://leonardodg.github.io/minimax-video-factory/
+- **Related project:** [insta_kb](https://github.com/leonardodg/insta_kb) — the knowledge-base/Instagram-sync sibling this repo was split from

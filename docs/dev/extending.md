@@ -3,13 +3,16 @@
 Practical guides for the most common extension points. All new MCP tools
 should follow the existing thin-wrapper pattern in `server.py`.
 
+> This repo is video-generation only since 2026-10-06 — the knowledge-base
+> and Instagram-sync domain moved to [`insta_kb`](https://github.com/leonardodg/insta_kb).
+> "Add a new ingest type" and "Add a new LLM provider" below live there now.
+
 ## Add a new MCP tool
 
 Adding a tool touches nine places. Six of them are enforced by a test, so
 skipping one turns the suite red rather than shipping a half-registered tool —
-which is what happened when the seven knowledge-base tools went undocumented
-for days and, later, when a stale container image left the server exposing
-none of them.
+which is what happened once when a stale container image left the server
+exposing none of the registered tools.
 
 | # | Step | Enforced by |
 |---|---|---|
@@ -45,43 +48,16 @@ def my_new_tool(
     param: str = Field(description="What this param does"),
 ) -> dict[str, Any]:
     """One-line description of what the tool does."""
-    from minimax_mcp import knowledge
-    return knowledge.my_function(param)
+    from minimax_mcp import orchestrator
+    return orchestrator.my_function(param)
 ```
 
 - `Field(description=...)` on every parameter — clients read these, and the
   slash command generator turns them into the command's own documentation.
-- Import the domain module lazily inside the function, so the server still
-  boots when the knowledge-base stack is down.
+- Import the domain module lazily inside the function if it has a heavy or
+  optional dependency, so the server still boots without it.
 - Return a plain `dict` carrying `ok: bool`. Never let an exception cross the
   MCP boundary.
-
-## Add a new ingest type (video/audio/text/markdown)
-
-1. Add the ingest function in `knowledge.py` following the existing four.
-   The common tail is `_save_document_with(...)` which handles chunking,
-   embeddings, and the optional vault write — reuse it.
-2. If the ingest needs to extract content first (download, transcribe), reuse
-   `downloader.py` / `transcriber.py`.
-3. Register the MCP tool (see above) and regenerate the docs.
-
-## Add a new LLM provider
-
-`llm.py` dispatches on `LLM_PROVIDER`:
-
-- `ollama` → `_ollama_generate()`
-- `openai-compatible` → `_openai_compatible_generate()` (uses
-  `OPENAI_API_URL` / `OPENAI_API_KEY`; works with OpenRouter/Groq free tier)
-
-To add a provider:
-
-1. Add a branch in `generate_structured()` / `chat()` and a
-   `_<provider>_generate()` helper.
-2. Make sure it honors the same contract: `force_json` must produce
-   parseable JSON that `parse_llm_json()` can read.
-3. Update `.env.example` docs and the Knowledge Base guide.
-
-**Embeddings are always local Ollama** regardless of `LLM_PROVIDER`.
 
 ## Add a new download platform
 
@@ -109,7 +85,7 @@ models:
 - **Formatting/lint:** `ruff check src tests` (and `ruff format` if you want
   auto-formatting).
 - **Tests:** `uv run pytest -m unit` for fast pure-logic tests; the
-  integration markers need Postgres + Ollama up (see
+  `integration_db` marker needs the `comfyui` container up (see
   [Contributing & Testing](contributing.md)).
 - **Docs:** after any registry or behavior change, rebuild the site:
   `uv run mkdocs build --strict`.

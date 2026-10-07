@@ -31,7 +31,7 @@ nav:
       - Architecture: ARCHITECTURE.md
       - Remote MCP (VPS): MCP_REMOTE.md
       - Self-hosted Runner: SELF_HOSTED_RUNNER.md
-      - Knowledge Base Tutorial: KNOWLEDGE_BASE.md
+      - Knowledge Base (moved to insta_kb): KNOWLEDGE_BASE.md
       - MCP Tools Reference: MCP_TOOLS.md
       - Slash Commands: COMMANDS.md
   - Developer Docs:

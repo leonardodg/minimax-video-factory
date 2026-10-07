@@ -1,0 +1,55 @@
+# Imagem Python da fábrica — servidor MCP e ig-worker. SEM ComfyUI.
+#
+# POR QUE ELA EXISTE
+# ------------------
+# Antes, o `ig-worker` e o servidor MCP rodavam dentro da imagem do ComfyUI
+# (36,2 GB). Nenhum dos dois usa o ComfyUI: o worker baixa com yt-dlp,
+# transcreve com Whisper, descreve com Ollama e grava no Postgres; o MCP fala
+# com o ComfyUI por HTTP. Carregavam torch, CUDA, os custom nodes e o ComfyUI
+# inteiro para rodar um consumidor de fila que ocupa 52 MiB de RAM.
+#
+# Custo disso, medido: todo build do código Python reconstruía 36 GB, e o
+# servidor MCP herdava o ambiente do container do ComfyUI -- foi assim que ele
+# ficou sem `RABBITMQ_URL` e as tools ig_* falhavam com erro vazio enquanto as
+# kb_* funcionavam (2026-08-12).
+#
+# BASE: python slim, não a do PyTorch
+# -----------------------------------
+# As libs de CUDA que o faster-whisper precisa (libcublas.so.12, libcudnn) vêm
+# por pip -- é o que a imagem do ComfyUI já fazia na linha do
+# `nvidia-cublas-cu12`. O driver vem do host pelo runtime da NVIDIA. Então não
+# há motivo para arrastar a imagem do PyTorch como base.
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# ffmpeg: yt-dlp remuxa com ele, e o faster-whisper lê áudio por ele.
+# git: instagrapi e algumas deps resolvem de repositório.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg git curl \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir uv
+
+WORKDIR /workspace
+
+# Só o que o `uv sync` precisa para resolver. O código vem por bind-mount em
+# tempo de execução (/workspace montado read-only pelo compose), igual à imagem
+# do ComfyUI -- assim editar Python não exige rebuild.
+COPY pyproject.toml uv.lock* /workspace/
+COPY src /workspace/src
+
+ENV UV_PROJECT_ENVIRONMENT=/opt/mcp-venv
+RUN uv sync --no-dev
+
+# ctranslate2 (dentro do faster-whisper) linka libcublas.so.12 e libcudnn. O
+# torch do venv é mais novo e traz cu13, que não serve -- mesma correção que a
+# imagem do ComfyUI já aplicava.
+RUN uv pip install --python /opt/mcp-venv/bin/python --no-cache-dir \
+      nvidia-cublas-cu12 nvidia-cudnn-cu12
+ENV LD_LIBRARY_PATH="/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
+
+ENV PYTHONPATH=/workspace/src
+
+# Sem CMD: cada serviço do compose declara o seu (server ou ig_worker).

@@ -1,11 +1,30 @@
-# docker-compose.yml — ComfyUI + MiniMax H3 (GPU) + in-image MCP server
-# All paths/config come from the project-root .env (via config.sh vars). The host
-# only needs Docker + the models dir; uv/Python/MCP run inside the image.
+# docker-compose.yml — ComfyUI + MiniMax H3 (GPU) e o servidor MCP
 #
-# ComfyUI writes output into /comfy/ComfyUI/output, which is the same bind-mount as
-# ${OUTPUT_DIR}. The MCP server runs in the SAME container via `docker compose exec`
-# (stdio, for OpenCode) or exposed over HTTP on ${MCP_PORT} (remote/VPS access) —
-# so it shares the ComfyUI process, models and output — no host uv required.
+# DOIS SERVICOS, DUAS IMAGENS
+#
+#   comfyui    minimax-comfyui:local  36,2 GB  render H3, GPU
+#   mcp        minimax-python:local    ~5 GB   servidor MCP, GPU (Whisper)
+#
+# O `mcp` NAO usa o ComfyUI. Antes rodava na imagem dele (36,2 GB) so por
+# conveniencia: o MCP fala com o ComfyUI por HTTP e transcreve com Whisper
+# (transcribe_video, studio_pipeline). Carregava torch, CUDA e o ComfyUI
+# inteiro para rodar um processo que nao precisa de nada disso.
+#
+# O custo nao era so disco. O servidor MCP rodava DENTRO do container do
+# comfyui e herdava o ambiente de la -- foi assim que ficou sem
+# RABBITMQ_URL enquanto tinha KB_DATABASE_URL, e as tools ig_* (ja migradas
+# para o projeto insta_kb, ver docs/HANDOFF.md) falhavam com erro VAZIO
+# enquanto as kb_* funcionavam (2026-08-12). O `postgres`, `rabbitmq` e
+# `ig-worker` que existiam aqui foram embora com elas -- este compose agora
+# só conhece o domínio de vídeo.
+#
+# ⚠️ SEPARAR CONTAINERS NAO SEPARA VRAM. Sao dois consumidores da mesma placa
+# de 12 GB: ComfyUI (~11 GB em render) e MCP (Whisper). Mais o ig-worker do
+# insta_kb, que continua disputando a MESMA GPU do host -- ver a regra do
+# CLAUDE.md sobre pausar/retomar antes de um render.
+#
+# O `mcp` e o `comfyui` compartilham ${OUTPUT_DIR}: o MCP le os .mp4 que o
+# ComfyUI escreve. E o unico acoplamento que nao se resolve com env var.
 
 services:
   comfyui:
@@ -18,9 +37,6 @@ services:
     container_name: ${COMFY_CONTAINER:-minimax-comfyui}
     ports:
       - "127.0.0.1:${COMFYUI_PORT:-8188}:8188"
-      # Remote MCP over HTTP (streamable-http). Keep it on 127.0.0.1 and front with
-      # a TLS reverse proxy (Caddy/nginx) for VPS use; see docs/MCP_REMOTE.md.
-      - "127.0.0.1:${MCP_PORT:-8848}:${MCP_PORT:-8848}"
     volumes:
       # host models dir (set MODELS_DIR in .env) -> container models dir (read-only)
       - ${MODELS_DIR:-/opt/minimax/models}:/comfy/ComfyUI/models:ro
@@ -74,41 +90,6 @@ services:
       MODEL_TEXT_ENCODER: ${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}
       MODEL_VIDEO_VAE: ${MODEL_VIDEO_VAE:-minimax_h3_video_vae_fp16.safetensors}
       MODEL_AUDIO_VAE: ${MODEL_AUDIO_VAE:-minimax_h3_audio_vae_fp32.safetensors}
-      # --- knowledge base -------------------------------------------------
-      # Container view of the database: "postgres" is the compose service, on
-      # the shared network. The host's .env says 127.0.0.1, which inside this
-      # container means this container -- it would never have connected.
-      KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@postgres:5432/${KB_POSTGRES_DB:-knowledge}
-      # Ollama runs on the host, so the container needs the gateway rather than
-      # localhost.
-      # This comment used to say the host firewall blocks it. MEASURED FALSE on
-      # 2026-08-11: ollama listens on *:11434 and a throwaway container reached
-      # http://host.docker.internal:11434/api/tags with HTTP 200. The /kb-* tools
-      # can run in container mode here; AGENTS.md still documents them as
-      # host-mode, which is now a choice rather than a constraint.
-      OLLAMA_URL: ${CONTAINER_OLLAMA_URL:-http://host.docker.internal:11434}
-      LLM_MODEL: ${LLM_MODEL:-lfm2:24b}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mxbai-embed-large}
-      # --- fila -----------------------------------------------------------
-      # O servidor MCP roda DENTRO deste container (scripts/mcp_runner.sh via
-      # `docker exec`), e as tools ig_* falam com o RabbitMQ. Sem esta linha o
-      # codigo cai no default `amqp://guest:guest@localhost:5672/` -- que no
-      # host acerta a porta publicada, mas aqui dentro aponta para este proprio
-      # container, onde nao ha broker.
-      #
-      # O sintoma era desconcertante: `ig_queue_status`, `ig_worker_stop` e
-      # `ig_sync_saved` falhavam com erro VAZIO, enquanto as tools kb_*
-      # funcionavam -- porque `KB_DATABASE_URL` acima ja vinha reescrito para a
-      # rede do compose e o RABBITMQ_URL nunca foi. Medido em 2026-08-12.
-      #
-      # Mesmos valores do servico ig-worker, que prova que `rabbitmq:5672`
-      # resolve a partir de um container desta rede.
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672/
-      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-ig.saved}
-      # Remote MCP transport settings
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
-      MCP_HOST: ${MCP_HOST:-0.0.0.0}
-      MCP_PORT: ${MCP_PORT:-8848}
     deploy:
       resources:
         reservations:
@@ -120,111 +101,58 @@ services:
     # Extra CLI flags come from .env COMFYUI_EXTRA_ARGS (overridable on the CLI too).
     command: ["bash", "-c", "cd /comfy/ComfyUI && python main.py --listen 0.0.0.0 --port 8188 ${COMFYUI_EXTRA_ARGS:-}"]
 
-  # Knowledge base storage — Postgres with the pgvector extension. Independent of
-  # comfyui (no GPU, no dependency on the render container). The MCP server reaches
-  # it from HOST mode (uv) at 127.0.0.1:${KB_POSTGRES_PORT}.
-  postgres:
-    image: pgvector/pgvector:pg16
-    container_name: ${KB_POSTGRES_CONTAINER:-minimax-kb-postgres}
-    restart: unless-stopped
-    # Roda como o usuário do HOST, não como o postgres da imagem (uid 999).
-    #
-    # Por quê: KB_POSTGRES_DATA_DIR fica dentro da árvore do projeto, então um
-    # `chown -R $USER` na raiz -- coisa perfeitamente razoável de fazer --
-    # tirava o data dir do uid 999 e o banco subia repetindo
-    # `could not open file "global/pg_filenode.map": Permission denied`.
-    # Devolver o dono para 999 conserta o sintoma e deixa a armadilha armada.
-    # Com o uid casando, o dono "errado" passa a ser o certo.
-    #
-    # Funciona porque a imagem deixa /var/run/postgresql como drwxrwsrwt
-    # (mundo-gravável, sticky), então um uid arbitrário cria o socket.
-    user: "${PG_UID:-1000}:${PG_GID:-1000}"
-    environment:
-      POSTGRES_USER: ${KB_POSTGRES_USER:-kb}
-      POSTGRES_PASSWORD: ${KB_POSTGRES_PASSWORD:-kb}
-      POSTGRES_DB: ${KB_POSTGRES_DB:-knowledge}
-    ports:
-      - "127.0.0.1:${KB_POSTGRES_PORT:-5432}:5432"
-    volumes:
-      - ${KB_POSTGRES_DATA_DIR:-${PROJECT_ROOT:-..}/.pgdata}:/var/lib/postgresql/data
-
-  # Message broker for the Instagram saved-posts sync. Local by default; a VPS
-  # RabbitMQ can be used instead by setting RABBITMQ_URL in .env.
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: ${RABBITMQ_CONTAINER:-minimax-rabbitmq}
-    restart: unless-stopped
-    environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
-    ports:
-      - "127.0.0.1:5672:5672"
-      - "127.0.0.1:15672:15672"
-    volumes:
-      - ${RABBITMQ_DATA_DIR:-.rabbitmq}:/var/lib/rabbitmq
-
-  # Instagram saved-posts -> knowledge base worker. Same image/stack as the H3
-  # renderer (shares its GPU for Whisper/vision); reaches postgres + rabbitmq on
-  # the compose network and host Ollama via host.docker.internal.
-  ig-worker:
-    image: ${COMFY_IMAGE:-minimax-comfyui:local}
-    container_name: ${IG_WORKER_CONTAINER:-minimax-ig-worker}
+  # Servidor MCP — container próprio, imagem Python enxuta, SEM ComfyUI.
+  #
+  # Antes ele rodava dentro do container do comfyui, por `docker exec`, e
+  # herdava o ambiente de lá. Foi assim que ficou sem RABBITMQ_URL enquanto
+  # tinha KB_DATABASE_URL, e as tools ig_* falhavam com erro vazio enquanto as
+  # kb_* funcionavam (2026-08-12). Com serviço próprio, ele declara o que
+  # precisa e o comfyui declara o que precisa.
+  #
+  # Ainda usa GPU: transcribe_video, studio_pipeline, knowledge_ingest_video e
+  # knowledge_ingest_audio rodam faster-whisper com device=cuda. Separar
+  # containers NÃO separa VRAM -- continuam três consumidores da mesma placa.
+  mcp:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.python
+    image: ${PYTHON_IMAGE:-minimax-python:local}
+    container_name: ${MCP_CONTAINER:-minimax-mcp}
     depends_on:
       - comfyui
-      - postgres
-      - rabbitmq
+    ports:
+      # MCP por HTTP (streamable-http). Sai do comfyui e vem para cá.
+      - "127.0.0.1:${MCP_PORT:-8848}:${MCP_PORT:-8848}"
     volumes:
       - ${PROJECT_ROOT:-..}:/workspace:ro
+      # MESMO diretório de saída do comfyui: o MCP lê os .mp4 que ele escreve.
+      # É o único acoplamento que não se resolve com variável de ambiente.
+      - ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}:/output
+      # só para o health_check conferir se os pesos existem
+      - ${MODELS_DIR:-/opt/minimax/models}:/models:ro
       - ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}:/downloads
       - ${HF_CACHE_DIR:-${PROJECT_ROOT:-..}/.hf-cache}:/root/.cache/huggingface
-    # Rede do HOST, nao a do compose. O worker precisa do Ollama, que roda no
-    # host, e nenhum caminho de container chegava la.
-    #
-    # Medido em 2026-08-12, com o ufw habilitado:
-    #   host      -> 127.0.0.1:11434   HTTP 200
-    #   host      -> 172.17.0.1:11434  HTTP 200   (gateway do docker0)
-    #   host      -> 172.18.0.1:11434  HTTP 200   (gateway desta rede)
-    #   CONTAINER -> 172.17.0.1:11434  bloqueado
-    #   CONTAINER -> 172.18.0.1:11434  bloqueado
-    #
-    # Ou seja: o Ollama escuta em tudo e responde por qualquer IP a partir do
-    # host; o que barra e o firewall, no sentido container->host. O sintoma era
-    # `screen read failed: [Errno 110] Connection timed out` a cada ~135 s, com
-    # o worker preso em laco no mesmo post -- transcrevia (2 min de GPU),
-    # falhava as leituras de tela, e recomecava. 7 falhas em 20 min, zero posts
-    # concluidos.
-    #
-    # A alternativa seria liberar a bridge do Docker no ufw. **DESCARTADA pelo
-    # usuario em 2026-08-12**: nao se mexe no firewall desta maquina. Nao
-    # reabrir a discussao -- `network_mode: host` resolve sem sudo e sem regra
-    # nova, e o worker passa a falar 127.0.0.1 com todo mundo.
-    #
-    # ⚠️ Com rede do host, o DNS do compose NAO resolve: `rabbitmq` e
-    # `postgres` deixam de existir como nomes. Por isso os dois enderecos
-    # abaixo viram 127.0.0.1 -- e funciona porque ambos JA publicam em
-    # 127.0.0.1 (ver a secao `ports` de cada um). O `depends_on` continua
-    # valendo para a ordem de subida.
-    network_mode: host
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility,video
       PYTHONPATH: /workspace/src
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@127.0.0.1:5672/
-      RABBITMQ_QUEUE: ${RABBITMQ_QUEUE:-ig.saved}
-      KB_DATABASE_URL: postgresql+psycopg://${KB_POSTGRES_USER:-kb}:${KB_POSTGRES_PASSWORD:-kb}@127.0.0.1:${KB_POSTGRES_PORT:-5432}/${KB_POSTGRES_DB:-knowledge}
-      OLLAMA_URL: http://127.0.0.1:11434
-      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen2.5vl:7b}
+      # o ComfyUI agora é outro container: nome de serviço, não 127.0.0.1
+      COMFYUI_URL: http://comfyui:8188
+      WORKFLOW_PATH: /workspace/workflows/minimax_h3_t2v_api.json
+      MODELS_DIR: /models
+      OUTPUT_DIR: /output
+      OUTPUT_HOST_DIR: ${OUTPUT_DIR:-${PROJECT_ROOT:-..}/output}
+      OUTPUT_PREFIX: ${OUTPUT_PREFIX:-video/factory}
+      STUDIO_DOWNLOADS_DIR: /downloads
+      STUDIO_DOWNLOADS_HOST_DIR: ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       WHISPER_DEVICE: ${WHISPER_DEVICE:-cuda}
-      LLM_MODEL: ${LLM_MODEL:-lfm2:24b}
-      LLM_TIMEOUT: ${LLM_TIMEOUT:-900}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-mxbai-embed-large}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-1024}
-      IG_SESSIONID: ${IG_SESSIONID}
-      IG_DOWNLOADS_DIR: /downloads/ig
-      IG_DELETE_AFTER_INGEST: ${IG_DELETE_AFTER_INGEST:-true}
-      IG_STATE_FILE: /downloads/ig/state.json
-      VAULT_PATH: ${VAULT_PATH:-}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-float16}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+      MCP_PORT: ${MCP_PORT:-8848}
     deploy:
       resources:
         reservations:
@@ -233,4 +161,4 @@ services:
               count: 1
               capabilities: [ gpu ]
     restart: unless-stopped
-    command: ["bash", "-c", "cd /workspace && /opt/mcp-venv/bin/python -m minimax_mcp.ig_worker"]
+    command: ["/opt/mcp-venv/bin/python", "-m", "minimax_mcp.server"]

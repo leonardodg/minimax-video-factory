@@ -33,10 +33,10 @@ SPECS = {s.tool_name: s for s in parse_tools(SERVER_PY)}
 
 print("== unit_commands: parser ==")
 
-if len(SPECS) == 26:
-    ok("found all 26 @mcp.tool() functions")
+if len(SPECS) == 12:
+    ok("found all 12 @mcp.tool() functions")
 else:
-    bad(f"found {len(SPECS)} tools, expected 26: {sorted(SPECS)}")
+    bad(f"found {len(SPECS)} tools, expected 12: {sorted(SPECS)}")
 
 # Only @mcp.tool()-decorated functions, not every function in the module.
 if "main" not in SPECS and "to_host_path" not in SPECS:
@@ -110,10 +110,10 @@ else:
     bad(f"compose_final.scene_paths type = {scenes.type_hint!r}")
 
 # Docstrings feed the summary line.
-if SPECS["knowledge_ask"].docstring.startswith("Responde"):
+if SPECS["studio_pipeline"].docstring.startswith("Run the complete"):
     ok("docstring captured")
 else:
-    bad(f"knowledge_ask docstring = {SPECS['knowledge_ask'].docstring[:40]!r}")
+    bad(f"studio_pipeline docstring = {SPECS['studio_pipeline'].docstring[:40]!r}")
 
 print("== unit_commands: catalog ==")
 
@@ -138,27 +138,23 @@ else:
     dupes = sorted({n for n in names if names.count(n) > 1})
     bad(f"duplicate command names: {dupes}")
 
-if catalog.command_name("knowledge_ask") == "kb-perguntar":
-    ok("command_name maps a knowledge tool to its kb- name")
+if catalog.command_name("generate_video") == "minimax-gerar-video":
+    ok("command_name maps a video tool to its minimax- name")
 else:
-    bad(f"command_name('knowledge_ask') = {catalog.command_name('knowledge_ask')!r}")
+    bad(f"command_name('generate_video') = {catalog.command_name('generate_video')!r}")
 
 wrong_prefix = [
     (tool, name)
     for tool, name in catalog.COMMAND_NAMES.items()
-    if tool.startswith(("knowledge_", "kb_")) != name.startswith("kb-")
+    if not name.startswith("minimax-")
 ]
 if not wrong_prefix:
-    ok("knowledge_*/kb_* tools get kb-, everything else gets minimax-")
+    ok("every tool gets a minimax- command name (only group left)")
 else:
     bad(f"prefix mismatch: {wrong_prefix}")
 
-if (
-    catalog.group_of("kb-buscar") == "kb"
-    and catalog.group_of("minimax-health") == "video"
-    and catalog.group_of("ig-status") == "ig"
-):
-    ok("group_of splits the three product areas")
+if catalog.group_of("minimax-health") == "video":
+    ok("group_of returns the only remaining product area")
 else:
     bad("group_of returned the wrong group")
 
@@ -372,24 +368,6 @@ if "GERADO AUTOMATICAMENTE" in dl_claude:
 else:
     bad("claude command is missing the generated-file header")
 
-# Routing: the knowledge_* tools only work against the host server, because
-# the container cannot reach Postgres or Ollama.
-kb_claude = renderer.render_claude_command(
-    SPECS["knowledge_search"], OVERRIDES.get("knowledge_search", _Ov()), "kb-buscar"
-)
-if "mcp__minimax-knowledge-base__knowledge_search" in kb_claude:
-    ok("kb commands are routed to the host knowledge-base server")
-else:
-    bad("kb command does not point at minimax-knowledge-base")
-
-if "minimax-video-factory" not in kb_claude:
-    ok("kb command never offers a container server as a fallback")
-else:
-    bad(
-        "kb command offers a container variant — it cannot reach Postgres, "
-        "so the retry turns a clear error into a timeout"
-    )
-
 vid_claude = renderer.render_claude_command(
     SPECS["generate_video"], OVERRIDES["generate_video"], "minimax-gerar-video"
 )
@@ -445,24 +423,13 @@ else:
     absent = [c for c, _, _ in entries if f"/{c}" not in page]
     bad(f"commands missing from the catalog page: {absent}")
 
-if "Pipeline de vídeo" in page and "Base de conhecimento" in page:
-    ok("catalog page is split by product area")
+if "Pipeline de vídeo" in page:
+    ok("catalog page has the (only) product-area heading")
 else:
-    bad("catalog page is missing its group headings")
-
-# Compare the two group headings against each other: the overview table at the
-# top already lists every command, so comparing a heading against a command
-# name would just measure the table.
-if page.index("## Pipeline de vídeo") < page.index("## Base de conhecimento"):
-    ok("video group precedes the knowledge-base group")
-else:
-    bad("group order is wrong on the catalog page")
+    bad("catalog page is missing its group heading")
 
 video_start = page.index("## Pipeline de vídeo")
-kb_start = page.index("## Base de conhecimento")
-if page.index("### `/minimax-health`") > video_start and page.index(
-    "### `/kb-buscar`"
-) > kb_start:
+if page.index("### `/minimax-health`") > video_start:
     ok("each command's section sits under its own group")
 else:
     bad("a command section landed in the wrong group")
