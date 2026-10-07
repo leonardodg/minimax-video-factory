@@ -1399,3 +1399,39 @@ diretamente. A troca pra HTTP já foi feita ali na Task 4 Step 8.
 **Pendente (Steps 3-5, ação do usuário):** reiniciar a sessão do OpenCode
 pra `insta-kb` reconectar via HTTP; depois, handshake + contagem de tools
 por instância (Step 4) — ainda não feito nesta sessão.
+
+---
+
+## 2026-10-07 — Task 6 (matriz de testes): Steps 1, 2, 4 feitos; 3 e 5 pendentes
+
+**Step 1 (baseline):** insta_kb 182 passed; minimax 9/9 unit + ruff limpo —
+mesmo baseline de antes, sem regressão.
+
+**Step 2 (tools minimax via MCP desta sessão):** `queue_status` (fila
+vazia, ok), `list_outputs` (219+ arquivos, ok), `get_status` (id
+inexistente → `{"state":"queued"}` — não é regressão desta sessão, é
+comportamento pré-existente; registrado como observação, não bug),
+`create_cinematic_prompt` (prompt gerado corretamente). `health_check`
+continua com o falso-negativo de processo MCP obsoleto (mesmo achado da
+Task 3 — a instância `minimax-video-factory-uv` desta sessão tem env
+antigo; resolve com o reload pendente do Step 3 da Task 5). `download_video`
+não testado (evitar rede/rate-limit sem necessidade).
+
+**Step 4 (REST + ComfyUI):** `/healthcheck` 200, `/ig/queue-status` 200,
+`/ig/progress` 200, `/knowledge/search?query=` 200 (⚠️ o plano original
+escreveu `q=`, parâmetro errado — é `query`), `/knowledge/documents` 200,
+`/knowledge/export/search` 200, `/gpu/status` 200 (novo, Task 4+).
+Traversal guard confirmado: `POST /knowledge/export?ids=1&output_dir=../../etc`
+→ `{"ok":false,"error":"output_dir must stay under /app/output"}` (os
+parâmetros são **query**, não body JSON — outro ajuste do teste, não bug).
+ComfyUI `/system_stats` e `/object_info` 200. `POST /prompt` de smoke
+**pulado de propósito** — evitaria disputar GPU com o worker ativo
+processando a fila real; já validado na Task 3.
+
+**Pendente:**
+- Step 3 (tools insta-kb via MCP): bloqueado até o reload do OpenCode
+  (Task 5 Step 3, ação do usuário).
+- Step 5 (renders reais novos vs baseline): ainda não feito — pede
+  confirmação porque o worker está processando a fila real agora; o
+  mutex de GPU (seção acima) serializa automaticamente, mas um render
+  de verdade ainda atrasa o worker por até 1800s enquanto segura o lock.
