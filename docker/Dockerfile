@@ -89,7 +89,11 @@ WORKDIR /comfy/ComfyUI
 
 # Entrypoint: launch with flags tuned for low-VRAM / limited-RAM machines.
 #   --fast-disk            move weights into page cache (critical on 16-32 GB RAM)
-#   --disable-pinned-memory  work around pinned-memory regression in 0.30.x
+#   --disable-pinned-memory  workaround for a pinned-memory regression seen on
+#                            0.30.x; kept on 0.39.1 after the v0.39.1 upgrade
+#                            (2026-10-07) rendered fine with it on -- removing
+#                            it hasn't been tested, so it stays until someone
+#                            verifies it's no longer needed.
 #   --lowvram              aggressive offload (12 GB VRAM: Qwen3VL-32B + diffusion exceed 12 GB)
 #   --listen 127.0.0.1     local only (fronted by docker port mapping)
 EXPOSE 8188

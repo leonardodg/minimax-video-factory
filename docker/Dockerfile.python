@@ -37,7 +37,7 @@ WORKDIR /workspace
 # Só o que o `uv sync` precisa para resolver. O código vem por bind-mount em
 # tempo de execução (/workspace montado read-only pelo compose), igual à imagem
 # do ComfyUI -- assim editar Python não exige rebuild.
-COPY pyproject.toml uv.lock* /workspace/
+COPY pyproject.toml uv.lock /workspace/
 COPY src /workspace/src
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/mcp-venv
