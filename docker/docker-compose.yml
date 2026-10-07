@@ -132,6 +132,9 @@ services:
       - ${MODELS_DIR:-/opt/minimax/models}:/models:ro
       - ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}:/downloads
       - ${HF_CACHE_DIR:-${PROJECT_ROOT:-..}/.hf-cache}:/root/.cache/huggingface
+      # Shared with insta_kb's ig-worker/api/mcp (same host path, neither
+      # repo imports the other -- see src/minimax_mcp/gpu_lock.py).
+      - ${HOME}/.gpu-lock:/var/lib/gpu-lock
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -153,6 +156,7 @@ services:
       MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable-http}
       MCP_HOST: ${MCP_HOST:-0.0.0.0}
       MCP_PORT: ${MCP_PORT:-8848}
+      GPU_LOCK_DIR: /var/lib/gpu-lock
     deploy:
       resources:
         reservations:

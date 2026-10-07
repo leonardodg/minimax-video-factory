@@ -13,6 +13,14 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import os
+
+# generate_video -> submit_scene_core acquires the shared GPU lock for real
+# (ComfyUIClient is mocked below, but gpu_lock isn't) -- isolated dir so
+# this never contends with a real render or insta_kb's ig-worker for
+# ~/.gpu-lock.
+os.environ.setdefault("GPU_LOCK_DIR", tempfile.mkdtemp())
+
 FAIL = 0
 
 

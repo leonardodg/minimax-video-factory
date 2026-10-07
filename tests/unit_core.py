@@ -12,6 +12,13 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import os
+
+# submit_scene_core acquires the shared GPU lock for real (ComfyUIClient is
+# mocked below, but gpu_lock isn't) -- isolated dir so this never contends
+# with a real render or insta_kb's ig-worker for ~/.gpu-lock.
+os.environ.setdefault("GPU_LOCK_DIR", tempfile.mkdtemp())
+
 FAIL = 0
 
 
@@ -105,6 +112,17 @@ else:
         bad(f"last_frame alone = {lh3.get('last_frame')!r}, first_frame = {lh3.get('first_frame')!r}")
 
 print("== unit_core: submit_scene_core ==")
+# submit_scene_core/wait_for_video_core are tested here for their OWN logic
+# (workflow patching, error shapes, output resolution) -- the GPU-lock
+# acquire/release pairing has its own dedicated coverage in
+# unit_gpu_lock.py. Mocked (not just isolated via GPU_LOCK_DIR) because
+# several submit_scene_core calls below never reach a matching
+# wait_for_video_core call in this script -- with the real lock, the
+# second successful submit would deadlock waiting for the first's token,
+# which nothing here ever releases.
+mock.patch.object(core, "gpu_acquire", lambda holder, timeout=300: "unit-test-token").start()
+mock.patch.object(core, "gpu_release", lambda token: None).start()
+
 with mock.patch.object(core, "ComfyUIClient") as m:
     client = m.return_value
     client.submit.return_value = "pid-1"

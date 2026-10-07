@@ -41,7 +41,10 @@ from typing import Any
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 from pydantic import Field
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
+from minimax_mcp import gpu_lock
 from minimax_mcp.comfyui_client import ComfyUIClient
 from minimax_mcp.core import (
     compose_final_core,
@@ -95,6 +98,38 @@ REQUIRED_MODELS = {
 }
 
 mcp = FastMCP("minimax-video-factory")
+
+
+# ---------------- GPU lock: plain HTTP, for diagnostics/manual use ----------
+# The real enforcement happens inside submit_scene_core/wait_for_video_core
+# (minimax_mcp/core.py), which acquire/release automatically around the
+# actual render. These three routes exist for an external caller (a human,
+# insta_kb's ig-worker checking before a long transcription, a shell) to
+# inspect or manually hold the same lock -- same file, same protocol, no
+# import of insta_kb's code (see minimax_mcp/gpu_lock.py docstring).
+@mcp.custom_route("/gpu/status", methods=["GET"])
+async def gpu_status_route(request: Request) -> JSONResponse:
+    return JSONResponse(gpu_lock.status())
+
+
+@mcp.custom_route("/gpu/acquire", methods=["POST"])
+async def gpu_acquire_route(request: Request) -> JSONResponse:
+    body = await request.json()
+    holder = body["holder"]
+    timeout = float(body.get("timeout", 300))
+    token = gpu_lock.acquire(holder, timeout=timeout)
+    if token is None:
+        return JSONResponse(
+            {"ok": False, "token": None, "held_by": gpu_lock.status()["holder"]}
+        )
+    return JSONResponse({"ok": True, "token": token, "held_by": None})
+
+
+@mcp.custom_route("/gpu/release", methods=["POST"])
+async def gpu_release_route(request: Request) -> JSONResponse:
+    body = await request.json()
+    gpu_lock.release(body["token"])
+    return JSONResponse({"ok": True})
 
 
 # ---------------- helpers ----------------

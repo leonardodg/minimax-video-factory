@@ -13,6 +13,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError
+from minimax_mcp.gpu_lock import acquire as gpu_acquire
+from minimax_mcp.gpu_lock import release as gpu_release
 
 load_dotenv()
 
@@ -218,6 +220,17 @@ def output_relpath(path: Path, output_dir: Path) -> str:
         return path.name
 
 
+# Tracks which prompt_id is holding which GPU-lock token between
+# submit_scene_core (acquire) and wait_for_video_core (release) -- the
+# actual GPU-busy window is "until ComfyUI reports this prompt done", not
+# bounded by any caller's wait_seconds. A render that outlives every
+# wait_for_video call this process ever receives for its prompt_id keeps
+# the lock held until the next successful poll (or process restart) --
+# a known, accepted gap, not a design this module can close on its own
+# (see docs/HANDOFF.md, 2026-10-07).
+_gpu_tokens_by_prompt: dict[str, str] = {}
+
+
 def submit_scene_core(
     prompt: str,
     duration: float = 5.0,
@@ -262,10 +275,19 @@ def submit_scene_core(
                       steps=steps, turbo_lora=turbo_lora,
                       turbo_strength=turbo_strength,
                       turbo_low_vram=turbo_low_vram)
+    # This machine has one 12 GB GPU, shared with insta_kb's ig-worker
+    # (Whisper transcription) -- same lock file, see minimax_mcp/gpu_lock.py.
+    # Timeout matches the worst-case render in the production table
+    # (CLAUDE.md): ~1300s at 103 Mpixel-frames, rounded up with headroom.
+    token = gpu_acquire(f"comfyui render prompt seed={seed}", timeout=1800)
+    if token is None:
+        return {"ok": False, "stage": "gpu_lock", "error": "GPU busy (ig-worker transcribing), gave up after 1800s"}
     try:
         prompt_id = client.submit(wf)
     except ComfyUIError as e:
+        gpu_release(token)
         return {"ok": False, "error": str(e)}
+    _gpu_tokens_by_prompt[prompt_id] = token
     effective_steps = steps or (DEFAULT_TURBO_STEPS if turbo else DEFAULT_STEPS)
     return {"ok": True, "prompt_id": prompt_id, "seed": seed,
             "duration": duration, "width": width, "height": height,
@@ -279,14 +301,29 @@ async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[s
     try:
         rec = await client.wait_for_execution(prompt_id, timeout=timeout)
     except ComfyUIError as e:
+        # A timeout here means ComfyUI hasn't reported the prompt done yet --
+        # the render may still be running, so the GPU lock stays held; the
+        # caller (or a later wait_for_video call) is expected to try again.
+        # Any OTHER ComfyUIError means the render itself failed/errored out,
+        # so the GPU is actually free again -- release it.
+        if "Timed out" not in str(e):
+            _release_gpu_token(prompt_id)
         return {"ok": False, "error": str(e)}
     except Exception as e:
+        _release_gpu_token(prompt_id)
         return {"ok": False, "error": f"unexpected: {e}"}
 
+    _release_gpu_token(prompt_id)
     # Resolve output path (container view) then translate to the host view for the client.
     path = client.resolve_output(rec, str(OUTPUT_DIR))
     return {"ok": path is not None, "prompt_id": prompt_id,
             "output_path": to_host_path(str(path)) if path else None, "outputs": rec.get("outputs")}
+
+
+def _release_gpu_token(prompt_id: str) -> None:
+    token = _gpu_tokens_by_prompt.pop(prompt_id, None)
+    if token is not None:
+        gpu_release(token)
 
 
 def compose_final_core(scene_paths: list[str], output_path: str = "output/final.mp4") -> dict[str, Any]:
