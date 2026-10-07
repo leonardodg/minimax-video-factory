@@ -61,7 +61,7 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 | Technology | Role |
 |---|---|
 | **MiniMax H3** (`Merserk/MiniMax-H3-INT4-ConvRot`) | Text → video + native stereo audio, pruned INT4 for 12 GB VRAM |
-| **ComfyUI** ≥ 0.30.0 | Render engine; loads H3 into VRAM and runs the diffusion pass |
+| **ComfyUI** ≥ 0.39.1 | Render engine; loads H3 into VRAM and runs the diffusion pass |
 | **FastMCP ≥ 4.0** | MCP server exposing the pipeline as tools over stdio / streamable-http |
 | **Python** ≥ 3.11 + **uv** | Application and dependency management |
 
@@ -98,6 +98,8 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 ```
 
 The MCP server runs **inside the ComfyUI container**, so it shares the loaded models, the GPU and the output directory. No second copy of 32 GB of weights, no host-to-container path guessing.
+
+Diagrams (structure, stack, flow — Mermaid): **[docs/ARQUITETURA.md](docs/ARQUITETURA.md)**, rendered on the **[docs site](https://leonardodg.github.io/minimax-video-factory/ARQUITETURA/)**.
 
 ---
 
@@ -342,7 +344,7 @@ The first render of a session is slower: it includes loading ~32 GB of weights.
 |---|---|
 | 00 | Host prereqs — GPU/VRAM ≥ 12 GB, Docker, curl, ffmpeg |
 | 01 | Docker image built, container running, GPU visible inside |
-| 02 | ComfyUI API up (≥ 0.30.0) and the H3 node classes present |
+| 02 | ComfyUI API up (≥ 0.39.1) and the H3 node classes present |
 | 03 | All 4 model files present, with exact sizes |
 | 04 | Workflow: all 14 node `class_type`s resolve |
 | 05 | Smoke render — a real 5 s clip with video **and** stereo audio |
@@ -362,7 +364,7 @@ MODELS_DIR=$HOME/minimax/models               # where the ~32 GB of weights live
 CUSTOM_NODES_DIR=$HOME/minimax/custom_nodes   # ComfyUI custom nodes (bind-mounted rw)
 OUTPUT_DIR=.../output                         # generated .mp4 (mounted into the container)
 
-COMFYUI_TAG=v0.30.2  COMFYUI_PORT=8188
+COMFYUI_TAG=v0.39.1  COMFYUI_PORT=8188
 MCP_TRANSPORT=streamable-http  MCP_HOST=0.0.0.0  MCP_PORT=8848
 
 # Studio
@@ -398,7 +400,8 @@ minimax-video-factory/
 ├── src/minimax_mcp/
 │   ├── server.py                 # the 12 @mcp.tool() definitions
 │   ├── core.py                   # workflow injection, submission, output resolution
-│   ├── comfyui_client.py         # HTTP + WebSocket client
+│   ├── comfyui_client.py         # HTTP + WebSocket client (transport guards → ComfyUITimeout)
+│   ├── gpu_lock.py               # one-GPU-at-a-time lock across processes
 │   ├── orchestrator.py           # the studio pipeline
 │   ├── downloader.py             # yt-dlp
 │   └── transcriber.py            # faster-whisper

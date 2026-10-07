@@ -8,14 +8,14 @@ How the pieces fit together and where the rendering decisions live.
 [ Video Script (story / scenes) ]
         │
         ▼
-[ OpenCode ]  ── MCP (stdio) ──►  [ MCP Server: src/minimax_mcp/server.py ]
-                                     │  FastMCP, 6 tools (see below)
+[ OpenCode ]  ── MCP (stdio / streamable-http) ──►  [ MCP Server: src/minimax_mcp/server.py ]
+                                     │  FastMCP, 12 tools (see below)
                                      │  env: COMFYUI_URL, WORKFLOW_PATH, MODELS_DIR, OUTPUT_DIR
                                      ▼
                               [ ComfyUIClient ]  ── POST /prompt, GET /history, WS /ws, GET /view
-                                     │
+                                     │  transport guards: httpx/TimeoutError/OSError → ComfyUITimeout
                                      ▼
-                              [ ComfyUI (Docker, v0.30.2, GPU) ]
+                              [ ComfyUI (Docker, v0.39.1, GPU) ]
                                      │  MiniMaxH3ImageToVideo + samplers + VAE-decode + CreateVideo/SaveVideo
                                      ▼
                               [ output/*.mp4  (video + native stereo audio) ]
@@ -28,7 +28,7 @@ How the pieces fit together and where the rendering decisions live.
 | Orchestrator | OpenCode (config added last) | Splits the script into scenes, writes H3-structured prompts, calls MCP tools |
 | Local agent | `src/minimax_mcp/server.py` | MCP server; injects scene values into the API workflow, submits jobs, waits, resolves outputs, composes final |
 | HTTP/WS client | `src/minimax_mcp/comfyui_client.py` | `submit()`, `get_history()`, `wait_for_execution()` (WS), `resolve_output()`, `download_file()` |
-| Render engine | `docker/` image | ComfyUI pinned v0.30.2, torch 2.8 (DynamicVRAM), loads INT4 H3 set |
+| Render engine | `docker/` image | ComfyUI pinned v0.39.1, torch 2.8 (DynamicVRAM), loads INT4 H3 set |
 | Workflow | `workflows/minimax_h3_t2v_api.json` | Expanded T2V API graph (14 nodes) — see `AGENTS.md` §6 for the node map |
 
 ## MCP tools
@@ -36,10 +36,17 @@ How the pieces fit together and where the rendering decisions live.
 - `health_check()` — ComfyUI `/system_stats` + the 4 required model files (size-aware).
 - `submit_scene(prompt, duration, width, height, seed, filename_prefix)` — patches the
   workflow (H3 node `5`, noise node `6`, SaveVideo prefix), POSTs `/prompt`, returns `prompt_id`.
+- `queue_status()` — the whole queue with sampler progress, from `/prompt` history.
 - `get_status(prompt_id)` — poll `/history`.
-- `wait_for_video(prompt_id, timeout)` — websocket-driven; returns the `.mp4` path.
+- `wait_for_video(prompt_id, timeout)` — websocket-driven (falls back to HTTP polling
+  if the WS transport dies); returns the `.mp4` path.
 - `list_outputs()` — newest `.mp4` files under `output/`.
 - `compose_final(scene_paths, output_path)` — `ffmpeg -f concat -c copy` of scenes.
+- `generate_video(...)` — prompt → rendered clip: submit + wait in one call.
+- `download_video(url, browser)` — fetch a Reel/YouTube video with browser cookies.
+- `transcribe_video(video_path, model_size, device, language)` — local Whisper.
+- `create_cinematic_prompt(transcription, style)` — transcript → structured H3 prompt.
+- `studio_pipeline(url, style, ...)` — the whole chain: URL → download → transcribe → prompt → render.
 
 ## Key design decisions
 

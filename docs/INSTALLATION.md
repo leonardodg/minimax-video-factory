@@ -98,7 +98,7 @@ sleep 15
 ```
 
 What the image does (see `docker/Dockerfile`):
-- Base `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, ComfyUI `v0.30.2`.
+- Base `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, ComfyUI `v0.39.1`.
 - **Upgrades torch to `2.8.0+cu128`** (with `torchvision==0.23.0`, `torchaudio==2.8.0`)
   so ComfyUI uses DynamicVRAM — required for `--lowvram` to actually offload on 12 GB.
 - Installs `uv` + creates `/opt/mcp-venv` (project deps) so the MCP server runs inside
