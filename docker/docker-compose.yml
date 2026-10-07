@@ -86,8 +86,8 @@ services:
       STUDIO_DOWNLOADS_DIR: /downloads
       STUDIO_DOWNLOADS_HOST_DIR: ${DOWNLOADS_DIR:-${PROJECT_ROOT:-..}/downloads}
       # Model set (bigger variants via .env)
-      MODEL_DIFFUSION: ${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int4_convrot.safetensors}
-      MODEL_TEXT_ENCODER: ${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}
+      MODEL_DIFFUSION: ${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int8_convrot.safetensors}
+      MODEL_TEXT_ENCODER: ${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors}
       MODEL_VIDEO_VAE: ${MODEL_VIDEO_VAE:-minimax_h3_video_vae_fp16.safetensors}
       MODEL_AUDIO_VAE: ${MODEL_AUDIO_VAE:-minimax_h3_audio_vae_fp32.safetensors}
     deploy:
