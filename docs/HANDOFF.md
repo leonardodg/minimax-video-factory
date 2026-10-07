@@ -33,6 +33,7 @@ versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
 | 7 | Fila do insta_kb (329 msgs) | ⏳ | |
 | 8 | Documentação | ⏳ | |
 | 9 | Diagramas | ⏳ | |
+| 10 | Auditoria SOLID (avaliação) | ⏳ | design aprovado no spec do insta_kb (`docs/superpowers/specs/2026-10-07-solid-audit-task-design.md`) |
 
 Regra de GPU durante toda a execução: 1 job (render/transcrição/Ollama) por
 vez; `av==18.1.0` fixo nos 2 repos; nenhum download de peso sem OK.
