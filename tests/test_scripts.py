@@ -1,6 +1,6 @@
 """Pytest entrypoints for the ok()/bad()-style smoke scripts under tests/, so
-`pytest -m unit` / `-m integration_db` / `-m integration_llm` work for
-selective/CI-friendly runs without rewriting each script's internals."""
+`pytest -m unit` / `-m integration_db` work for selective/CI-friendly runs
+without rewriting each script's internals."""
 from __future__ import annotations
 
 import subprocess
@@ -26,12 +26,6 @@ def test_unit_pure():
 
 
 @pytest.mark.unit
-def test_unit_knowledge():
-    result = _run_script("unit_knowledge.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.unit
 def test_unit_orchestrator():
     result = _run_script("unit_orchestrator.py")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -46,12 +40,6 @@ def test_unit_core():
 @pytest.mark.unit
 def test_unit_registry():
     result = _run_script("unit_registry.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.unit
-def test_unit_db():
-    result = _run_script("unit_db.py")
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -74,32 +62,8 @@ def test_unit_privacy():
 
 
 @pytest.mark.unit
-def test_unit_ig_queue():
-    result = _run_script("unit_ig_queue.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.unit
-def test_unit_ig_sync():
-    result = _run_script("unit_ig_sync.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.unit
-def test_unit_ig_worker():
-    result = _run_script("unit_ig_worker.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.unit
 def test_unit_transcriber():
     result = _run_script("unit_transcriber.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.unit
-def test_unit_vault():
-    result = _run_script("unit_vault.py")
     assert result.returncode == 0, result.stdout + result.stderr
 
 
@@ -117,25 +81,3 @@ def test_container_deps():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-@pytest.mark.integration_db
-def test_integration_knowledge_db():
-    result = _run_script("integration_knowledge_db.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.integration_llm
-def test_integration_knowledge_llm():
-    result = _run_script("integration_knowledge_llm.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.integration_db
-def test_integration_ig_db():
-    result = _run_script("integration_ig_db.py")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-
-@pytest.mark.integration_llm
-def test_integration_ig_llm():
-    result = _run_script("integration_ig_llm.py")
-    assert result.returncode == 0, result.stdout + result.stderr

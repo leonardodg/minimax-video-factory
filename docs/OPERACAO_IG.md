@@ -107,7 +107,7 @@ tail -f output/ig-sync-2026-08-10/worker.log | grep -E "public_request|DOCTYPE|T
 bash scripts/ig_relatorio.sh
 ```
 
-**A verificação que importa antes de dormir** — íntegro é `total == distintos`:
+**A verificação que importa antes** — íntegro é `total == distintos`:
 
 ```bash
 set -a; . ./.env; set +a

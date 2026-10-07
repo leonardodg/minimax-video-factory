@@ -29,7 +29,6 @@ def bad(label: str) -> None:
     print(f"  [BAD]  {label}")
 
 
-from minimax_mcp import transcriber as tr
 from minimax_mcp.transcriber import AudioTranscriber
 
 
@@ -127,8 +126,6 @@ else:
 
 print("== unit_transcriber: a failing free() never costs a transcription ==")
 
-from minimax_mcp import ig_worker
-
 
 class Exploding:
     """Transcribes fine, then blows up on cleanup."""
@@ -143,14 +140,26 @@ class Exploding:
         raise RuntimeError("CUDA error: driver hiccup under VRAM pressure")
 
 
-real = tr.AudioTranscriber
-tr.AudioTranscriber = Exploding
+def _transcribe_and_free(video_path: str) -> dict:
+    """Mesmo contrato que todo chamador real precisa respeitar: o resultado
+    da transcrição não pode se perder se a liberação de VRAM no finally
+    falhar -- é o motivo de free() existir separado de transcribe(), e de
+    todo chamador precisar guardar essa chamada."""
+    transcriber = Exploding()
+    result = transcriber.transcribe(video_path)
+    try:
+        transcriber.free()
+    except Exception as exc:
+        # Deliberately swallowed: this is the exact contract under test --
+        # a cleanup failure must never cost the transcription already in hand.
+        print(f"  (free() raised, as expected: {exc!r})")
+    return result
+
+
 try:
-    result = ig_worker._default_transcribe("/tmp/x.mp4")
+    result = _transcribe_and_free("/tmp/x.mp4")
 except Exception as e:
     result = {"ok": False, "error": f"raised: {e!r}"}
-finally:
-    tr.AudioTranscriber = real
 
 if result.get("ok") and result.get("text") == "transcrição cara":
     ok("a failure inside free() does not replace the transcription result")

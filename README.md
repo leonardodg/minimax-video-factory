@@ -56,83 +56,6 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 
 ---
 
-## 📥 Instagram saved-posts → Knowledge Base
-
-Auto-ingest every post you save on Instagram into the personal knowledge base:
-download, transcribe/describe, summarize, and index — with zero manual steps.
-
-### How it works
-
-```
-Instagram saved posts
-   │  ig_sync.py  (instagrapi, IG_SESSIONID)
-   ▼
-ig.saved (RabbitMQ durable queue)
-   │  ig_worker.py  (daemon, runs on the HOST via uv)
-   ▼
-download (instagrapi auth → yt-dlp fallback)
-   │
-   ├─ video  → Whisper GPU  → LLM summary + tutorial
-   ├─ image  → LLM vision   → LLM summary + tutorial
-   └─ carousel → first video (or first image) resource
-   │
-   ▼
-knowledge.ingest_text → Postgres (documents + chunks + embeddings)
-   │
-   └─ ack ✔  /  retry ×3 → ig.saved.dead (DLQ)
-```
-
-### The moving parts
-
-| Component | File | Role |
-|---|---|---|
-| **Enumeration** | `src/minimax_mcp/ig_sync.py` | Lists saved posts via instagrapi (collections → medias), maps them to queue messages, filters out already-ingested `ig_pk`s. MCP tools: `ig_sync`, `ig_get_progress`. |
-| **Queue** | `src/minimax_mcp/ig_queue.py` | RabbitMQ abstraction: declares `ig.saved` (durable) + DLQ `ig.saved.dead` + control queue, publishes, validates the message contract, and implements the attempts/DLQ retry policy. |
-| **Worker daemon** | `src/minimax_mcp/ig_worker.py` | Consumes one message at a time (prefetch=1, Whisper and ComfyUI share the GPU): download → transcribe/describe → ingest → ack. Reconnects automatically if the broker drops the connection. |
-| **Download** | `src/minimax_mcp/ig_worker.py` `_default_download` | Authenticated instagrapi first (`IG_SESSIONID`, works for private/saved posts), yt-dlp fallback for public content. Carousels pick the first video (or first image) resource. |
-| **KB ingest** | `src/minimax_mcp/knowledge.py` | Splits the transcript into chunks, embeds with `mxbai-embed-large`, and writes the document + summary/tutorial to Postgres. |
-
-### What was validated (real posts, 12 GB GPU)
-
-- ✅ Authenticated download of private/saved posts (instagrapi with `IG_SESSIONID`)
-- ✅ Video pipeline: download → Whisper small (GPU) → LLM summary → KB document
-- ✅ Image/carousel pipeline: download first resource → LLM vision → KB document
-- ✅ Dedup: an already-ingested `ig_pk` is acked without re-processing
-- ✅ Retry ×3 → DLQ on failures; a corrupted body goes straight to the DLQ
-- ✅ Worker survives broker disconnects (reconnect loop with backoff)
-- ✅ 10-post batch ingested back-to-back on one GPU
-
-### Running it
-
-```bash
-# 1. One-time setup (see docs/KNOWLEDGE_BASE.md §7.1 for IG_SESSIONID)
-export IG_SESSIONID=$(grep '^IG_SESSIONID' .env | cut -d= -f2-)
-
-# 2. The worker MUST run on the HOST (uv), not in a container: it needs
-#    Ollama (localhost:11434) and Postgres (127.0.0.1:5432), both blocked
-#    from containers by the host firewall.
-uv run --directory <project> python -m minimax_mcp.ig_worker
-
-# 3. Publish saved posts to the queue (limit = only sync ~10 for a first test)
-uv run python - <<'PY'
-from minimax_mcp import ig_sync, ig_queue, db
-client = ig_sync.make_client()
-items = ig_sync.saved_posts(client, max_per_collection=200)
-msgs = ig_sync.to_messages(items)
-new, _ = ig_sync.split_new(msgs, db.list_ig_pks(db.get_session()))
-conn = ig_queue.connect(); ch = conn.channel(); ig_queue.declare(ch)
-for m in new[:10]:
-    ig_queue.publish(ch, m)
-print(ig_queue.queue_status(ch))
-PY
-```
-
-> ⚠️ **Only sync a handful for a first test.** A full sync of every saved post
-> takes ~1–2 min per item on a 12 GB GPU (Whisper + LLM). The auto-collection
-> "All posts" can hold thousands.
-
----
-
 ## Technologies and Tools
 
 ### Core
@@ -382,15 +305,14 @@ be correct out of the frame.
 
 ## ⌨️ Slash commands
 
-Every MCP tool has a matching command. `/minimax-*` drives the video pipeline, `/kb-*` the knowledge base.
+Every MCP tool has a matching `/minimax-*` command, driving the video pipeline.
+The knowledge-base/Instagram-sync commands (`/kb-*`, `/ig-*`) moved to the
+`insta_kb` project in 2026-10-06, along with the tools and modules behind them
+— see `insta_kb/docs/HANDOFF.md`.
 
 Generated for both clients: `.opencode/command/` for OpenCode and `.claude/commands/`
 for Claude Code. The two differ in how they name an MCP tool — Claude Code uses
 `mcp__server__tool` — so each gets its own file from the same source.
-
-The `/kb-*` commands only answer against the **host** server
-(`minimax-knowledge-base`): the `knowledge_*` tools need direct Postgres and Ollama,
-which the container cannot reach. Everything else runs in the container.
 
 ### Render pipeline
 
@@ -413,30 +335,6 @@ which the container cannot reach. Everything else runs in the container.
 | `transcribe_video` | `/minimax-transcrever` | Local Whisper transcription with timestamps |
 | `create_cinematic_prompt` | `/minimax-prompt-cinematico` | Turn a transcript into a structured H3 prompt |
 | `studio_pipeline` | `/minimax-studio` | The whole chain: URL → download → transcribe → prompt → render |
-
-### Knowledge base
-
-| Tool | Command | What it does |
-|---|---|---|
-| `knowledge_ingest_text` | `/kb-ingest-texto` | Summarise and store a text you already have |
-| `knowledge_ingest_video` | `/kb-ingest-video` | Download, transcribe and document a video |
-| `knowledge_ingest_audio` | `/kb-ingest-audio` | Transcribe and document a podcast |
-| `knowledge_ingest_markdown` | `/kb-ingest-markdown` | Import `.md` files; reuses `## Summary` and skips the LLM |
-| `knowledge_search` | `/kb-buscar` | Hybrid search — keyword and semantic, fused with RRF |
-| `knowledge_ask` | `/kb-perguntar` | Answer from your own base only, citing the sources |
-| `knowledge_reindex` | `/kb-reindex` | Recompute chunks and embeddings for everything |
-| `kb_export_search` | `/kb-export-search` | List documents to export — by ids, query, or latest first |
-| `kb_export` | `/kb-export` | Write the selected documents as readable `.md` files (land under `<output_dir>/Knowledge/`, e.g. `output/kb-export/Knowledge/`) |
-
-### Instagram sync
-
-| Tool | Command | What it does |
-|---|---|---|
-| `ig_sync_saved` | `/ig-sync` | Enqueue every Instagram saved post (via IG_SESSIONID) onto the RabbitMQ queue |
-| `ig_queue_status` | `/ig-status` | RabbitMQ queue depth and active consumers |
-| `ig_worker_start` | `/ig-worker` | Send 'start' to the ig-worker daemon |
-| `ig_worker_stop` | `/ig-worker-stop` | Send 'stop' to the ig-worker daemon |
-| `ig_get_progress` | `/ig-progress` | Last processed Instagram items + KB document count |
 
 The command files are **generated from the tool signatures** — `uv run python scripts/generate_commands.py`. A test fails if a tool ever lacks one. Full reference: **[docs/COMMANDS.md](https://leonardodg.github.io/minimax-video-factory/COMMANDS/)**.
 

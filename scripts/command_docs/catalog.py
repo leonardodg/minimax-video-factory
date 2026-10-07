@@ -21,28 +21,10 @@ COMMAND_NAMES: dict[str, str] = {
     "create_cinematic_prompt": "minimax-prompt-cinematico",
     "generate_video": "minimax-gerar-video",
     "studio_pipeline": "minimax-studio",
-    # Knowledge base
-    "knowledge_ingest_text": "kb-ingest-texto",
-    "knowledge_ingest_markdown": "kb-ingest-markdown",
-    "knowledge_ingest_video": "kb-ingest-video",
-    "knowledge_ingest_audio": "kb-ingest-audio",
-    "knowledge_search": "kb-buscar",
-    "knowledge_ask": "kb-perguntar",
-    "knowledge_reindex": "kb-reindex",
-    "kb_export_search": "kb-export-search",
-    "kb_export": "kb-export",
-    # Instagram sync
-    "ig_sync_saved": "ig-sync",
-    "ig_queue_status": "ig-status",
-    "ig_worker_start": "ig-worker",
-    "ig_worker_stop": "ig-worker-stop",
-    "ig_get_progress": "ig-progress",
 }
 
 GROUP_TITLES: dict[str, str] = {
     "video": "Pipeline de vídeo",
-    "kb": "Base de conhecimento",
-    "ig": "Instagram sync",
 }
 
 # Commands in .opencode/command/ that are not backed by an MCP tool. The
@@ -52,26 +34,17 @@ GROUP_TITLES: dict[str, str] = {
 # would shadow them.
 NON_TOOL_COMMANDS: frozenset[str] = frozenset({"compress", "search-sessions"})
 
-# Which server actually answers each group, for clients that can route.
-#
-# The knowledge_* tools talk straight to Postgres (127.0.0.1:5432) and Ollama
-# (localhost:11434), neither of which the container can reach, so they only
-# work on the host server. Video and IG tools want the container, where the
-# models and the ComfyUI bind-mounts live. OpenCode names one server for all
-# 24 and leans on the fallback step; Claude Code gets told the truth up front.
+# Which server actually answers each group, for clients that can route. The
+# knowledge_*/ig_* tools (and their minimax-knowledge-base server) moved to
+# the insta_kb project in 2026-10-06 -- this repo only has the video group
+# left, so there is nothing left to route between.
 SERVER_BY_GROUP: dict[str, str] = {
     "video": "minimax-video-factory",
-    "ig": "minimax-video-factory",
-    "kb": "minimax-knowledge-base",
 }
 
-# Variants to try when the primary server is not connected, in order. The kb
-# group has none on purpose: the container variants cannot reach Postgres, so
-# retrying there turns a clear "not connected" into a confusing timeout.
+# Variants to try when the primary server is not connected, in order.
 FALLBACKS_BY_GROUP: dict[str, tuple[str, ...]] = {
     "video": ("minimax-video-factory-remote", "minimax-video-factory-uv"),
-    "ig": ("minimax-video-factory-remote", "minimax-video-factory-uv"),
-    "kb": (),
 }
 
 
@@ -88,11 +61,8 @@ def command_name(tool: str) -> str:
 
 
 def group_of(command: str) -> str:
-    """Which product area a command belongs to: 'kb', 'ig' or 'video'."""
-    if command.startswith("kb-"):
-        return "kb"
-    if command.startswith("ig-"):
-        return "ig"
+    """Which product area a command belongs to. Only 'video' exists in this
+    repo now -- kb-*/ig-* moved to insta_kb."""
     return "video"
 
 

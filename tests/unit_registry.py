@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Registry test for the MCP server: the 26 @mcp.tool functions are registered,
+"""Registry test for the MCP server: the 12 @mcp.tool functions are registered,
 required params have Field(description=...), and the set matches docs/MCP_TOOLS.md.
 
 Run: uv run --directory . python tests/unit_registry.py
@@ -41,23 +41,6 @@ EXPECTED_TOOLS = {
     "create_cinematic_prompt",
     "generate_video",
     "studio_pipeline",
-    # knowledge base
-    "knowledge_ingest_text",
-    "knowledge_ingest_markdown",
-    "knowledge_ingest_video",
-    "knowledge_ingest_audio",
-    "knowledge_search",
-    "knowledge_ask",
-    "knowledge_reindex",
-    # instagram saved-posts sync
-    "ig_sync_saved",
-    "ig_queue_status",
-    "ig_worker_start",
-    "ig_worker_stop",
-    "ig_get_progress",
-    # markdown export
-    "kb_export_search",
-    "kb_export",
 }
 
 # required params that MUST carry a Field(description=...)
@@ -69,13 +52,6 @@ REQUIRED_DESCRIBED = {
     "generate_video": ["prompt"],
     "studio_pipeline": ["url"],
     "compose_final": ["scene_paths"],
-    "knowledge_ingest_text": ["text"],
-    "knowledge_ingest_markdown": ["path"],
-    "knowledge_ingest_video": ["url"],
-    "knowledge_ingest_audio": ["path_or_url"],
-    "knowledge_search": ["query"],
-    "knowledge_ask": ["query"],
-    "kb_export": ["ids"],
 }
 
 
@@ -128,21 +104,9 @@ async def main() -> None:
         doc_flat = {n for tup in doc_tool_names for n in tup if n}
         doc_flat = {n for n in doc_flat if n in EXPECTED_TOOLS}
         if doc_flat == EXPECTED_TOOLS:
-            ok("all 26 tools documented in docs/MCP_TOOLS.md")
+            ok(f"all {len(EXPECTED_TOOLS)} tools documented in docs/MCP_TOOLS.md")
         else:
             bad(f"MCP_TOOLS.md mentions {sorted(doc_flat)} but expected {sorted(EXPECTED_TOOLS)}")
-
-    print("== unit_registry: tools fail soft (never raise) ==")
-    from unittest.mock import patch
-
-    from minimax_mcp import db as _db
-
-    with patch.object(_db, "get_session", side_effect=RuntimeError("db down")):
-        res = server.ig_get_progress()
-    if res.get("ok") is False and "ig_get_progress failed" in res.get("error", ""):
-        ok("ig_get_progress returns {ok: False} instead of raising when the DB is down")
-    else:
-        bad(f"ig_get_progress did not fail soft: {res!r}")
 
 
 if __name__ == "__main__":
