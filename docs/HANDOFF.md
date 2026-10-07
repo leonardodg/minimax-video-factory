@@ -3,7 +3,8 @@
 **Este arquivo agora vive no repositório.** Antes ele estava em
 `~/bkp/minimax-night/HANDOFF.md`, fora do git — e por isso toda sessão nova
 começava sem memória nenhuma. As regras permanentes foram para o
-[`CLAUDE.md`](../CLAUDE.md) da raiz, que o Claude Code carrega sozinho em toda
+[`CLAUDE.md`](https://github.com/leonardodg/minimax-video-factory/blob/main/CLAUDE.md)
+da raiz, que o Claude Code carrega sozinho em toda
 sessão; aqui fica o **estado**: o que está rodando, o que já foi medido, o que
 está pendente. **Atualizar aqui**, não num arquivo solto no home.
 

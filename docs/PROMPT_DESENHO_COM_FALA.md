@@ -4,7 +4,8 @@ Receita destilada da **rodada 3** (2026-08-09): 5 sondagens + 14 renders de
 produção, ~7 h de GPU. Tudo aqui é medido ou marcado como não medido.
 
 Números de máquina (teto de VRAM, tempo por render) estão no
-[`CLAUDE.md`](../CLAUDE.md). Aqui é só **como escrever o prompt**.
+[`CLAUDE.md`](https://github.com/leonardodg/minimax-video-factory/blob/main/CLAUDE.md).
+Aqui é só **como escrever o prompt**.
 
 ---
 
