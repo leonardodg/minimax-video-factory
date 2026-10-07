@@ -7,8 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-1de9d6.svg)](LICENSE)
 [![CI](https://github.com/leonardodg/minimax-video-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/leonardodg/minimax-video-factory/actions/workflows/ci.yml)
 [![Docs](https://github.com/leonardodg/minimax-video-factory/actions/workflows/docs.yml/badge.svg)](https://leonardodg.github.io/minimax-video-factory/)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-3776ab.svg)](https://www.python.org/)
-[![MCP](https://img.shields.io/badge/MCP-FastMCP%203.x-8a2be2.svg)](https://gofastmcp.com)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776ab.svg)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-FastMCP%204.x-8a2be2.svg)](https://gofastmcp.com)
 [![VRAM](https://img.shields.io/badge/VRAM-12%20GB-76b900.svg)](#-render-cost-measured)
 
 **[Documentation](https://leonardodg.github.io/minimax-video-factory/)** ·
@@ -62,8 +62,8 @@ You trade wall-clock time for money and privacy. Whether that is a good trade de
 |---|---|
 | **MiniMax H3** (`Merserk/MiniMax-H3-INT4-ConvRot`) | Text → video + native stereo audio, pruned INT4 for 12 GB VRAM |
 | **ComfyUI** ≥ 0.30.0 | Render engine; loads H3 into VRAM and runs the diffusion pass |
-| **FastMCP 3.x** | MCP server exposing the pipeline as tools over stdio / streamable-http |
-| **Python** ≥ 3.10 + **uv** | Application and dependency management |
+| **FastMCP ≥ 4.0** | MCP server exposing the pipeline as tools over stdio / streamable-http |
+| **Python** ≥ 3.11 + **uv** | Application and dependency management |
 
 ### Studio
 | Technology | Role |

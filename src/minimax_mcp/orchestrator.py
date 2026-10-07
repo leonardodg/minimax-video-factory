@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -186,8 +187,8 @@ class AudiovisualStudio:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        from datetime import datetime, timezone
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        from datetime import datetime
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
         # Save transcription
         transcription_file = output_dir / f"transcription_{timestamp}.txt"

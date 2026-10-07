@@ -6,7 +6,7 @@ is covered in [Installation](../INSTALLATION.md).
 
 ## Prerequisites
 
-- Python ≥ 3.10 and [uv](https://docs.astral.sh/uv/)
+- Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/)
 - Docker with the compose plugin (for Postgres and the ComfyUI container)
 - [Ollama](https://ollama.com) running locally with the models from `.env`
 

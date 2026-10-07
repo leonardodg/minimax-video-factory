@@ -274,7 +274,7 @@ class ComfyUIClient:
                     return done
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=poll_interval)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     done = await _poll()
                     continue
                 except ConnectionClosed:
