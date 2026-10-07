@@ -1178,3 +1178,57 @@ intermediário com a discriminação do 32B e o custo do 24B.
 | `audio_work/` | capítulos normalizados, intermediários da unificação |
 | `HANDOFF-int4-2026-08-07.md` | o handoff da era INT4, como linha de base |
 | `coverage.py`, `coverage2.py`, `finish_tests.sh` | exercitam as tools pelo MCP |
+
+---
+
+## 2026-10-07 — reconciliação pós-review: fixes presos na branch errada chegaram na `main`
+
+Dois fixes desta sessão (revisão por subagent do split video-factory/insta_kb)
+tinham sido comitados, por engano, só no branch `update/deps-2026-10` (a
+atualização de dependências que o usuário estava fazendo em paralelo, em
+outro terminal, na mesma working directory) — nunca chegaram na `main`:
+
+- `44b6406` build: default INT8 ConvRot + nvfp4 AWQ (compose, .env.example, config.sh)
+- `4b34bd2` docs: regenera MCP_TOOLS.md (26 → 12 tools)
+
+`.env` já tinha os valores corretos (int8/nvfp4) explícitos, então produção
+nunca foi afetada — só o fallback `:-default` do compose/`.env.example`
+ficava errado para quem clonasse sem copiar `.env`. Cherry-pick dos dois para
+`main` via worktree temporário (sem tocar o branch `update/deps-2026-10`, que
+tem WIP do usuário: bump ComfyUI v0.30.2→v0.39.1, ainda não commitado).
+Também adicionei o teste que faltava (`tests/test_scripts.py::test_mcp_docs_not_stale`,
+chama `generate_mcp_docs.py --check`) — era a recomendação "Important" do
+review que ainda não tinha sido wireada.
+
+**`av==18.1.0`** (escolhido pela atualização de deps paralela, documentado em
+`docs/PLANO_ATUALIZACAO.md`) foi verificado de novo, independentemente: ainda
+aceita `metadata_errors=` (erro foi `InvalidDataError` de arquivo inválido,
+não `TypeError` de parâmetro desconhecido) — confirmado também com uma
+transcrição real via faster-whisper. Não reintroduz o bug que `av==15.1.0`
+corrigiu.
+
+Push para `main`: `ecca647..86595f1`. CI: 3/4 jobs verdes (Static Lint, Unit
+Tests, MCP Handshake); **GPU Validation falhou em `00_prereq.sh`** por RAM
+livre no runner ter caído para 9 GB (< 12 GB exigido) — ambiental, não
+regressão: o render real (`07_e2e_agent.sh`, `submit_scene`+`compose_final`)
+e as 12 tools do container (`09_container_deps.sh`) passaram dentro do mesmo
+run. Provável causa: o runner self-hosted é esta própria máquina, e a
+atualização de deps paralela e/ou o ig-worker podiam estar consumindo RAM
+no momento do job. **Pendência: re-rodar o workflow (`gh workflow run CI
+--ref main`) quando a máquina estiver mais livre**, só para confirmar que é
+mesmo RAM momentânea e não um limiar que ficou baixo demais.
+
+### Pendências reais no fim desta sessão
+
+- Re-rodar GPU Validation em `main` (ver acima).
+- `update/deps-2026-10` (nos dois repos) é trabalho do usuário em andamento
+  (plano em `docs/PLANO_ATUALIZACAO.md`/`insta_kb`): bump ComfyUI v0.39.1,
+  fastmcp>=4.0.11, av==18.1.0, instagrapi>=3.0.20, fastapi>=0.142.2 — **não
+  mexi nisso**, só confirmei que não conflita com os fixes que cherry-pickei.
+- `insta_kb`: commitei o teste que faltava (`test_search_db_failure_returns_ok_false_not_raise`)
+  direto no branch `update/deps-2026-10` (era o branch já checked-out) — ainda
+  não existe um merge desse branch para `dev`/`main`, isso é parte do trabalho
+  em andamento do usuário, não meu para decidir.
+- `database.db*` (sqlite vazio, sem schema, não referenciado no código) —
+  adicionado ao `.gitignore` do insta_kb; arquivos ainda no disco (remoção
+  bloqueada pelo classificador de permissões desta sessão).
