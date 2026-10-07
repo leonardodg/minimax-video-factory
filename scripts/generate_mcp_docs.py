@@ -3,6 +3,10 @@
 tool reference never drifts from the actual @mcp.tool() definitions.
 
 Run: uv run --directory <project> python scripts/generate_mcp_docs.py
+`--check` writes nothing and exits non-zero if the file is stale -- the form
+tests/test_scripts.py uses, mirroring scripts/generate_commands.py's --check.
+This file went undetected as stale for a full domain-removal commit before
+that check existed (2026-10-07) -- it's the reason the check exists now.
 """
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
 
-async def main() -> None:
+async def build() -> str:
     env = dict(os.environ)
     # The repo's .env defaults to streamable-http; docs generation needs stdio.
     env["MCP_TRANSPORT"] = "stdio"
@@ -52,9 +56,23 @@ async def main() -> None:
                 lines.append(f"| `{name}` | {ptype} | {'yes' if name in required else 'no'} | {desc} |")
             lines.append("")
 
+    return "\n".join(lines)
+
+
+async def main() -> None:
+    content = await build()
     out_path = ROOT / "docs" / "MCP_TOOLS.md"
-    out_path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"Wrote {out_path} ({len(tools)} tools)")
+
+    if "--check" in sys.argv:
+        current = out_path.read_text(encoding="utf-8") if out_path.exists() else None
+        if current != content:
+            print(f"{out_path} is stale -- run without --check to regenerate")
+            sys.exit(1)
+        print(f"{out_path} is up to date")
+        return
+
+    out_path.write_text(content, encoding="utf-8")
+    print(f"Wrote {out_path}")
 
 
 if __name__ == "__main__":
