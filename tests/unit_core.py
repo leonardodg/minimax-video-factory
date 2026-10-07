@@ -34,6 +34,7 @@ def bad(label: str) -> None:
 
 print("== unit_core: duration_to_frames ==")
 from minimax_mcp import core
+from minimax_mcp.comfyui_client import ComfyUITimeout
 
 CASES = {5.0: 124, 10.0: 243, 1.0: 39, 15.0: 362, 0.5: 22}
 for dur, expect in CASES.items():
@@ -205,6 +206,42 @@ if res.get("ok") and res.get("output_path") and res.get("prompt_id") == "pid-2":
     ok("wait_for_video_core returns ok + output_path + prompt_id")
 else:
     bad(f"wait_for_video_core result = {res!r}")
+
+print("== unit_core: wait_for_video_core timeout contract ==")
+# SOLID backlog #1+#2: the client raises a typed ComfyUITimeout; the core
+# layer converts it into a timed_out dict (keeping the GPU lock held) and
+# never goes back to string-matching "Timed out" in the message.
+
+async def run_wait_timeout():
+    core._gpu_tokens_by_prompt["pid-3"] = "tok-3"
+    with mock.patch.object(core, "ComfyUIClient") as m, \
+         mock.patch.object(core, "gpu_release") as rel:
+        client = m.return_value
+        client.wait_for_execution = mock.AsyncMock(
+            side_effect=ComfyUITimeout(
+                "Timed out after 10s waiting for prompt pid-3"))
+        res_timeout = await core.wait_for_video_core("pid-3", timeout=10)
+        client.wait_for_execution = mock.AsyncMock(
+            side_effect=core.ComfyUIError("execution error: node failed"))
+        res_error = await core.wait_for_video_core("pid-3", timeout=10)
+        release_calls = rel.call_count
+    core._gpu_tokens_by_prompt.pop("pid-3", None)
+    return res_timeout, res_error, release_calls
+
+res_timeout, res_error, release_calls = asyncio.run(run_wait_timeout())
+if res_timeout.get("ok") is False and res_timeout.get("timed_out") is True \
+        and res_timeout.get("prompt_id") == "pid-3":
+    ok("timeout comes back as timed_out=True with the prompt_id")
+else:
+    bad(f"timeout result = {res_timeout!r}")
+if res_error.get("ok") is False and "timed_out" not in res_error:
+    ok("a real execution error is not flagged as a timeout")
+else:
+    bad(f"execution-error result = {res_error!r}")
+if release_calls == 1:
+    ok("timeout kept the GPU lock held; the execution error released it")
+else:
+    bad(f"gpu_release call_count = {release_calls}, expected 1")
 
 print("== unit_core: compose_final_core ==")
 with tempfile.TemporaryDirectory() as td:

@@ -12,7 +12,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError
+from minimax_mcp.comfyui_client import ComfyUIClient, ComfyUIError, ComfyUITimeout
 from minimax_mcp.gpu_lock import acquire as gpu_acquire
 from minimax_mcp.gpu_lock import release as gpu_release
 
@@ -308,15 +308,18 @@ async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[s
     client = ComfyUIClient(COMFYUI_URL)
     try:
         rec = await client.wait_for_execution(prompt_id, timeout=timeout)
-    except ComfyUIError as e:
-        # A timeout here means ComfyUI hasn't reported the prompt done yet --
+    except ComfyUITimeout as e:
+        # A timeout means ComfyUI hasn't reported the prompt done yet --
         # the render may still be running, so the GPU lock stays held; the
         # caller (or a later wait_for_video call) is expected to try again.
+        # Branch on the typed exception, never on the message (audit #1/#2).
+        return {"ok": False, "timed_out": True, "prompt_id": prompt_id,
+                "error": str(e)}
+    except ComfyUIError as e:
         # Any OTHER ComfyUIError means the render itself failed/errored out,
         # so the GPU is actually free again -- release it.
-        if "Timed out" not in str(e):
-            _release_gpu_token(prompt_id)
-        return {"ok": False, "error": str(e)}
+        _release_gpu_token(prompt_id)
+        return {"ok": False, "prompt_id": prompt_id, "error": str(e)}
     except Exception as e:
         _release_gpu_token(prompt_id)
         return {"ok": False, "error": f"unexpected: {e}"}

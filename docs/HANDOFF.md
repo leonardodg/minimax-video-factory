@@ -1560,3 +1560,41 @@ concerns; dispatch if/elif de eventos ws embutido no poll).
 (0 ciclos, MI A, testes verdes) — mas o bug do `state=rendering` entra
 no próximo ciclo **como bugfix, antes** do resto do backlog (§5 do
 relatório, severidade × esforço).
+
+## 2026-10-07 — bugfix SOLID #1+#2: `state=rendering` alcançável (TDD)
+
+Escopo executado do backlog §5 do `docs/SOLID_AUDIT.md` (itens críticos
+#1 e #2, acoplados — a recomendação do audit era resolvê-los juntos).
+
+**Ciclo TDD (Red → Green → verificação):**
+
+- **Red**: 2 testes novos em `tests/unit_orchestrator.py` falhando pelo
+  motivo certo (`prompt_id lost on generate failure`, `pending render
+  result` sem `state`) + 1 em `tests/unit_core.py` (ImportError →
+  asserção `timed_out` ausente após criar a classe).
+- **Green**:
+  - `comfyui_client.py`: nova classe `ComfyUITimeout(ComfyUIError)`;
+    o timeout de `wait_for_execution` agora a **levanta** (linha ~316) em
+    vez de `ComfyUIError` genérica. Race corrigida: o branch
+    `node is None` do poll devolvia `await _poll()` direto — podia
+    retornar `None` se o `/history` atrasasse um tick (pyright 9→0).
+  - `core.py`: `wait_for_video_core` faz `except ComfyUITimeout` →
+    `{"ok": False, "timed_out": True, "prompt_id": ...}` mantendo o
+    lock de GPU; `except ComfyUIError` (outros) libera o lock. **Zero
+    string-match** de `"Timed out"` (eliminado dos 2 pontos).
+  - `orchestrator.py`: `except ComfyUITimeout` tipado (defensivo — o
+    core retorna dict); branch `wait_result["timed_out"]` →
+    `{"ok": True, "state": "rendering", "prompt_id": ...}` agora
+    **alcançável**; `run_full_pipeline` preserva `prompt_id` no failure
+    e propaga `state=rendering` + `message` no sucesso.
+  - `tests/unit_orchestrator.py`: teste stale `_never` (mockava a
+    assinatura antiga de raise) reescrito p/ o contrato real (dict
+    `timed_out`); `make_studio` anotado `-> AudiovisualStudio` (era
+    `-> object`, cegava o pyright em 12 pontos).
+  - Docs: docstring + `docs/MCP_TOOLS.md` de `wait_for_video` com o
+    contrato de timeout (`ok=false, timed_out=true, prompt_id`).
+
+**Verificação (tudo verde):** `pytest -q` **10 passed** (baseline 9, +1);
+`unit_core` / `unit_orchestrator` / `unit_privacy` / `unit_transcriber`
+OK; `ruff check .` limpo; `pyright` nos arquivos tocados **0 errors**
+(baseline 9 — só melhorou).

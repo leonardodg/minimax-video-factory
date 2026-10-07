@@ -6,7 +6,7 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any
 
-from minimax_mcp.comfyui_client import ComfyUIError
+from minimax_mcp.comfyui_client import ComfyUIError, ComfyUITimeout
 from minimax_mcp.core import (
     submit_scene_core,
     wait_for_video_core,
@@ -141,12 +141,14 @@ class AudiovisualStudio:
                 wait_result = asyncio.run(
                     wait_for_video_core(prompt_id, timeout=wait_seconds)
                 )
-            except ComfyUIError as e:
+            except ComfyUITimeout:
                 # Only a timeout is survivable: the render is still going and the
                 # caller can pick it up. A real execution error is a failure.
-                if "Timed out" not in str(e):
-                    return {"ok": False, "prompt_id": prompt_id, "error": str(e)}
+                # (wait_for_video_core normally RETURNS this as a timed_out dict;
+                # the except stays typed for any client that still raises.)
                 wait_result = {"ok": False, "timed_out": True}
+            except ComfyUIError as e:
+                return {"ok": False, "prompt_id": prompt_id, "error": str(e)}
 
             if not wait_result.get("ok"):
                 if wait_result.get("timed_out"):
@@ -295,10 +297,14 @@ class AudiovisualStudio:
         logger.info("Generation result: %s", gen_result)
 
         if not gen_result.get("ok"):
-            return {"ok": False, "stage": "generate", "error": gen_result.get("error")}
+            # Keep the prompt_id: a render that failed (or is still going)
+            # must stay reachable — dropping it is what the SOLID audit #1
+            # flagged as the critical bug.
+            return {"ok": False, "stage": "generate",
+                    "prompt_id": gen_result.get("prompt_id"),
+                    "error": gen_result.get("error")}
 
-        logger.info("=== Pipeline completed successfully ===")
-        return {
+        result = {
             "ok": True,
             "url": url,
             "downloaded_file": video_path,
@@ -309,6 +315,16 @@ class AudiovisualStudio:
             "prompt_id": gen_result.get("prompt_id"),
             "seed": gen_result.get("seed"),
         }
+        if gen_result.get("state") == "rendering":
+            # Documented timeout contract: ok=True + state="rendering" means
+            # the submission worked and wait_for_video still has to collect it.
+            logger.info("=== Pipeline submitted; render still in progress (prompt_id=%s) ===",
+                        gen_result.get("prompt_id"))
+            result["state"] = "rendering"
+            result["message"] = gen_result.get("message")
+        else:
+            logger.info("=== Pipeline completed successfully ===")
+        return result
 
 
 def run_studio_pipeline(

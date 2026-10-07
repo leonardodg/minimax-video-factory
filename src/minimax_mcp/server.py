@@ -317,7 +317,11 @@ async def wait_for_video(
     prompt_id: str,
     timeout: float = Field(default=1200.0, description="Max seconds to wait"),
 ) -> dict[str, Any]:
-    """Block until the prompt finishes rendering; returns path to the generated .mp4."""
+    """Block until the prompt finishes rendering; returns path to the generated .mp4.
+
+    On timeout: ok=false with timed_out=true and the prompt_id — the render may
+    still be running; call again with the same prompt_id to collect it.
+    """
     return await wait_for_video_core(prompt_id, timeout=timeout)
 
 

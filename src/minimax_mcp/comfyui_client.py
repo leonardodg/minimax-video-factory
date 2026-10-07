@@ -24,6 +24,14 @@ class ComfyUIError(RuntimeError):
     pass
 
 
+class ComfyUITimeout(ComfyUIError):
+    """The wait deadline expired — the render may still be running.
+
+    Subclass so consumers can branch on the type instead of string-matching
+    "Timed out" in the message (SOLID audit backlog #1/#2).
+    """
+
+
 def queue_state_from(queue_payload: dict[str, Any], prompt_id: str) -> str | None:
     """Locate `prompt_id` in a ComfyUI /queue payload.
 
@@ -292,8 +300,12 @@ class ComfyUIClient:
                 if evt_type == "executing":
                     data = evt.get("data", {})
                     if data.get("prompt_id") == prompt_id and data.get("node") is None:
-                        # finished executing this prompt
-                        return await _poll()
+                        # finished executing this prompt — /history may lag a
+                        # tick behind the ws event, so never return None here:
+                        # keep polling until the record materialises.
+                        done = await _poll()
+                        if done:
+                            return done
                     if data.get("prompt_id") == prompt_id:
                         done = await _poll()
                         if done:
@@ -305,7 +317,7 @@ class ComfyUIClient:
                 if done is None:
                     done = await _poll()
 
-        raise ComfyUIError(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
+        raise ComfyUITimeout(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
 
     # ---------- output resolution ----------
     def resolve_output(self, history_rec: dict[str, Any], output_dir: str) -> str | None:
