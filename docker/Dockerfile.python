@@ -46,6 +46,8 @@ RUN uv sync --no-dev --frozen
 # ctranslate2 (dentro do faster-whisper) linka libcublas.so.12 e libcudnn. O
 # torch do venv é mais novo e traz cu13, que não serve -- mesma correção que a
 # imagem do ComfyUI já aplicava.
+# ATENÇÃO: wheels fora do uv.lock — qualquer `uv sync`/`uv run` reexecutado
+# dentro do container pruna eles e quebra GPU transcription (`uv run --no-sync`).
 RUN uv pip install --python /opt/mcp-venv/bin/python --no-cache-dir \
       nvidia-cublas-cu12 nvidia-cudnn-cu12
 ENV LD_LIBRARY_PATH="/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"

@@ -82,6 +82,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/mcp-venv
 RUN cd /workspace && uv sync --no-dev --frozen
 # nvidia cu12 libs (cublas/cudnn) for ctranslate2/faster-whisper GPU transcription —
 # the venv's torch is cu13 (latest), but ctranslate2 needs libcublas.so.12.
+# CAUTION: these wheels are NOT in uv.lock — any `uv sync`/`uv run` re-run
+# inside the container (UV_PROJECT_ENVIRONMENT=/opt/mcp-venv) prunes them and
+# breaks GPU transcription. Use `uv run --no-sync` if you must run uv there.
 RUN /opt/conda/bin/uv pip install --python /opt/mcp-venv/bin/python --no-cache-dir nvidia-cublas-cu12 nvidia-cudnn-cu12
 ENV LD_LIBRARY_PATH="/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
 

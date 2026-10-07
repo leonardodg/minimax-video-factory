@@ -26,7 +26,7 @@ versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
 | 0 | Commits pendentes + baseline + cópias do plano | ✅ | baseline `9 passed`; commits `44b6406` (INT8/nvfp4), `4b34bd2` (MCP_TOOLS), `376e6ae` (plano) |
 | 1 | Deps insta_kb | ✅ | no repo `insta_kb` (`58e8093`+`d034fd0`); ver HANDOFF de lá |
 | 2 | Deps minimax | ✅ | `fastmcp>=4.0.11`+`av==18.1.0`+`requires-python>=3.11`; commits `715216e`+`83c8454` |
-| 3 | ComfyUI v0.39.1 + nodes + pesos | ⏳ | |
+| 3 | ComfyUI v0.39.1 + nodes + pesos | ✅ | `ae944c1`+`d9c6f18`+`760006b` + review "with fixes" (commit desta linha); 6 nodes ff-only; 3+3 pesos; render turbo validado |
 | 4 | Docker insta_kb (Parte B) | ⏳ | |
 | 5 | MCPs do OpenCode | ⏳ | |
 | 6 | Matriz de testes | ⏳ | |
@@ -1278,8 +1278,8 @@ de uma sessão anterior ao `/clear`).
   ⚠️ A tool MCP `health_check()` (instância `minimax-video-factory-uv`,
   processo stdio de sessão anterior) reportou `models: present=false` pra
   tudo — **falso negativo de processo stale**, não do código: testado
-  isoladamente com `uv run python` que `MODELS_DIR` resolve certo
-  (`/home/leodg/minimax/models`) e os arquivos existem. A instância MCP
+   isoladamente com `uv run python` que `MODELS_DIR` resolve certo
+   (`$HOME/minimax/models`) e os arquivos existem. A instância MCP
   antiga está com env/estado desatualizado — resolve sozinho na Task 5
   (reload do OpenCode). Não bloqueou o render.
 - **Render de validação** (Step 8): turbo, seed 42, 512×320, 5 s —
@@ -1297,5 +1297,11 @@ de uma sessão anterior ao `/clear`).
 
 ### Pendências da Task 3
 
-- Resultado do code review do commit `ae944c1` (em andamento).
+- Code review do `ae944c1` concluído (2026-10-07, "with fixes" — aplicados
+  na mesma rodada): path `/home/...` no HANDOFF quebrava `unit_privacy`
+  (crítico), `scripts/config.sh` com default stale `v0.30.2` (era a 3ª
+  fonte do tag), `AGENTS.md` stale (tag + FastMCP 3.x), aviso sobre
+  `uv sync` podendo prunar as wheels nvidia dos 2 Dockerfiles. Sobram p/ a
+  Task 8 o sweep de `v0.30.2` em `README.md:365`, `docs/ARCHITECTURE.md`
+  (18,31), `docs/INSTALLATION.md:101`.
 - Visual completo do clipe de validação — só 1 frame foi olhado aqui.

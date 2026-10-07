@@ -37,7 +37,7 @@ export COMFYUI_URL="${COMFYUI_URL:-http://127.0.0.1:8188}"
 export COMFYUI_PORT="${COMFYUI_PORT:-8188}"
 export COMFY_CONTAINER="${COMFY_CONTAINER:-minimax-comfyui}"
 export COMFY_IMAGE="${COMFY_IMAGE:-minimax-comfyui:local}"
-export COMFYUI_TAG="${COMFYUI_TAG:-v0.30.2}"
+export COMFYUI_TAG="${COMFYUI_TAG:-v0.39.1}"
 export COMFYUI_EXTRA_ARGS="${COMFYUI_EXTRA_ARGS:---lowvram --fast-disk --disable-pinned-memory}"
 
 # --- Models directory ---
