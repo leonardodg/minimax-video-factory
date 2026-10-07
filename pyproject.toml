@@ -2,10 +2,13 @@
 name = "minimax-video-factory"
 version = "0.1.0"
 description = "OpenCode + MCP + ComfyUI orchestration for local MiniMax H3 video+audio generation + Instagram/YT downloader + Whisper transcriber"
-requires-python = ">=3.10"
+# >=3.11 (was >=3.10): av==18.1.0 requires Python >=3.11, so uv could not
+# resolve for 3.10. Python 3.10 is EOL (Oct 2025); real runtimes here are
+# 3.14 (host) and 3.11 (docker MCP venv) -- both still satisfied.
+requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28.1",
-    "fastmcp>=3.0.0",
+    "fastmcp>=4.0.11",
     "pydantic>=2.11.4",
     "python-dotenv>=1.0.1",
     "typing-extensions>=4.12.2",
@@ -14,6 +17,13 @@ dependencies = [
     "faster-whisper>=1.0.0",
     "requests>=2.31.0",
     "PyYAML>=6.0",
+    # Same trap as insta_kb: faster-whisper 1.2.1's decode_audio() needs
+    # av<19 (the metadata_errors kwarg was removed in 19.0.0; 19.x raises
+    # TypeError on every transcription). Verified 2026-10-07 on Python 3.14:
+    # 15.1.0/17.1.0/18.0.0/18.1.0 pass, 19.0.0/19.0.1 fail. This project
+    # never declared `av` before (the lock drifted 17.1.0/18.0.0 via
+    # markers) -- pin it. See docs/HANDOFF.md.
+    "av==18.1.0",
 ]
 
 [project.optional-dependencies]

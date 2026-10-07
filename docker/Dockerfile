@@ -3,7 +3,7 @@
 FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
 # Pin ComfyUI at a release with native MiniMax H3 support (>= 0.30.0)
-ARG COMFYUI_TAG=v0.30.2
+ARG COMFYUI_TAG=v0.39.1
 # Tag list: see https://github.com/comfyanonymous/ComfyUI/tags (0.3.x). Fall back to master if tag missing.
 # For a fully pinned build, set COMFYUI_TAG to a known-good tag; otherwise use master.
 
@@ -70,14 +70,21 @@ RUN pip install --no-cache-dir \
 # /opt/mcp-venv. At runtime the compose file bind-mounts the live repo to
 # /workspace (read-only) so `docker compose exec` runs this venv's uv directly.
 RUN pip install --no-cache-dir uv
-COPY pyproject.toml /workspace/pyproject.toml
+# uv.lock IN the image + --frozen: the venv must match the tested lock exactly
+# (av==18.1.0 pin, fastmcp 4.0.11) instead of re-resolving floating ranges at
+# every build. Needs uv >= 0.12 for lock revision 5 (Dockerfile installs latest
+# uv unpinned, so OK). Decision recorded in docs/HANDOFF.md (review Task 2).
+COPY pyproject.toml uv.lock /workspace/
 COPY src /workspace/src
 COPY workflows /workspace/workflows
 COPY scripts /workspace/scripts
 ENV UV_PROJECT_ENVIRONMENT=/opt/mcp-venv
-RUN cd /workspace && uv sync --no-dev
+RUN cd /workspace && uv sync --no-dev --frozen
 # nvidia cu12 libs (cublas/cudnn) for ctranslate2/faster-whisper GPU transcription —
 # the venv's torch is cu13 (latest), but ctranslate2 needs libcublas.so.12.
+# CAUTION: these wheels are NOT in uv.lock — any `uv sync`/`uv run` re-run
+# inside the container (UV_PROJECT_ENVIRONMENT=/opt/mcp-venv) prunes them and
+# breaks GPU transcription. Use `uv run --no-sync` if you must run uv there.
 RUN /opt/conda/bin/uv pip install --python /opt/mcp-venv/bin/python --no-cache-dir nvidia-cublas-cu12 nvidia-cudnn-cu12
 ENV LD_LIBRARY_PATH="/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"
 
@@ -85,7 +92,11 @@ WORKDIR /comfy/ComfyUI
 
 # Entrypoint: launch with flags tuned for low-VRAM / limited-RAM machines.
 #   --fast-disk            move weights into page cache (critical on 16-32 GB RAM)
-#   --disable-pinned-memory  work around pinned-memory regression in 0.30.x
+#   --disable-pinned-memory  workaround for a pinned-memory regression seen on
+#                            0.30.x; kept on 0.39.1 after the v0.39.1 upgrade
+#                            (2026-10-07) rendered fine with it on -- removing
+#                            it hasn't been tested, so it stays until someone
+#                            verifies it's no longer needed.
 #   --lowvram              aggressive offload (12 GB VRAM: Qwen3VL-32B + diffusion exceed 12 GB)
 #   --listen 127.0.0.1     local only (fronted by docker port mapping)
 EXPOSE 8188

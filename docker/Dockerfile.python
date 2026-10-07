@@ -37,15 +37,17 @@ WORKDIR /workspace
 # Só o que o `uv sync` precisa para resolver. O código vem por bind-mount em
 # tempo de execução (/workspace montado read-only pelo compose), igual à imagem
 # do ComfyUI -- assim editar Python não exige rebuild.
-COPY pyproject.toml uv.lock* /workspace/
+COPY pyproject.toml uv.lock /workspace/
 COPY src /workspace/src
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/mcp-venv
-RUN uv sync --no-dev
+RUN uv sync --no-dev --frozen
 
 # ctranslate2 (dentro do faster-whisper) linka libcublas.so.12 e libcudnn. O
 # torch do venv é mais novo e traz cu13, que não serve -- mesma correção que a
 # imagem do ComfyUI já aplicava.
+# ATENÇÃO: wheels fora do uv.lock — qualquer `uv sync`/`uv run` reexecutado
+# dentro do container pruna eles e quebra GPU transcription (`uv run --no-sync`).
 RUN uv pip install --python /opt/mcp-venv/bin/python --no-cache-dir \
       nvidia-cublas-cu12 nvidia-cudnn-cu12
 ENV LD_LIBRARY_PATH="/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cublas/lib:/opt/mcp-venv/lib/python3.11/site-packages/nvidia/cudnn/lib:${LD_LIBRARY_PATH}"

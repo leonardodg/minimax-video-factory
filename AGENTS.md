@@ -21,13 +21,13 @@ transcribe locally with Whisper, generate cinematic prompts, and render with Min
 
 | Component | Version / choice | Why |
 |---|---|---|
-| ComfyUI | tag `v0.30.2` | First stable release with MiniMax H3 (day-0 support) |
+| ComfyUI | tag `v0.39.1` | Upgraded 2026-10-07 (H3 support landed in 0.30.x) |
 | Base image | `pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime`, **torch upgraded in-image to 2.8.0+cu128** (DynamicVRAM) | torch ≥ 2.8 required for lowvram to work |
 | Diffusion model | `Merserk/MiniMax-H3-INT4-ConvRot` → `minimax_h3_fl2va_pruned_int4_convrot.safetensors` (11.3 GB) | INT4 pruned fits 12 GB VRAM |
 | Text encoder | same repo → `qwen3vl_32b_minimax_h3_int4_convrot.safetensors` (15.0 GB) | Qwen3-VL-32B, INT4 |
 | Video VAE | `Comfy-Org/MiniMax-H3` → `vae/minimax_h3_video_vae_fp16.safetensors` (4.85 GB) | official, **stored in `vae/` subfolder** |
 | Audio VAE | same → `vae/minimax_h3_audio_vae_fp32.safetensors` (0.58 GB) | official, **stored in `vae/` subfolder** |
-| MCP | FastMCP 3.x (Python 3.14, `uv`) | stdio transport |
+| MCP | FastMCP 4.x (uv; in-image venv Python 3.11) | stdio transport |
 | Downloader | yt-dlp + browser cookies | Instagram Reels, YouTube, etc. |
 | Transcriber | faster-whisper (GPU) | local, free, PT-BR + timestamps |
 | Docker | Compose v2, `--gpus all`, nvidia-container-toolkit | GPU passthrough tested |
@@ -55,7 +55,7 @@ minimax-video-factory/
 ├── docs/MCP_REMOTE.md        <- VPS / HTTPS MCP deployment (Caddy/nginx)
 ├── pyproject.toml            <- uv project (fastmcp, httpx, websockets, pydantic, yt-dlp, faster-whisper, requests)
 ├── docker/
-│   ├── Dockerfile            <- pinned v0.30.2, base pytorch 2.5.1, torch 2.8, IN-IMAGE uv venv (/opt/mcp-venv)
+│   ├── Dockerfile            <- pinned v0.39.1, base pytorch 2.5.1, torch 2.8, IN-IMAGE uv venv (/opt/mcp-venv)
 │   └── docker-compose.yml    <- .env-driven mounts (MODELS_DIR/OUTPUT_DIR/PROJECT_ROOT), gpus all, MCP port
 ├── scripts/
 │   ├── config.sh             <- loads .env + exports derived vars + COMPOSE_ARGS

@@ -14,6 +14,61 @@ regras antigas deste arquivo eram do INT4 e **metade caiu**. O que está abaixo
 
 ---
 
+## 🔄 EM ANDAMENTO 2026-10-07: atualização completa (deps/ComfyUI/Docker/MCPs/testes)
+
+Plano mestre: `~/.claude/plans/vamos-atualizar-a-lista-groovy-sun.md` — cópias
+versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
+**Branch: `update/deps-2026-10`** (PR no fim). Execução inline, 10 tasks
+(0-9), status da tabela no próprio plano.
+
+| Task | Descrição | Status | Evidência |
+|---|---|---|---|
+| 0 | Commits pendentes + baseline + cópias do plano | ✅ | baseline `9 passed`; commits `44b6406` (INT8/nvfp4), `4b34bd2` (MCP_TOOLS), `376e6ae` (plano) |
+| 1 | Deps insta_kb | ✅ | no repo `insta_kb` (`58e8093`+`d034fd0`); ver HANDOFF de lá |
+| 2 | Deps minimax | ✅ | `fastmcp>=4.0.11`+`av==18.1.0`+`requires-python>=3.11`; commits `715216e`+`83c8454` |
+| 3 | ComfyUI v0.39.1 + nodes + pesos | ✅ | `ae944c1`+`d9c6f18`+`760006b` + review "with fixes" (commit desta linha); 6 nodes ff-only; 3+3 pesos; render turbo validado |
+| 4 | Docker insta_kb (Parte B) | ✅ (Ollama corrigido) | venv isolado `/opt/venv`, rede `insta-kb-net` + api/worker/mcp, Ollama CONTAINERIZADO (pin `0.32.9`), `.mcp.json`→HTTP, mutex de GPU compartilhado; detalhes no `insta_kb/docs/HANDOFF.md` |
+| 5 | MCPs do OpenCode | ✅ | inventário + testes reais: insta-kb 7 tools + **remote (8848) 3** (`health_check`/`queue_status`/`list_outputs`) + **uv stdio 2**; `MODELS_DIR` stale corrigido no `opencode.json` (restart do OpenCode pendente, ação do usuário) |
+| 6 | Matriz de testes | ✅ | baselines 168+9 → **206+11**; suítes ×2 (pytest/ruff/pyright/bandit/pip-audit + `unit_privacy`); tools MCP exercitadas de verdade; incidente de render (mutex) documentado abaixo |
+| 7 | Fila do insta_kb | ✅ (drenando) | 322→193 ready (snapshot com 1 consumer ativo), 0 dead; retomável/pausável via `ig_worker_start`/`stop`; ver HANDOFF do insta_kb |
+| 8 | Documentação | ✅ | `MCP_TOOLS.md` regenerado (`scripts/generate_mcp_docs.py`); README (ComfyUI ≥ 0.39.1, FastMCP 4.x, av 18.1.0) + `docs/INSTALLATION.md` sweep v0.30.2→v0.39.1; apêndice no `REVISAO_2026-10-07.md`; `mkdocs build --strict` verdes; commits `53a92ae` (insta_kb) + `fe4fc82`+docs desta sessão |
+| 9 | Diagramas | ✅ | `docs/ARQUITETURA.md` (3 Mermaid: estrutura/stack/fluxo) + nav/`superfences` no `mkdocs.yml` + link "Arquitetura Diagrams" no README; render `<pre class="mermaid">` ×3 verificado no build; graphify não solicitado |
+| 10 | Auditoria SOLID (avaliação) | ✅ | relatório `docs/SOLID_AUDIT.md` (231 l., só avaliação); 1 crítico = bug de contrato `state=rendering` + 6 importantes; veredito **ciclo futura**; ver seção abaixo |
+
+Regra de GPU durante toda a execução: 1 job (render/transcrição/Ollama) por
+vez; `av==18.1.0` fixo nos 2 repos; nenhum download de peso sem OK.
+
+### Task 2 ✅ (2026-10-07): deps minimax — fastmcp 4, av 18.1.0
+
+- **Versões no lock:** fastmcp 4.0.11, av 18.1.0 (nunca 19.x), yt-dlp
+  2026.8.19, pydantic 2.13.5, ruff 0.16.10, pylint 4.1.2. Validação:
+  ruff clean, `9/9` testes, smoke import `fastmcp 4.0.11 | av 18.1.0`.
+- **fastmcp 3→4: sem breaking changes no uso atual.** `server.py` só usa
+  `FastMCP`, `@mcp.tool()` function-mode e `mcp.run(transport=...)` — nada
+  de sampling/roots/shims 3.x (todos removidos na 4.0.0). Review confirmou
+  que `FastMCP.run` 4.0.11 aceita os 4 transports, inclusive o
+  **`streamable-http`** da produção (`.mcp.json`).
+- **Uso de cliente também OK:** `fastmcp.Client` + `StdioTransport`
+  (usados em `scripts/generate_mcp_docs.py`, `scripts/demo_aurora.sh`,
+  `tests/07_e2e_agent.sh`) importam em 4.0.11 — os 9 testes não os cobrem;
+  Task 8 (geração de docs) é a primeira execução real.
+- **Desvio 1:** `requires-python >=3.10` → `>=3.11` — `av==18.1.0` exige
+  ≥3.11 e o uv não resolvia para 3.10 (EOL desde 2025-10; runtimes reais:
+  host 3.14, venv MCP do container 3.11). README/dev-environment
+  atualizados (badge 3.11+, FastMCP 4.x).
+- **Desvio 2 (corrige o próprio baseline):** o HANDOFF registrava baseline
+  `9 passed`, mas no HEAD `5b47daa` o teste `unit_privacy` estava RED — o
+  plano versionado (`376e6ae`) continha 34 caminhos `/home/...` e o teste
+  anti-vazamento existe só neste repo. O commit `715216e` (plano sem home
+  paths, `$HOME/`) é o que deixa o repo verde de verdade; baseline correta:
+  `9 passed` **a partir de `715216e`**.
+- **Caveat Task 3:** `docker/Dockerfile` só copia `pyproject.toml` (não
+  `uv.lock`) e faz `uv sync` sem `--frozen` → a imagem re-resolve dos
+  ranges (`av` pin protege, `fastmcp>=4.0.11` flutua). Decidir no rebuild:
+  `COPY uv.lock` + `--frozen` (reprodutível) ou registrar float.
+- **Nota insta_kb:** sem teste `unit_privacy`; a regra de "nenhum
+  `/home/...` em arquivo rastreado" vale só para este repo público.
+
 ## ✅ CONCLUÍDO em 2026-10-06: domínio Instagram/KB saiu deste repo
 
 **Objetivo (cumprido):** este projeto nasceu só para gerar vídeo (ComfyUI +
@@ -1124,3 +1179,423 @@ intermediário com a discriminação do 32B e o custo do 24B.
 | `audio_work/` | capítulos normalizados, intermediários da unificação |
 | `HANDOFF-int4-2026-08-07.md` | o handoff da era INT4, como linha de base |
 | `coverage.py`, `coverage2.py`, `finish_tests.sh` | exercitam as tools pelo MCP |
+
+---
+
+## 2026-10-07 — reconciliação pós-review: fixes presos na branch errada chegaram na `main`
+
+Dois fixes desta sessão (revisão por subagent do split video-factory/insta_kb)
+tinham sido comitados, por engano, só no branch `update/deps-2026-10` (a
+atualização de dependências que o usuário estava fazendo em paralelo, em
+outro terminal, na mesma working directory) — nunca chegaram na `main`:
+
+- `44b6406` build: default INT8 ConvRot + nvfp4 AWQ (compose, .env.example, config.sh)
+- `4b34bd2` docs: regenera MCP_TOOLS.md (26 → 12 tools)
+
+`.env` já tinha os valores corretos (int8/nvfp4) explícitos, então produção
+nunca foi afetada — só o fallback `:-default` do compose/`.env.example`
+ficava errado para quem clonasse sem copiar `.env`. Cherry-pick dos dois para
+`main` via worktree temporário (sem tocar o branch `update/deps-2026-10`, que
+tem WIP do usuário: bump ComfyUI v0.30.2→v0.39.1, ainda não commitado).
+Também adicionei o teste que faltava (`tests/test_scripts.py::test_mcp_docs_not_stale`,
+chama `generate_mcp_docs.py --check`) — era a recomendação "Important" do
+review que ainda não tinha sido wireada.
+
+**`av==18.1.0`** (escolhido pela atualização de deps paralela, documentado em
+`docs/PLANO_ATUALIZACAO.md`) foi verificado de novo, independentemente: ainda
+aceita `metadata_errors=` (erro foi `InvalidDataError` de arquivo inválido,
+não `TypeError` de parâmetro desconhecido) — confirmado também com uma
+transcrição real via faster-whisper. Não reintroduz o bug que `av==15.1.0`
+corrigiu.
+
+Push para `main`: `ecca647..86595f1`. CI: 3/4 jobs verdes (Static Lint, Unit
+Tests, MCP Handshake); **GPU Validation falhou em `00_prereq.sh`** por RAM
+livre no runner ter caído para 9 GB (< 12 GB exigido) — ambiental, não
+regressão: o render real (`07_e2e_agent.sh`, `submit_scene`+`compose_final`)
+e as 12 tools do container (`09_container_deps.sh`) passaram dentro do mesmo
+run. Provável causa: o runner self-hosted é esta própria máquina, e a
+atualização de deps paralela e/ou o ig-worker podiam estar consumindo RAM
+no momento do job. **Pendência: re-rodar o workflow (`gh workflow run CI
+--ref main`) quando a máquina estiver mais livre**, só para confirmar que é
+mesmo RAM momentânea e não um limiar que ficou baixo demais.
+
+### Pendências reais no fim desta sessão
+
+- Re-rodar GPU Validation em `main` (ver acima).
+- `update/deps-2026-10` (nos dois repos) é trabalho do usuário em andamento
+  (plano em `docs/PLANO_ATUALIZACAO.md`/`insta_kb`): bump ComfyUI v0.39.1,
+  fastmcp>=4.0.11, av==18.1.0, instagrapi>=3.0.20, fastapi>=0.142.2 — **não
+  mexi nisso**, só confirmei que não conflita com os fixes que cherry-pickei.
+- `insta_kb`: commitei o teste que faltava (`test_search_db_failure_returns_ok_false_not_raise`)
+  direto no branch `update/deps-2026-10` (era o branch já checked-out) — ainda
+  não existe um merge desse branch para `dev`/`main`, isso é parte do trabalho
+  em andamento do usuário, não meu para decidir.
+- `database.db*` (sqlite vazio, sem schema, não referenciado no código) —
+  adicionado ao `.gitignore` do insta_kb; arquivos ainda no disco (remoção
+  bloqueada pelo classificador de permissões desta sessão).
+
+---
+
+## 2026-10-07 — Task 3 concluída: ComfyUI v0.39.1 + nodes + pesos novos
+
+Continuação de `docs/PLANO_ATUALIZACAO.md` (Tasks 0-2 já ✅ em sessão
+anterior). Retomei Task 3 a partir de WIP não commitado (bump do
+`COMFYUI_TAG` e decisão `uv sync --frozen` já estavam no working tree,
+de uma sessão anterior ao `/clear`).
+
+- **Backup**: `minimax-comfyui:v0.30.2-backup` já existia (tag preservada).
+- **Nodes** (6 atrasados): já estavam atualizados — nenhum pull necessário
+  nesta sessão (`comfyui_AcademiaSD`, `ComfyUI-Easy-Use`, `ComfyUI-KJNodes`,
+  `ComfyUI-MiniMax-H3-Turbo`, `ComfyUI-VideoHelperSuite`, `rgthree-comfy`
+  todos `git status` limpo e `up to date`).
+- **ComfyUI v0.39.1**: `COMFYUI_TAG` bumped nas 3 fontes
+  (`.env.example`, `docker/Dockerfile` ARG, `docker/docker-compose.yml`
+  default) — consistentes.
+- **`uv sync --frozen`**: decisão da Task 2 (review) aplicada — `docker/Dockerfile`
+  e `docker/Dockerfile.python` agora fazem `COPY pyproject.toml uv.lock` +
+  `uv sync --no-dev --frozen`, em vez de só `pyproject.toml` com resolução
+  solta a cada build. Garante que a imagem reflete exatamente o lock
+  testado (`av==18.1.0`, `fastmcp==4.0.11`).
+- **Rebuild**: `docker compose -f docker/docker-compose.yml --project-directory .
+  build comfyui` (nota: sem `--project-directory .` o compose resolve o
+  Dockerfile relativo à pasta do arquivo compose, não ao repo — dá
+  `lstat docker/docker: no such file`; documentado em `scripts/config.sh`,
+  mas fácil de esquecer rodando o comando cru). `docker ... up -d
+  --force-recreate comfyui` depois, pra garantir que o container usa a
+  imagem nova (o primeiro `up -d` sem `--force-recreate` não trocou,
+  porque compose não detecta mudança de digest sozinho quando a tag não
+  muda).
+- **Pesos novos** (checkpoint do repo `Comfy-Org/MiniMax-H3`, modificado
+  2026-09-29): usuário aprovou 3 de ~15 candidatos "NEW" (o resto são
+  requantizações de modelos que já temos em int8_convrot/nvfp4, redundantes):
+  - `loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` (1,96 GB)
+  - `loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` (1,96 GB)
+  - `vae/minimax_h3_video_vae_int8_convrot.safetensors` (2,81 GB)
+  Baixados via `hf download` (CLI nova; `huggingface-cli` está deprecated).
+  Nenhum outro peso baixado.
+- **Health check**: `curl :8188/system_stats` → `comfyui_version: 0.39.1`,
+  VRAM livre 11,8/12,4 GB pós-recreate (limpo). `curl :8188/models/vae`
+  confirma os 3 arquivos novos visíveis pelo ComfyUI via bind-mount.
+  ⚠️ A tool MCP `health_check()` (instância `minimax-video-factory-uv`,
+  processo stdio de sessão anterior) reportou `models: present=false` pra
+  tudo — **falso negativo de processo stale**, não do código: testado
+   isoladamente com `uv run python` que `MODELS_DIR` resolve certo
+   (`$HOME/minimax/models`) e os arquivos existem. A instância MCP
+  antiga está com env/estado desatualizado — resolve sozinho na Task 5
+  (reload do OpenCode). Não bloqueou o render.
+- **Render de validação** (Step 8): turbo, seed 42, 512×320, 5 s —
+  `prompt_id d09d0b64`, sucesso, `output/validation/task3_turbo_00001_.mp4`
+  (1,08 MB, h264 + aac estéreo 2ch, 5,167 s). Frame extraído em 2,5s:
+  composição coerente (raposa em floresta, luz entre as árvores), sem
+  manchas de cor visíveis. Avaliação completa (olhar o clipe inteiro)
+  ainda é do usuário — só a amostra de 1 frame foi conferida aqui.
+- **Commit**: `ae944c1` (`build(docker): ComfyUI v0.39.1 + uv sync --frozen
+  nas imagens MCP`). Code review disparado (subagent em background,
+  resultado ainda pendente no momento deste commit do HANDOFF).
+- **Rollback**: não necessário — tudo passou. Se precisar:
+  `COMFY_IMAGE=minimax-comfyui:v0.30.2-backup` no `.env` + `up -d` sem
+  rebuild.
+
+### Pendências da Task 3
+
+- Code review do `ae944c1` concluído (2026-10-07, "with fixes" — aplicados
+  na mesma rodada): path `/home/...` no HANDOFF quebrava `unit_privacy`
+  (crítico), `scripts/config.sh` com default stale `v0.30.2` (era a 3ª
+  fonte do tag), `AGENTS.md` stale (tag + FastMCP 3.x), aviso sobre
+  `uv sync` podendo prunar as wheels nvidia dos 2 Dockerfiles. Sobram p/ a
+  Task 8 o sweep de `v0.30.2` em `README.md:365`, `docs/ARCHITECTURE.md`
+  (18,31), `docs/INSTALLATION.md:101`.
+- Visual completo do clipe de validação — só 1 frame foi olhado aqui.
+
+---
+
+## 2026-10-07 — Mutex de GPU compartilhado com insta_kb
+
+Achado fora do plano original (surgiu durante a Task 4, quando o ig-worker
+do insta_kb virou um serviço Docker independente de verdade, em vez de
+algo que só rodava manualmente): este host tem UMA GPU de 12 GB, e os dois
+projetos (renders ComfyUI aqui, transcrição Whisper no insta_kb) podem
+rodar como serviços de container a qualquer momento, sem coordenação
+automática — antes era só disciplina manual (checar `nvidia-smi`).
+
+**Pedido explícito do usuário: os dois projetos NÃO podem ficar acoplados**
+("não quero um projeto dependendo do outro ou vinculado ao outro"). Solução:
+um arquivo de lock compartilhado fora dos dois repos (`~/.gpu-lock/gpu.lock`,
+bind-mounted no mesmo path `/var/lib/gpu-lock` nos containers relevantes dos
+dois lados), com `fcntl.flock`, e um módulo Python **idêntico mas duplicado**
+em cada repo (`src/minimax_mcp/gpu_lock.py` aqui, `src/infra/gpu_lock/
+gpu_lock.py` no insta_kb) — nenhum importa o outro.
+
+- `submit_scene_core` adquire o lock logo antes de `client.submit(wf)`
+  (timeout 1800s); `wait_for_video_core` libera quando o render realmente
+  termina (sucesso ou erro real), não quando o `wait_seconds` do caller
+  expira — senão o lock cairia com o render ainda rodando de verdade.
+  Token guardado por `prompt_id` (`_gpu_tokens_by_prompt`), porque submit e
+  wait podem ser chamadas MCP separadas.
+  ⚠️ **Limitação aceita:** se ninguém chamar `wait_for_video` de novo depois
+  de um timeout do `generate_video`, o lock fica preso até a próxima
+  chamada bem-sucedida ou restart do processo MCP. Sem detector de lock
+  órfão (processo morto sem liberar = lock preso até apagar o arquivo à
+  mão). Registrado, não resolvido — revisitar se virar problema de verdade.
+- 3 rotas HTTP via `@mcp.custom_route` (não MCP tools): `GET /gpu/status`,
+  `POST /gpu/acquire`, `POST /gpu/release` — porta 8848. São diagnóstico/
+  uso manual externo; a aplicação real do lock está em
+  `submit_scene_core`/`wait_for_video_core`, não nessas rotas.
+- `docker/docker-compose.yml`: `${HOME}/.gpu-lock` montado no serviço `mcp`
+  (não no `comfyui` — o lock é aplicado no processo MCP, que é quem chama
+  o ComfyUI, não dentro do ComfyUI em si).
+- `~/scripts/gpu-lock.sh` (fora dos dois repos, pasta pessoal do usuário):
+  `status`/`run`/`hold` sobre o MESMO arquivo — útil pra reservar a GPU
+  manualmente do terminal sem precisar dos containers rodando.
+
+**Validado nesta sessão, ponta a ponta entre os dois processos de verdade:**
+`POST :8848/gpu/acquire` (minimax) → `GET :8084/gpu/status` (insta_kb, processo
+totalmente separado) reportou `held=true` com o holder certo → `POST
+:8848/gpu/release` → insta_kb viu `free=true` de novo. Suíte unit completa
+(9 scripts) passou depois de ajustar `unit_core.py`/`unit_orchestrator.py`
+(que chamavam `submit_scene_core` de verdade e, sem mock do lock, faziam
+deadlock entre chamadas sucessivas do mesmo teste). Commit `c92ffee`.
+Commit irmão no insta_kb: `a2d391f`.
+
+**Review (`c92ffee`): aprovado com ressalvas, 1 bug real corrigido.**
+`client.submit(wf)` faz POST via httpx -- um erro de conexão/timeout de
+rede não vira `ComfyUIError` (só status HTTP/corpo de erro viram), então
+um glitch de rede simples travava o lock pra sempre, com nada de fato
+rodando na GPU. Fix em `ffeadae`: `except Exception` genérico libera o
+token antes de repropagar, + teste de regressão (`ConnectionError` no
+lugar de `ComfyUIError`, confirma `gpu_release` chamado). Ressalvas não
+bloqueantes registradas pelo reviewer: `"Timed out" not in str(e)` é
+string-match frágil a refactor futuro de `comfyui_client.py` (sem teste
+que pegaria isso, já que `ComfyUIClient` é mockado nos testes); rotas
+HTTP de diagnóstico devolvem 500 feio em corpo vazio/inválido em vez de
+400 (aceitável, são manuais); sem detector de lock órfão (processo
+morto = lock preso até apagar `~/.gpu-lock/gpu.lock`/`gpu.holder` à mão).
+
+---
+
+## 2026-10-07 — Task 5 (MCPs do OpenCode): inventário + insta-kb → HTTP
+
+**Step 1 (inventário):** 4 instâncias minimax no `~/.config/opencode/
+opencode.json` global (`minimax-video-factory-uv` host stdio,
+`minimax-video-factory-remote` HTTP :8848) + 2 no `.mcp.json` deste repo
+(`minimax-video-factory` docker exec, `minimax-video-factory-remote`
+HTTP :8848) — sem mudança, já corretas. `minimax-knowledge-base` (pendência
+antiga, apontava pro server.py velho sem tools de KB) **já não existe mais**
+no opencode.json — resolvida antes desta sessão, sem ação necessária.
+
+**`insta-kb` global estava stdio** (`uv run --directory insta_kb python
+src/mcp_server/server.py`), com a própria descrição já dizendo "Trocar para
+HTTP 127.0.0.1:8849/mcp na Task 4" — trocado agora pra `type: remote, url:
+http://127.0.0.1:8849/mcp`, apontando pro serviço `mcp` containerizado
+(Task 4). Confirmado vivo: `GET :8849/mcp` → 400 (não 000).
+
+**Step 2 (venvs):** `fastmcp 4.0.11` confirmado nos 3 lugares — host
+(`uv run python -c "import fastmcp"`), container `minimax-comfyui`
+(`/opt/mcp-venv`), container `devcontainer-mcp-1` do insta_kb (`/opt/venv`).
+
+**Claude Code (não OpenCode) não precisa de ação separada:** não tem um
+agregador global como o `opencode.json` — lê `.mcp.json` por projeto
+diretamente. A troca pra HTTP já foi feita ali na Task 4 Step 8.
+
+**Pendente (Steps 3-5, ação do usuário):** reiniciar a sessão do OpenCode
+pra `insta-kb` reconectar via HTTP; depois, handshake + contagem de tools
+por instância (Step 4) — ainda não feito nesta sessão.
+
+---
+
+## 2026-10-07 — Task 6 (matriz de testes): Steps 1, 2, 4 feitos; 3 e 5 pendentes
+
+**Step 1 (baseline):** insta_kb 182 passed; minimax 9/9 unit + ruff limpo —
+mesmo baseline de antes, sem regressão.
+
+**Step 2 (tools minimax via MCP desta sessão):** `queue_status` (fila
+vazia, ok), `list_outputs` (219+ arquivos, ok), `get_status` (id
+inexistente → `{"state":"queued"}` — não é regressão desta sessão, é
+comportamento pré-existente; registrado como observação, não bug),
+`create_cinematic_prompt` (prompt gerado corretamente). `health_check`
+continua com o falso-negativo de processo MCP obsoleto (mesmo achado da
+Task 3 — a instância `minimax-video-factory-uv` desta sessão tem env
+antigo; resolve com o reload pendente do Step 3 da Task 5). `download_video`
+não testado (evitar rede/rate-limit sem necessidade).
+
+**Step 4 (REST + ComfyUI):** `/healthcheck` 200, `/ig/queue-status` 200,
+`/ig/progress` 200, `/knowledge/search?query=` 200 (⚠️ o plano original
+escreveu `q=`, parâmetro errado — é `query`), `/knowledge/documents` 200,
+`/knowledge/export/search` 200, `/gpu/status` 200 (novo, Task 4+).
+Traversal guard confirmado: `POST /knowledge/export?ids=1&output_dir=../../etc`
+→ `{"ok":false,"error":"output_dir must stay under /app/output"}` (os
+parâmetros são **query**, não body JSON — outro ajuste do teste, não bug).
+ComfyUI `/system_stats` e `/object_info` 200. `POST /prompt` de smoke
+**pulado de propósito** — evitaria disputar GPU com o worker ativo
+processando a fila real; já validado na Task 3.
+
+**Pendente:**
+- Step 3 (tools insta-kb via MCP): bloqueado até o reload do OpenCode
+  (Task 5 Step 3, ação do usuário).
+- Step 5 (renders reais novos vs baseline): ainda não feito — pede
+  confirmação porque o worker está processando a fila real agora; o
+  mutex de GPU (seção acima) serializa automaticamente, mas um render
+  de verdade ainda atrasa o worker por até 1800s enquanto segura o lock.
+
+### Step 5 executado — e um incidente real que prova por que o mutex importa
+
+Render turbo (seed 42, 512×320, 5s) submetido via `submit_scene`/`wait_for_video`
+da instância MCP **do host** (`minimax-video-factory-uv`). Completou OK
+(`task6/turbo_val_00001_.mp4`). **Mas o mutex não pegou essa chamada**: essa
+instância é um processo de longa duração, rodando desde antes das mudanças
+desta sessão em `core.py` — nunca reimportou `gpu_lock`. `GET /gpu/status`
+mostrou `free` durante o render inteiro (confirmado via curl nos dois
+lados). Isso só se resolve com o reload do OpenCode (Task 5, pendente) ou
+reiniciando essa instância especificamente.
+
+**Consequência real, não hipotética:** com o lock não aplicado, o worker do
+insta_kb pegou o próximo item da fila *durante* o render (11,4 GB/12,3 GB,
+81% util). Um post falhou: `processing failed ig_pk=...: LLM generation
+failed: [Errno 110] Connection timed out` — a chamada ao Ollama (descrição
+de imagem) não conseguiu VRAM. Pausei o worker manualmente assim que vi
+(`ig_worker_stop` MCP falhou sem detalhe; fallback funcionou: publish direto
+na exchange, **porta 15673** — não 15672, que é a porta interna do
+container; a docs antiga do CLAUDE.md usa 15672 porque foi escrita antes da
+containerização do RabbitMQ). Retomei (`start`) depois que o render
+terminou.
+
+**Segundo problema, encadeado:** mesmo com VRAM livre depois do render, o
+worker continuou preso em retry de "screen read failed" (backoff crescente:
+~2min15s → ~7min) — porque **o ComfyUI mantém os modelos residentes depois
+do render** (10,5 GB a 0% de uso, exatamente o comportamento já documentado
+na seção "Operação" deste arquivo). `POST :8188/free
+{"unload_models":true,"free_memory":true}` liberou (10,5 GB→1 GB), mas o
+worker ainda não tinha voltado a progredir no momento deste registro —
+monitorando.
+
+**Conclusão prática:** o mutex de GPU (feature desta sessão) teria evitado
+esse incidente inteiro, SE a instância MCP que fez a chamada tivesse o
+código novo carregado. Isso é a evidência mais forte até agora de que o
+reload pendente da Task 5 não é cosmético — é uma lacuna de segurança real
+enquanto não acontece.
+
+**Causa raiz de verdade do "screen read failed" (não era só VRAM):**
+investigando por que o worker não voltou a progredir mesmo com VRAM livre,
+achei que `host.docker.internal:11434` **não é alcançável a partir da rede
+`insta-kb-net`** (testado de dentro do container `devcontainer-worker-1`:
+timeout; e comparando um container solto na bridge padrão do Docker — que
+funciona, 200 OK — contra um na `insta-kb-net` — timeout sempre). O
+firewall do host deixa passar a bridge padrão mas bloqueia a rede
+customizada. **É exatamente o que o `.env` antigo descrevia** ("containers
+não alcançam Ollama, worker tem que rodar no host") — eu tinha avaliado
+esse comentário como desatualizado cedo demais, validando só com um
+container solto na bridge padrão, não na rede real do compose. Decisão do
+usuário: **containerizar o Ollama** na própria `insta-kb-net` (sem sudo
+disponível pra mexer no firewall) — container-pra-container na mesma rede
+nunca cruza essa regra. Serviço `ollama` novo no
+`.devcontainer/docker-compose.yml`, montando **read-only** o diretório de
+modelos que o `ollama serve` do host já usa (`.ollama` de
+`/home/ollama_models`, 133 GB) — sem duplicar nem rebaixar nada. `OLLAMA_URL` dos 3 serviços
+trocado de `http://host.docker.internal:11434` pra `http://ollama:11434`;
+`extra_hosts` removido (não serve mais pra nada); `ollama` adicionado ao
+`depends_on` dos 3. **Validado depois (2026-10-07 ~18:02):** exigiu pinar a imagem em
+`ollama/ollama:0.32.9` (o `latest` 0.40 migra o store pra `manifests-v2`
+e quebra o mount `:ro`) + recriar os containers com a env nova — worker
+drenando com ingests reais (detalhe no HANDOFF do insta_kb).
+
+---
+
+## 📍 Status consolidado desta sessão (2026-10-07, fim de tarde)
+
+Visão rápida de onde as coisas estão, pros próximos passos:
+
+| Task | Estado real | Pendência |
+|---|---|---|
+| 0-3 | ✅ fechadas, commitadas, revisadas | nenhuma |
+| 4 (Docker insta_kb) | ✅ fechada — Ollama containerizado (pin `0.32.9`), worker com ingests reais | nenhuma |
+| 5 (MCPs OpenCode) | ✅ fechada — testes reais: insta-kb 7 tools + remote 3 + uv stdio 2 verdes; `MODELS_DIR` stale corrigido | **reiniciar a sessão do OpenCode (ação sua)** — recarrega as instâncias MCP e faz o mutex valer pra TODAS as chamadas; já causou um incidente real (acima) |
+| 6 (matriz de testes) | ✅ fechada — baselines 168+9 → 206+11, suites ×2 verdes, tools MCP exercitadas; skip documentado (worker ativo, reindex custosa) | nenhuma |
+| 7 (fila insta_kb) | ✅ drenando — 322→193 ready (snapshot), 0 dead, 1 consumer | retomar/pausar quando quiser — `ig_worker_start`/`ig_worker_stop` |
+| 8 (documentação) | ✅ fechada — READMEs sweep (v0.39.1/206/4.x/8084), MCP_TOOLS regenerado, REVISAO apêndice, mkdocs --strict ×2, Pages workflow novo no insta_kb | nenhuma |
+| 9 (diagramas) | ✅ fechada — `docs/ARQUITETURA.md` ×2 (3 Mermaid cada) + links nos READMEs | nenhuma |
+| 10 (auditoria SOLID) | ✅ fechada nesta sessão — `docs/SOLID_AUDIT.md` (avaliação, veredito **ciclo futura**; 1 bug de contrato `state=rendering` pra tratar como bugfix) | ver §5 do relatório (backlog severidade × esforço) |
+
+**Trabalho fora do plano original, mas crítico, feito nesta sessão:**
+- Mutex de GPU compartilhado insta_kb↔minimax (arquivo+flock, endpoints
+  HTTP nos dois, 1 bug de vazamento corrigido com review)
+- Bug real do venv do devcontainer (`/app/.venv` quebrava o do host) —
+  corrigido, revisado
+- Containerização do Ollama (ainda em teste) — substituindo a tentativa
+  via `host.docker.internal` que não funcionava na rede real
+
+**Pendências reais, em ordem de urgência:**
+1. ~~Confirmar que o `ollama` containerizado sobe e o worker volta a
+   processar (build em andamento)~~ ✅ confirmado ~18:02 — worker com
+   ingests reais (docs 3720+), exigiu pin da imagem em `0.32.9`
+2. **Reiniciar a sessão do OpenCode (ação sua)** — único resíduo da
+   Task 5: recarrega as instâncias MCP (valores novos de `MODELS_DIR`,
+   mutex de GPU em todas as chamadas)
+3. Commits/PR da branch `update/deps-2026-10` (suítes finais antes)
+4. **Último passo do plano (pedido do usuário): testes reais de criação
+   de vídeo** — GPU livre, worker parado
+5. graphify (Task 9 Step 4, opcional) — não solicitado; Mermaid cobre
+
+---
+
+## 2026-10-07 — Task 10 ✅: auditoria SOLID (só avaliação)
+
+Entregável: **`docs/SOLID_AUDIT.md`** (231 linhas) — nenhum código
+alterado, conforme design (`insta_kb:docs/superpowers/specs/2026-10-07-solid-audit-task-design.md`).
+
+Método: radon cc/mi + vulture (0 dead code) + grafo AST (8 módulos,
+**0 ciclos**) + checklist S/O/L/I/D manual. Piores métricas:
+`inject_scene` cc=**20** (`core.py:74`), `wait_for_execution` cc=15
+(`comfyui_client.py:237`); MI todos rank A.
+
+Achados (10): **1 crítico que é BUG, não dívida** — o contrato
+*documentado* `state=rendering` é inalcançável: `wait_for_video_core`
+**retorna** dict no timeout (`core.py:307-328`) mas
+`orchestrator.py:139-166` trata como se **lançasse** `ComfyUIError`;
+`tests/unit_orchestrator.py:178-185` mascara o problema mockando a
+assinatura antiga. + 6 importantes (server.py polyglot; core.py com 5–6
+responsabilidades; `ComfyUIClient` concreto em 5 pontos (DIP);
+string-match `"Timed out" in str(e)` em 2 camadas; `inject_scene` com 7
+concerns; dispatch if/elif de eventos ws embutido no poll).
+
+**Veredito go/no-go: `ciclo futura`.** Repo estruturalmente saudável
+(0 ciclos, MI A, testes verdes) — mas o bug do `state=rendering` entra
+no próximo ciclo **como bugfix, antes** do resto do backlog (§5 do
+relatório, severidade × esforço).
+
+## 2026-10-07 — bugfix SOLID #1+#2: `state=rendering` alcançável (TDD)
+
+Escopo executado do backlog §5 do `docs/SOLID_AUDIT.md` (itens críticos
+#1 e #2, acoplados — a recomendação do audit era resolvê-los juntos).
+
+**Ciclo TDD (Red → Green → verificação):**
+
+- **Red**: 2 testes novos em `tests/unit_orchestrator.py` falhando pelo
+  motivo certo (`prompt_id lost on generate failure`, `pending render
+  result` sem `state`) + 1 em `tests/unit_core.py` (ImportError →
+  asserção `timed_out` ausente após criar a classe).
+- **Green**:
+  - `comfyui_client.py`: nova classe `ComfyUITimeout(ComfyUIError)`;
+    o timeout de `wait_for_execution` agora a **levanta** (linha ~316) em
+    vez de `ComfyUIError` genérica. Race corrigida: o branch
+    `node is None` do poll devolvia `await _poll()` direto — podia
+    retornar `None` se o `/history` atrasasse um tick (pyright 9→0).
+  - `core.py`: `wait_for_video_core` faz `except ComfyUITimeout` →
+    `{"ok": False, "timed_out": True, "prompt_id": ...}` mantendo o
+    lock de GPU; `except ComfyUIError` (outros) libera o lock. **Zero
+    string-match** de `"Timed out"` (eliminado dos 2 pontos).
+  - `orchestrator.py`: `except ComfyUITimeout` tipado (defensivo — o
+    core retorna dict); branch `wait_result["timed_out"]` →
+    `{"ok": True, "state": "rendering", "prompt_id": ...}` agora
+    **alcançável**; `run_full_pipeline` preserva `prompt_id` no failure
+    e propaga `state=rendering` + `message` no sucesso.
+  - `tests/unit_orchestrator.py`: teste stale `_never` (mockava a
+    assinatura antiga de raise) reescrito p/ o contrato real (dict
+    `timed_out`); `make_studio` anotado `-> AudiovisualStudio` (era
+    `-> object`, cegava o pyright em 12 pontos).
+  - Docs: docstring + `docs/MCP_TOOLS.md` de `wait_for_video` com o
+    contrato de timeout (`ok=false, timed_out=true, prompt_id`).
+
+**Verificação (tudo verde):** `pytest -q` **10 passed** (baseline 9, +1);
+`unit_core` / `unit_orchestrator` / `unit_privacy` / `unit_transcriber`
+OK; `ruff check .` limpo; `pyright` nos arquivos tocados **0 errors**
+(baseline 9 — só melhorou).

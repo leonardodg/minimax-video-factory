@@ -8,10 +8,19 @@ Exit 0 = all pass. Any failure prints [BAD] and exits non-zero.
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any, cast
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+
+import os
+
+# generate_video -> submit_scene_core acquires the shared GPU lock for real
+# (ComfyUIClient is mocked below, but gpu_lock isn't) -- isolated dir so
+# this never contends with a real render or insta_kb's ig-worker for
+# ~/.gpu-lock.
+os.environ.setdefault("GPU_LOCK_DIR", tempfile.mkdtemp())
 
 FAIL = 0
 
@@ -29,7 +38,7 @@ def bad(label: str) -> None:
 from minimax_mcp.orchestrator import AudiovisualStudio
 
 
-def make_studio(tmp: Path) -> object:
+def make_studio(tmp: Path) -> AudiovisualStudio:
     """Build an AudiovisualStudio with downloader/transcriber mocked out."""
 
     dl = mock.MagicMock()
@@ -102,6 +111,43 @@ with tempfile.TemporaryDirectory() as td:
     else:
         bad(f"generate failure result = {result!r}")
 
+    # SOLID backlog #1: a failed generate used to swallow the prompt_id --
+    # the render (if any) stayed unreachable, which is the exact bug commit
+    # 5095e21 set out to kill.
+    gen_lost = mock.MagicMock()
+    gen_lost.return_value = {
+        "ok": False, "error": "execution error: node failed", "prompt_id": "abc-lost",
+    }
+    studio.generate_video = gen_lost
+    result = studio.run_full_pipeline(
+        url="https://example.com/v", save_only=False, output_dir=tmp
+    )
+    if not result.get("ok") and result.get("prompt_id") == "abc-lost":
+        ok("a failed generate keeps the prompt_id reachable")
+    else:
+        bad(f"prompt_id lost on generate failure: {result!r}")
+
+    # SOLID backlog #1: the documented timeout contract -- ok=True with
+    # state="rendering" -- must survive the pipeline, prompt_id included.
+    gen_pending = mock.MagicMock()
+    gen_pending.return_value = {
+        "ok": True,
+        "state": "rendering",
+        "prompt_id": "abc-pending",
+        "seed": 42,
+        "output_path": None,
+        "message": "still rendering after 900s. Use wait_for_video(prompt_id).",
+    }
+    studio.generate_video = gen_pending
+    result = studio.run_full_pipeline(
+        url="https://example.com/v", save_only=False, output_dir=tmp
+    )
+    if result.get("ok") and result.get("state") == "rendering" \
+            and result.get("prompt_id") == "abc-pending":
+        ok("a still-rendering generate reports state=rendering with its prompt_id")
+    else:
+        bad(f"pending render result = {result!r}")
+
 print("== unit_orchestrator: create_cinematic_prompt templates ==")
 with tempfile.TemporaryDirectory() as td:
     tmp = Path(td)
@@ -117,7 +163,8 @@ print("== unit_orchestrator: pipeline fails fast on bad stages ==")
 with tempfile.TemporaryDirectory() as td:
     tmp = Path(td)
     studio = make_studio(tmp)
-    studio.downloader.download.return_value = {"ok": False, "error": "download blocked"}
+    cast(Any, studio.downloader).download.return_value = {
+        "ok": False, "error": "download blocked"}
     result = studio.run_full_pipeline(url="https://example.com/v", save_only=True, output_dir=tmp)
     if not result.get("ok") and result.get("stage") == "download":
         ok("download failure short-circuits with stage='download'")
@@ -168,8 +215,10 @@ else:
 print("== unit_orchestrator: generate_video does not hold the connection open ==")
 
 async def _never(prompt_id, timeout=0):
-    # Stands in for a render that outlives the caller's patience.
-    raise _orch.ComfyUIError(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
+    # Stands in for a render that outlives the caller's patience. The real
+    # wait_for_video_core answers with a timed_out dict — it does not raise.
+    return {"ok": False, "timed_out": True, "prompt_id": prompt_id,
+            "error": f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}"}
 
 _studio2 = object.__new__(_orch.AudiovisualStudio)
 with _mock.patch.object(_orch, "submit_scene_core",

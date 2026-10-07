@@ -24,6 +24,14 @@ class ComfyUIError(RuntimeError):
     pass
 
 
+class ComfyUITimeout(ComfyUIError):
+    """The wait deadline expired — the render may still be running.
+
+    Subclass so consumers can branch on the type instead of string-matching
+    "Timed out" in the message (SOLID audit backlog #1/#2).
+    """
+
+
 def queue_state_from(queue_payload: dict[str, Any], prompt_id: str) -> str | None:
     """Locate `prompt_id` in a ComfyUI /queue payload.
 
@@ -245,67 +253,97 @@ class ComfyUIClient:
         Returns the history record for this prompt_id. Raises ComfyUIError on
         timeout or explicit execution error.
         """
-        from websockets import ConnectionClosed
+        from websockets import ConnectionClosed, WebSocketException
         from websockets.asyncio.client import connect
 
         ws_url = self.base_url.replace("http", "ws", 1) + "/ws?clientId=minimax-factory"
         deadline = asyncio.get_event_loop().time() + timeout
 
         async def _poll() -> dict[str, Any] | None:
-            hist = self.get_history(prompt_id)
-            rec = hist.get(prompt_id)
-            if rec is None:
+            try:
+                hist = self.get_history(prompt_id)
+                rec = hist.get(prompt_id)
+                if rec is None:
+                    return None
+                status = rec.get("status", {})
+                if status.get("completed") or rec.get("outputs"):
+                    return rec
+                if status.get("status_str") == "error" or status.get("error"):
+                    raise ComfyUIError(describe_execution_error(status))
                 return None
-            status = rec.get("status", {})
-            if status.get("completed") or rec.get("outputs"):
-                return rec
-            if status.get("status_str") == "error" or status.get("error"):
-                raise ComfyUIError(describe_execution_error(status))
-            return None
+            except ComfyUIError:
+                raise
+            except (httpx.HTTPError, TimeoutError, OSError) as e:
+                # Transport failure while the render may still be running:
+                # report "not done yet" and let the deadline decide (review
+                # fast-follow, 2026-10-07). Escaping here would look like a
+                # failed start upstream, which releases the GPU lock while
+                # the job keeps rendering.
+                logger.warning("poll /history transport error: %s", e)
+                return None
 
         # Fast path: check immediately (might already be done or queued behind others)
         done = await _poll()
         if done:
             return done
 
-        async with connect(ws_url) as ws:
+        try:
+            async with connect(ws_url) as ws:
+                while asyncio.get_event_loop().time() < deadline:
+                    if done:
+                        return done
+                    try:
+                        msg = await asyncio.wait_for(ws.recv(), timeout=poll_interval)
+                    except TimeoutError:
+                        done = await _poll()
+                        continue
+                    except ConnectionClosed:
+                        done = await _poll()
+                        continue
+
+                    if isinstance(msg, bytes):
+                        continue
+                    try:
+                        evt = json.loads(msg)
+                    except json.JSONDecodeError:
+                        continue
+
+                    evt_type = evt.get("type")
+                    if evt_type == "executing":
+                        data = evt.get("data", {})
+                        if data.get("prompt_id") == prompt_id and data.get("node") is None:
+                            # finished executing this prompt — /history may lag a
+                            # tick behind the ws event, so never return None here:
+                            # keep polling until the record materialises.
+                            done = await _poll()
+                            if done:
+                                return done
+                        if data.get("prompt_id") == prompt_id:
+                            done = await _poll()
+                            if done:
+                                return done
+                    elif evt_type == "execution_error":
+                        err = evt.get("data", {})
+                        raise ComfyUIError(describe_execution_error(err))
+
+                    if done is None:
+                        done = await _poll()
+        except ComfyUIError:
+            raise
+        except (OSError, TimeoutError, WebSocketException) as e:
+            # /ws handshake or socket failed (refused/reset/404) but the
+            # render may be fine: fall back to HTTP-only polling until the
+            # deadline instead of escaping as a raw transport error, which
+            # upstream would read as "job never started" and use to release
+            # the GPU lock (review fast-follow, 2026-10-07).
+            logger.warning("ws unavailable during wait (%s); polling /history only", e)
             while asyncio.get_event_loop().time() < deadline:
+                done = await _poll()
                 if done:
                     return done
-                try:
-                    msg = await asyncio.wait_for(ws.recv(), timeout=poll_interval)
-                except asyncio.TimeoutError:
-                    done = await _poll()
-                    continue
-                except ConnectionClosed:
-                    done = await _poll()
-                    continue
+                await asyncio.sleep(poll_interval)
 
-                if isinstance(msg, bytes):
-                    continue
-                try:
-                    evt = json.loads(msg)
-                except json.JSONDecodeError:
-                    continue
-
-                evt_type = evt.get("type")
-                if evt_type == "executing":
-                    data = evt.get("data", {})
-                    if data.get("prompt_id") == prompt_id and data.get("node") is None:
-                        # finished executing this prompt
-                        return await _poll()
-                    if data.get("prompt_id") == prompt_id:
-                        done = await _poll()
-                        if done:
-                            return done
-                elif evt_type == "execution_error":
-                    err = evt.get("data", {})
-                    raise ComfyUIError(describe_execution_error(err))
-
-                if done is None:
-                    done = await _poll()
-
-        raise ComfyUIError(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
+        raise ComfyUITimeout(f"Timed out after {timeout:.0f}s waiting for prompt {prompt_id}")
 
     # ---------- output resolution ----------
     def resolve_output(self, history_rec: dict[str, Any], output_dir: str) -> str | None:

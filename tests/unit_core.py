@@ -12,6 +12,13 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import os
+
+# submit_scene_core acquires the shared GPU lock for real (ComfyUIClient is
+# mocked below, but gpu_lock isn't) -- isolated dir so this never contends
+# with a real render or insta_kb's ig-worker for ~/.gpu-lock.
+os.environ.setdefault("GPU_LOCK_DIR", tempfile.mkdtemp())
+
 FAIL = 0
 
 
@@ -27,6 +34,7 @@ def bad(label: str) -> None:
 
 print("== unit_core: duration_to_frames ==")
 from minimax_mcp import core
+from minimax_mcp.comfyui_client import ComfyUITimeout
 
 CASES = {5.0: 124, 10.0: 243, 1.0: 39, 15.0: 362, 0.5: 22}
 for dur, expect in CASES.items():
@@ -105,6 +113,17 @@ else:
         bad(f"last_frame alone = {lh3.get('last_frame')!r}, first_frame = {lh3.get('first_frame')!r}")
 
 print("== unit_core: submit_scene_core ==")
+# submit_scene_core/wait_for_video_core are tested here for their OWN logic
+# (workflow patching, error shapes, output resolution) -- the GPU-lock
+# acquire/release pairing has its own dedicated coverage in
+# unit_gpu_lock.py. Mocked (not just isolated via GPU_LOCK_DIR) because
+# several submit_scene_core calls below never reach a matching
+# wait_for_video_core call in this script -- with the real lock, the
+# second successful submit would deadlock waiting for the first's token,
+# which nothing here ever releases.
+mock.patch.object(core, "gpu_acquire", lambda holder, timeout=300: "unit-test-token").start()
+mock.patch.object(core, "gpu_release", lambda token: None).start()
+
 with mock.patch.object(core, "ComfyUIClient") as m:
     client = m.return_value
     client.submit.return_value = "pid-1"
@@ -152,6 +171,24 @@ with mock.patch.object(core, "ComfyUIClient") as m:
     else:
         bad(f"upload failure result = {result!r}")
 
+with mock.patch.object(core, "ComfyUIClient") as m, \
+     mock.patch.object(core, "gpu_release") as release_spy:
+    # client.submit posts over httpx -- a connection error/timeout isn't
+    # wrapped as ComfyUIError (only HTTP-status/body errors are), so this
+    # exercises the plain `except Exception` path, not the ComfyUIError one
+    # above. Without it the GPU lock leaked forever on a network glitch,
+    # with nothing actually running on the GPU (review finding, 2026-10-07).
+    client = m.return_value
+    client.submit.side_effect = ConnectionError("network blip")
+    try:
+        core.submit_scene_core("p", seed=4)
+        bad("submit_scene_core swallowed a non-ComfyUIError exception")
+    except ConnectionError:
+        if release_spy.call_count == 1:
+            ok("a non-ComfyUIError submit failure still releases the GPU lock")
+        else:
+            bad(f"gpu_release call_count = {release_spy.call_count}, expected 1")
+
 print("== unit_core: wait_for_video_core ==")
 async def run_wait():
     with mock.patch.object(core, "ComfyUIClient") as m:
@@ -169,6 +206,42 @@ if res.get("ok") and res.get("output_path") and res.get("prompt_id") == "pid-2":
     ok("wait_for_video_core returns ok + output_path + prompt_id")
 else:
     bad(f"wait_for_video_core result = {res!r}")
+
+print("== unit_core: wait_for_video_core timeout contract ==")
+# SOLID backlog #1+#2: the client raises a typed ComfyUITimeout; the core
+# layer converts it into a timed_out dict (keeping the GPU lock held) and
+# never goes back to string-matching "Timed out" in the message.
+
+async def run_wait_timeout():
+    core._gpu_tokens_by_prompt["pid-3"] = "tok-3"
+    with mock.patch.object(core, "ComfyUIClient") as m, \
+         mock.patch.object(core, "gpu_release") as rel:
+        client = m.return_value
+        client.wait_for_execution = mock.AsyncMock(
+            side_effect=ComfyUITimeout(
+                "Timed out after 10s waiting for prompt pid-3"))
+        res_timeout = await core.wait_for_video_core("pid-3", timeout=10)
+        client.wait_for_execution = mock.AsyncMock(
+            side_effect=core.ComfyUIError("execution error: node failed"))
+        res_error = await core.wait_for_video_core("pid-3", timeout=10)
+        release_calls = rel.call_count
+    core._gpu_tokens_by_prompt.pop("pid-3", None)
+    return res_timeout, res_error, release_calls
+
+res_timeout, res_error, release_calls = asyncio.run(run_wait_timeout())
+if res_timeout.get("ok") is False and res_timeout.get("timed_out") is True \
+        and res_timeout.get("prompt_id") == "pid-3":
+    ok("timeout comes back as timed_out=True with the prompt_id")
+else:
+    bad(f"timeout result = {res_timeout!r}")
+if res_error.get("ok") is False and "timed_out" not in res_error:
+    ok("a real execution error is not flagged as a timeout")
+else:
+    bad(f"execution-error result = {res_error!r}")
+if release_calls == 1:
+    ok("timeout kept the GPU lock held; the execution error released it")
+else:
+    bad(f"gpu_release call_count = {release_calls}, expected 1")
 
 print("== unit_core: compose_final_core ==")
 with tempfile.TemporaryDirectory() as td:
