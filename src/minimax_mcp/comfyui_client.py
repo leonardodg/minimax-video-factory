@@ -298,7 +298,17 @@ class ComfyUIClient:
                         done = await _poll()
                         continue
                     except ConnectionClosed:
+                        # Unlike the TimeoutError branch above, recv() on an
+                        # already-closed socket returns immediately -- no
+                        # sleep here spins this at whatever speed _poll()
+                        # allows. Measured: 113k iterations/s against a dead
+                        # ws with get_history erroring, i.e. a self-DDoS of
+                        # ComfyUI's /history during exactly the window a
+                        # render is in trouble (review finding, 2026-10-07).
                         done = await _poll()
+                        if done:
+                            return done
+                        await asyncio.sleep(poll_interval)
                         continue
 
                     if isinstance(msg, bytes):

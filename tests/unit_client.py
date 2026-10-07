@@ -14,7 +14,9 @@ the GPU lock — while the render may still be running on the GPU.
 
 import asyncio
 import sys
+import time
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -73,5 +75,62 @@ if "pid-msg" in msg:
     ok("timeout message carries the prompt_id")
 else:
     bad(f"timeout message should mention pid-msg: {msg!r}")
+
+print("== unit_client: ConnectionClosed while polling doesn't spin hot ==")
+from websockets import ConnectionClosed
+
+
+class _DeadWs:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def recv(self):
+        # Every call raises immediately, like recv() on an already-closed
+        # socket -- this is exactly what reproduced the hot loop: nothing
+        # here takes any wall-clock time on its own.
+        raise ConnectionClosed(None, None)
+
+
+poll_calls = 0
+
+
+def _failing_get_history(self, prompt_id):
+    global poll_calls
+    poll_calls += 1
+    raise ConnectionError("transport down")
+
+
+async def _hot_loop_probe() -> float:
+    client = ComfyUIClient(base_url="http://127.0.0.1:9999")
+    with (
+        mock.patch(
+            "websockets.asyncio.client.connect",
+            return_value=_DeadWs(),
+        ),
+        mock.patch.object(
+            ComfyUIClient, "get_history", _failing_get_history
+        ),
+    ):
+        start = time.monotonic()
+        try:
+            await client.wait_for_execution("pid-hot", timeout=0.5, poll_interval=0.05)
+        except ComfyUITimeout:
+            pass
+        return time.monotonic() - start
+
+
+elapsed = asyncio.run(_hot_loop_probe())
+# A real poll_interval=0.05 sleep between iterations bounds this to roughly
+# timeout/poll_interval calls (~10 for a 0.5s budget). The unfixed code
+# measured 113k calls/s against this exact mock -- orders of magnitude more
+# than any sleep-respecting loop could reach in the same wall-clock budget.
+MAX_SANE_CALLS = 100
+if poll_calls <= MAX_SANE_CALLS:
+    ok(f"ConnectionClosed path stayed sleep-bound ({poll_calls} polls in {elapsed:.2f}s)")
+else:
+    bad(f"ConnectionClosed path spun hot: {poll_calls} polls in {elapsed:.2f}s (no sleep?)")
 
 sys.exit(1 if FAIL else 0)
