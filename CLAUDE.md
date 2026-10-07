@@ -23,20 +23,41 @@ ComfyUI + MiniMax H3 (FL2VA, INT8) exposto por um servidor MCP.
 4. **Mostrar a fila junto com todo vídeo entregue**, e avisar do que houver nela.
 5. **Worktree é obrigatório para implementação.** Commit só de documentação, não.
 6. **Nunca animar rosto de terceiro identificável.** Fotos do próprio usuário, sim.
-7. **O `ig-worker` disputa a MESMA GPU.** Ele roda no container `minimax-ig-worker`
-   (não no host — corrigido em 2026-08-12) e carrega Whisper + um modelo de visão
-   no Ollama do host: medido **5,8 GB** com `qwen3-vl:8b` residente, de 12 GB
-   totais. Se ele pegar trabalho durante um render, o render morre por OOM —
-   aconteceu em 2026-08-12. Avisar, e pausar só se o usuário mandar.
-   **Pausar/retomar** (as tools MCP `ig_worker_stop`/`ig_worker_start` fazem isso):
+7. **O `ig-worker` disputa a MESMA GPU.** Desde a Task 4 de
+   `docs/PLANO_ATUALIZACAO.md` (2026-10-07) ele vive inteiramente no repo
+   `insta_kb`, containerizado (`insta-kb-net`, serviços `api`/`worker`/`mcp`/
+   `ollama`) — **não existe mais o container `minimax-ig-worker`** desta
+   frase antiga. Ollama também está containerizado lá (não mais `localhost`
+   do host: `host.docker.internal` não alcança a rede customizada por causa
+   do firewall do host — achado real, ver HANDOFF 2026-10-07).
+
+   **Defesa automática:** mutex de GPU compartilhado via arquivo
+   (`~/.gpu-lock/gpu.lock`, `fcntl.flock`) — módulo `src/minimax_mcp/
+   gpu_lock.py` aqui, idêntico (duplicado, não importado) em `insta_kb/src/
+   infra/gpu_lock/`. `submit_scene_core`/`wait_for_video_core`
+   (`src/minimax_mcp/core.py`) adquirem/liberam automaticamente em volta de
+   cada render; `_default_transcribe` do ig-worker faz o mesmo em volta do
+   Whisper. **Isso só funciona se o processo MCP que você está chamando
+   carregou o código novo** — uma instância de longa duração iniciada antes
+   dessas mudanças não tem o lock (causou um incidente real de verdade em
+   2026-10-07, ver HANDOFF: render + transcrição simultâneos, um post falhou).
+   Reinicie a sessão/processo MCP depois de qualquer mudança em
+   `gpu_lock.py`/`core.py` se desconfiar que o lock não está pegando.
+
+   **Status manual:** `GET :8848/gpu/status` (minimax) ou `GET :8084/gpu/status`
+   (insta_kb) — mesmo arquivo, qualquer um dos dois mostra o estado real.
+   `~/scripts/gpu-lock.sh status` também serve, direto no arquivo.
+
+   ⚠️ **Lock preso sem ninguém usando a GPU** (processo MCP matou sem
+   liberar, ou o ComfyUI ficou inalcançável por tempo suficiente — ver
+   `docs/HANDOFF.md` 2026-10-07 sobre a decisão de design por trás disso):
+   `nvidia-smi` mostra GPU livre mas `/gpu/status` mostra `held`. Destravar:
    ```bash
-   curl -s -u guest:guest -H "content-type:application/json" -X POST \
-     http://localhost:15672/api/exchanges/%2F//publish \
-     -d '{"properties":{},"routing_key":"ig.worker.command","payload":"{\"command\": \"stop\"}","payload_encoding":"string"}'
+   curl -X POST :8848/gpu/release -H 'content-type: application/json' \
+     -d '{"token":"'$(grep -o 'token=[a-f0-9]*' ~/.gpu-lock/gpu.holder | cut -d= -f2)'"}'
    ```
-   A pausa é real: `basic_cancel` na fila de trabalho. Confere em
-   `/api/queues` — `ig.saved` vai a **0 consumidores** e `ig.worker.command`
-   fica em 1, que é como o `start` volta a chegar.
+   (ou apagar `~/.gpu-lock/gpu.lock` e `~/.gpu-lock/gpu.holder` direto, se
+   os containers estiverem todos parados).
 
 ---
 
@@ -123,6 +144,11 @@ Quatro coisas que não são óbvias:
   vídeo (shift 12) e áudio (shift 3) em relógios separados por conta própria —
   o caminho `legacy dual-schedule` do log. É o que impede o áudio de quebrar com
   poucos steps. Ao subir a versão do ComfyUI, reconferir essa linha.
+  ⚠️ **Subiu pra v0.39.1 na Task 3 (2026-10-07) e esta linha não foi reconferida**
+  — o render de validação da Task 3 foi vídeo mudo (sem diálogo), então não
+  testou o caminho `legacy dual-schedule` especificamente. Antes de confiar em
+  áudio com poucos steps na v0.39.1, procurar essa linha no log de um render
+  com `turbo=True` e falas.
 
 **O áudio sobrevive a 6 steps** (medido 2026-08-11, 2 falas em 5 s):
 
