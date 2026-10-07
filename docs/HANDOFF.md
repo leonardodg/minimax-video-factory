@@ -13,6 +13,70 @@ regras antigas deste arquivo eram do INT4 e **metade caiu**. O que está abaixo
 
 ---
 
+## ✅ CONCLUÍDO em 2026-10-06: domínio Instagram/KB saiu deste repo
+
+**Objetivo (cumprido):** este projeto nasceu só para gerar vídeo (ComfyUI +
+MiniMax H3), mas acumulou um segundo domínio inteiro (base de conhecimento do
+Instagram: Postgres+pgvector, RabbitMQ, `ig-worker`, Ollama). Esse segundo
+domínio foi **migrado de verdade** (dados reais incluídos) para um projeto
+novo e independente, [`insta_kb`](https://github.com/leonardodg/insta_kb) —
+ver `insta_kb/docs/HANDOFF.md` e o README de lá, agora documentação completa.
+
+Plano completo (todas as decisões, fases, critérios de verificação):
+`~/.claude/plans/task-notification-task-id-a46236a77511d-valiant-cray.md`.
+
+### O que foi feito, nesta ordem, cada um verificado antes do próximo
+
+1. **Código e dados reais migrados para `insta_kb`** — 3403 documentos /
+   12755 chunks / 12755 embeddings no Postgres do `insta_kb` (porta 5433),
+   filas `ig.saved`/`ig.saved.dead` migradas via backup/restore de
+   definições do RabbitMQ. `insta_kb` agora na `main`, 136 testes, pyright
+   strict/ruff/bandit/pip-audit limpos, README completo.
+2. **Limpeza deste repo, no worktree `worktree-separar-python-comfyui`**
+   (commit `1e5efe2`): `server.py` reduzido às 12 tools de vídeo;
+   `db.py`/`ig_queue.py`/`ig_sync.py`/`ig_worker.py`/`knowledge.py`/`llm.py`/
+   `vault.py` deletados; `pyproject.toml`/`uv.lock` sem as deps do KB;
+   `docker/docker-compose.yml` caiu de 5 para 2 serviços (`comfyui`, `mcp`);
+   os 4 scripts `ig_*` rastreados migraram para `insta_kb/scripts/` com
+   imports corrigidos (verificado por import real, não só sintaxe); 13
+   arquivos de teste que só testavam os módulos deletados saíram; o catálogo
+   de slash commands (`catalog.py`, `overrides.py`) perdeu as entradas
+   `kb-*`/`ig-*`, e os 26 `.md` órfãos de comando saíram de
+   `.opencode/command/`/`.claude/commands/`.
+3. **Documentação limpa, mesmo worktree** (commit `b52ee21`):
+   `docs/KNOWLEDGE_BASE.md` e `docs/OPERACAO_IG.md` (eram tutoriais completos
+   de 458+200 linhas) viraram redirecionamentos para `insta_kb`;
+   `docs/dev/{modules,extending,contributing,index}.md`, `docs/index.md`,
+   `docs/api.md` perderam as seções do domínio migrado;
+   `tests/08_knowledge.sh` (chamava tools que não existem mais, rodava de
+   verdade via `diagnose.sh`) foi deletado; `README.md` com os números
+   certos (12 tools, não os "18"/"24" que já estavam errados antes) e um
+   link para `insta_kb` como projeto relacionado.
+
+### O que falta
+
+- **Mergear o worktree para `main`.** Ainda não feito. `git status` na raiz
+  do repo (fora do worktree) tem mudanças soltas e não investigadas nesta
+  sessão: `pyproject.toml` (+1 linha), `scripts/config.sh`,
+  `scripts/ig_reprocessar.py`, `src/minimax_mcp/core.py`,
+  `src/minimax_mcp/server.py`, `uv.lock`, `workflows/minimax_h3_t2v_api.json`,
+  e não-rastreados `.codex/`, `.pylintrc`, `database.db`,
+  `scripts/ig_catchall_check.py`, `scripts/ig_replay_dlq.py`,
+  `scripts/ig_sync_bg.py` — provavelmente trabalho anterior do usuário,
+  independente deste refactor. Checar com o usuário antes do merge (vai
+  precisar resolver conflito em `docs/HANDOFF.md`, que diverge entre a
+  branch e este arquivo na `main`).
+- **Reconstruir o container `comfyui`/`mcp` com o código novo** — o
+  `test_container_deps` (marcador `integration_db`) falha de propósito até
+  isso acontecer: o container em execução ainda responde com 26 tools,
+  a fonte já declara 12. `docker compose build mcp && docker compose up -d`
+  depois do merge resolve.
+- Task #8 do plano original (os "4 lugares" por tool MCP) — já feito **aqui**
+  neste repo; conferir se vale regenerar um equivalente no `insta_kb` (que
+  nunca teve `catalog.py`/`unit_registry` próprio).
+
+---
+
 ## ✅ CONCLUÍDO em 2026-08-19: o sync do Instagram e cinco defeitos de conteúdo
 
 **A catch-all está resolvida.** A seção anterior deste arquivo dizia que ela
