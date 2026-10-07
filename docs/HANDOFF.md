@@ -1305,3 +1305,54 @@ de uma sessão anterior ao `/clear`).
   Task 8 o sweep de `v0.30.2` em `README.md:365`, `docs/ARCHITECTURE.md`
   (18,31), `docs/INSTALLATION.md:101`.
 - Visual completo do clipe de validação — só 1 frame foi olhado aqui.
+
+---
+
+## 2026-10-07 — Mutex de GPU compartilhado com insta_kb
+
+Achado fora do plano original (surgiu durante a Task 4, quando o ig-worker
+do insta_kb virou um serviço Docker independente de verdade, em vez de
+algo que só rodava manualmente): este host tem UMA GPU de 12 GB, e os dois
+projetos (renders ComfyUI aqui, transcrição Whisper no insta_kb) podem
+rodar como serviços de container a qualquer momento, sem coordenação
+automática — antes era só disciplina manual (checar `nvidia-smi`).
+
+**Pedido explícito do usuário: os dois projetos NÃO podem ficar acoplados**
+("não quero um projeto dependendo do outro ou vinculado ao outro"). Solução:
+um arquivo de lock compartilhado fora dos dois repos (`~/.gpu-lock/gpu.lock`,
+bind-mounted no mesmo path `/var/lib/gpu-lock` nos containers relevantes dos
+dois lados), com `fcntl.flock`, e um módulo Python **idêntico mas duplicado**
+em cada repo (`src/minimax_mcp/gpu_lock.py` aqui, `src/infra/gpu_lock/
+gpu_lock.py` no insta_kb) — nenhum importa o outro.
+
+- `submit_scene_core` adquire o lock logo antes de `client.submit(wf)`
+  (timeout 1800s); `wait_for_video_core` libera quando o render realmente
+  termina (sucesso ou erro real), não quando o `wait_seconds` do caller
+  expira — senão o lock cairia com o render ainda rodando de verdade.
+  Token guardado por `prompt_id` (`_gpu_tokens_by_prompt`), porque submit e
+  wait podem ser chamadas MCP separadas.
+  ⚠️ **Limitação aceita:** se ninguém chamar `wait_for_video` de novo depois
+  de um timeout do `generate_video`, o lock fica preso até a próxima
+  chamada bem-sucedida ou restart do processo MCP. Sem detector de lock
+  órfão (processo morto sem liberar = lock preso até apagar o arquivo à
+  mão). Registrado, não resolvido — revisitar se virar problema de verdade.
+- 3 rotas HTTP via `@mcp.custom_route` (não MCP tools): `GET /gpu/status`,
+  `POST /gpu/acquire`, `POST /gpu/release` — porta 8848. São diagnóstico/
+  uso manual externo; a aplicação real do lock está em
+  `submit_scene_core`/`wait_for_video_core`, não nessas rotas.
+- `docker/docker-compose.yml`: `${HOME}/.gpu-lock` montado no serviço `mcp`
+  (não no `comfyui` — o lock é aplicado no processo MCP, que é quem chama
+  o ComfyUI, não dentro do ComfyUI em si).
+- `~/scripts/gpu-lock.sh` (fora dos dois repos, pasta pessoal do usuário):
+  `status`/`run`/`hold` sobre o MESMO arquivo — útil pra reservar a GPU
+  manualmente do terminal sem precisar dos containers rodando.
+
+**Validado nesta sessão, ponta a ponta entre os dois processos de verdade:**
+`POST :8848/gpu/acquire` (minimax) → `GET :8084/gpu/status` (insta_kb, processo
+totalmente separado) reportou `held=true` com o holder certo → `POST
+:8848/gpu/release` → insta_kb viu `free=true` de novo. Suíte unit completa
+(9 scripts) passou depois de ajustar `unit_core.py`/`unit_orchestrator.py`
+(que chamavam `submit_scene_core` de verdade e, sem mock do lock, faziam
+deadlock entre chamadas sucessivas do mesmo teste). Commit `c92ffee`,
+review disparado (resultado pendente no momento deste HANDOFF). Commit
+irmão no insta_kb: `a2d391f`.
