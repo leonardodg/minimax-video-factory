@@ -46,3 +46,10 @@ site/
 # Claude Code per-machine permissions. `.claude/commands/` IS versioned (it is
 # generated from the code, like .opencode/command/); this one file is not.
 .claude/settings.local.json
+
+# Codex CLI per-machine MCP config (same role as .mcp.json, different tool,
+# not every contributor uses it).
+.codex/
+
+# Stray local sqlite file, no schema -- not a project artifact.
+database.db

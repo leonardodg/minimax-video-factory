@@ -91,8 +91,8 @@ export OUTPUT_PREFIX="${OUTPUT_PREFIX:-video/factory}"
 # --- Model set (supports bigger variants; sizes optional -> size checks skipped) ---
 export MODEL_REPO_INT4="${MODEL_REPO_INT4:-Merserk/MiniMax-H3-INT4-ConvRot}"
 export MODEL_REPO_COMFY="${MODEL_REPO_COMFY:-Comfy-Org/MiniMax-H3}"
-export MODEL_DIFFUSION="${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int4_convrot.safetensors}"
-export MODEL_TEXT_ENCODER="${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_int4_convrot.safetensors}"
+export MODEL_DIFFUSION="${MODEL_DIFFUSION:-minimax_h3_fl2va_pruned_int8_convrot.safetensors}"
+export MODEL_TEXT_ENCODER="${MODEL_TEXT_ENCODER:-qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors}"
 
 # Which repo each weight comes from, and where inside it. The two repos are laid
 # out differently: Merserk keeps the files at the root, Comfy-Org nests them
