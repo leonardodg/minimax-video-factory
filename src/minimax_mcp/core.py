@@ -287,6 +287,14 @@ def submit_scene_core(
     except ComfyUIError as e:
         gpu_release(token)
         return {"ok": False, "error": str(e)}
+    except Exception:
+        # client.submit posts over httpx; a connection error/timeout isn't
+        # wrapped as ComfyUIError (only HTTP-status/body errors are), so
+        # without this the lock would leak forever on a plain network
+        # glitch -- with nothing actually running on the GPU (review
+        # finding, 2026-10-07).
+        gpu_release(token)
+        raise
     _gpu_tokens_by_prompt[prompt_id] = token
     effective_steps = steps or (DEFAULT_TURBO_STEPS if turbo else DEFAULT_STEPS)
     return {"ok": True, "prompt_id": prompt_id, "seed": seed,

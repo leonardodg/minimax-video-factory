@@ -170,6 +170,24 @@ with mock.patch.object(core, "ComfyUIClient") as m:
     else:
         bad(f"upload failure result = {result!r}")
 
+with mock.patch.object(core, "ComfyUIClient") as m, \
+     mock.patch.object(core, "gpu_release") as release_spy:
+    # client.submit posts over httpx -- a connection error/timeout isn't
+    # wrapped as ComfyUIError (only HTTP-status/body errors are), so this
+    # exercises the plain `except Exception` path, not the ComfyUIError one
+    # above. Without it the GPU lock leaked forever on a network glitch,
+    # with nothing actually running on the GPU (review finding, 2026-10-07).
+    client = m.return_value
+    client.submit.side_effect = ConnectionError("network blip")
+    try:
+        core.submit_scene_core("p", seed=4)
+        bad("submit_scene_core swallowed a non-ComfyUIError exception")
+    except ConnectionError:
+        if release_spy.call_count == 1:
+            ok("a non-ComfyUIError submit failure still releases the GPU lock")
+        else:
+            bad(f"gpu_release call_count = {release_spy.call_count}, expected 1")
+
 print("== unit_core: wait_for_video_core ==")
 async def run_wait():
     with mock.patch.object(core, "ComfyUIClient") as m:
