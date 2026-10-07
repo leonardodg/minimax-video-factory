@@ -1369,3 +1369,33 @@ que pegaria isso, já que `ComfyUIClient` é mockado nos testes); rotas
 HTTP de diagnóstico devolvem 500 feio em corpo vazio/inválido em vez de
 400 (aceitável, são manuais); sem detector de lock órfão (processo
 morto = lock preso até apagar `~/.gpu-lock/gpu.lock`/`gpu.holder` à mão).
+
+---
+
+## 2026-10-07 — Task 5 (MCPs do OpenCode): inventário + insta-kb → HTTP
+
+**Step 1 (inventário):** 4 instâncias minimax no `~/.config/opencode/
+opencode.json` global (`minimax-video-factory-uv` host stdio,
+`minimax-video-factory-remote` HTTP :8848) + 2 no `.mcp.json` deste repo
+(`minimax-video-factory` docker exec, `minimax-video-factory-remote`
+HTTP :8848) — sem mudança, já corretas. `minimax-knowledge-base` (pendência
+antiga, apontava pro server.py velho sem tools de KB) **já não existe mais**
+no opencode.json — resolvida antes desta sessão, sem ação necessária.
+
+**`insta-kb` global estava stdio** (`uv run --directory insta_kb python
+src/mcp_server/server.py`), com a própria descrição já dizendo "Trocar para
+HTTP 127.0.0.1:8849/mcp na Task 4" — trocado agora pra `type: remote, url:
+http://127.0.0.1:8849/mcp`, apontando pro serviço `mcp` containerizado
+(Task 4). Confirmado vivo: `GET :8849/mcp` → 400 (não 000).
+
+**Step 2 (venvs):** `fastmcp 4.0.11` confirmado nos 3 lugares — host
+(`uv run python -c "import fastmcp"`), container `minimax-comfyui`
+(`/opt/mcp-venv`), container `devcontainer-mcp-1` do insta_kb (`/opt/venv`).
+
+**Claude Code (não OpenCode) não precisa de ação separada:** não tem um
+agregador global como o `opencode.json` — lê `.mcp.json` por projeto
+diretamente. A troca pra HTTP já foi feita ali na Task 4 Step 8.
+
+**Pendente (Steps 3-5, ação do usuário):** reiniciar a sessão do OpenCode
+pra `insta-kb` reconectar via HTTP; depois, handshake + contagem de tools
+por instância (Step 4) — ainda não feito nesta sessão.
