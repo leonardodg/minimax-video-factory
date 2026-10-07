@@ -14,6 +14,29 @@ regras antigas deste arquivo eram do INT4 e **metade caiu**. O que está abaixo
 
 ---
 
+## 🔄 EM ANDAMENTO 2026-10-07: atualização completa (deps/ComfyUI/Docker/MCPs/testes)
+
+Plano mestre: `~/.claude/plans/vamos-atualizar-a-lista-groovy-sun.md` — cópias
+versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
+**Branch: `update/deps-2026-10`** (PR no fim). Execução inline, 10 tasks
+(0-9), status da tabela no próprio plano.
+
+| Task | Descrição | Status | Evidência |
+|---|---|---|---|
+| 0 | Commits pendentes + baseline + cópias do plano | ✅ | baseline `9 passed`; commits `44b6406` (INT8/nvfp4), `4b34bd2` (MCP_TOOLS), `376e6ae` (plano) |
+| 1 | Deps insta_kb | ⏳ | |
+| 2 | Deps minimax | ⏳ | |
+| 3 | ComfyUI v0.39.1 + nodes + pesos | ⏳ | |
+| 4 | Docker insta_kb (Parte B) | ⏳ | |
+| 5 | MCPs do OpenCode | ⏳ | |
+| 6 | Matriz de testes | ⏳ | |
+| 7 | Fila do insta_kb (329 msgs) | ⏳ | |
+| 8 | Documentação | ⏳ | |
+| 9 | Diagramas | ⏳ | |
+
+Regra de GPU durante toda a execução: 1 job (render/transcrição/Ollama) por
+vez; `av==18.1.0` fixo nos 2 repos; nenhum download de peso sem OK.
+
 ## ✅ CONCLUÍDO em 2026-10-06: domínio Instagram/KB saiu deste repo
 
 **Objetivo (cumprido):** este projeto nasceu só para gerar vídeo (ComfyUI +
