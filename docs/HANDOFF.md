@@ -24,8 +24,8 @@ versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
 | Task | Descrição | Status | Evidência |
 |---|---|---|---|
 | 0 | Commits pendentes + baseline + cópias do plano | ✅ | baseline `9 passed`; commits `44b6406` (INT8/nvfp4), `4b34bd2` (MCP_TOOLS), `376e6ae` (plano) |
-| 1 | Deps insta_kb | ⏳ | |
-| 2 | Deps minimax | ⏳ | |
+| 1 | Deps insta_kb | ✅ | no repo `insta_kb` (`58e8093`+`d034fd0`); ver HANDOFF de lá |
+| 2 | Deps minimax | ✅ | `fastmcp>=4.0.11`+`av==18.1.0`+`requires-python>=3.11`; commits `715216e`+`83c8454` |
 | 3 | ComfyUI v0.39.1 + nodes + pesos | ⏳ | |
 | 4 | Docker insta_kb (Parte B) | ⏳ | |
 | 5 | MCPs do OpenCode | ⏳ | |
@@ -36,6 +36,37 @@ versionadas em `docs/PLANO_ATUALIZACAO.md` (este repo) e no `insta_kb`.
 
 Regra de GPU durante toda a execução: 1 job (render/transcrição/Ollama) por
 vez; `av==18.1.0` fixo nos 2 repos; nenhum download de peso sem OK.
+
+### Task 2 ✅ (2026-10-07): deps minimax — fastmcp 4, av 18.1.0
+
+- **Versões no lock:** fastmcp 4.0.11, av 18.1.0 (nunca 19.x), yt-dlp
+  2026.8.19, pydantic 2.13.5, ruff 0.16.10, pylint 4.1.2. Validação:
+  ruff clean, `9/9` testes, smoke import `fastmcp 4.0.11 | av 18.1.0`.
+- **fastmcp 3→4: sem breaking changes no uso atual.** `server.py` só usa
+  `FastMCP`, `@mcp.tool()` function-mode e `mcp.run(transport=...)` — nada
+  de sampling/roots/shims 3.x (todos removidos na 4.0.0). Review confirmou
+  que `FastMCP.run` 4.0.11 aceita os 4 transports, inclusive o
+  **`streamable-http`** da produção (`.mcp.json`).
+- **Uso de cliente também OK:** `fastmcp.Client` + `StdioTransport`
+  (usados em `scripts/generate_mcp_docs.py`, `scripts/demo_aurora.sh`,
+  `tests/07_e2e_agent.sh`) importam em 4.0.11 — os 9 testes não os cobrem;
+  Task 8 (geração de docs) é a primeira execução real.
+- **Desvio 1:** `requires-python >=3.10` → `>=3.11` — `av==18.1.0` exige
+  ≥3.11 e o uv não resolvia para 3.10 (EOL desde 2025-10; runtimes reais:
+  host 3.14, venv MCP do container 3.11). README/dev-environment
+  atualizados (badge 3.11+, FastMCP 4.x).
+- **Desvio 2 (corrige o próprio baseline):** o HANDOFF registrava baseline
+  `9 passed`, mas no HEAD `5b47daa` o teste `unit_privacy` estava RED — o
+  plano versionado (`376e6ae`) continha 34 caminhos `/home/...` e o teste
+  anti-vazamento existe só neste repo. O commit `715216e` (plano sem home
+  paths, `$HOME/`) é o que deixa o repo verde de verdade; baseline correta:
+  `9 passed` **a partir de `715216e`**.
+- **Caveat Task 3:** `docker/Dockerfile` só copia `pyproject.toml` (não
+  `uv.lock`) e faz `uv sync` sem `--frozen` → a imagem re-resolve dos
+  ranges (`av` pin protege, `fastmcp>=4.0.11` flutua). Decidir no rebuild:
+  `COPY uv.lock` + `--frozen` (reprodutível) ou registrar float.
+- **Nota insta_kb:** sem teste `unit_privacy`; a regra de "nenhum
+  `/home/...` em arquivo rastreado" vale só para este repo público.
 
 ## ✅ CONCLUÍDO em 2026-10-06: domínio Instagram/KB saiu deste repo
 
