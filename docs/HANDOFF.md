@@ -1599,3 +1599,54 @@ Escopo executado do backlog §5 do `docs/SOLID_AUDIT.md` (itens críticos
 `unit_core` / `unit_orchestrator` / `unit_privacy` / `unit_transcriber`
 OK; `ruff check .` limpo; `pyright` nos arquivos tocados **0 errors**
 (baseline 9 — só melhorou).
+
+---
+
+## 2026-10-07 (fim de sessão) — review dos commits paralelos + fechamento
+
+Review de código dos 6 commits que uma sessão paralela fez nesta janela
+(fixes da Task do mutex de GPU, auditoria SOLID avaliação, diagramas):
+**aprovado, com 1 bug real e medido corrigido antes de qualquer render**.
+
+- `comfyui_client.py`: o branch `except ConnectionClosed` (fast-follow de
+  um review anterior) fazia `continue` sem dormir — `recv()` num socket já
+  fechado retorna na hora, então o loop girava livre até o deadline.
+  Medido pelo revisor: **113.005 chamadas de poll em 1,01s** contra um
+  mock — com ComfyUI vivo e só o ws caído, cada iteração bateria
+  `/history` de verdade (self-DDoS do próprio ComfyUI bem na janela em
+  que um render está com problema) + um `logger.warning` por iteração
+  (flood de log). Fix: `await asyncio.sleep(poll_interval)` antes do
+  `continue`, mesmo padrão do branch `TimeoutError` logo acima. Teste de
+  regressão reproduz o cenário exato do review (mock de `connect()` +
+  `get_history` falhando) e mede: 11 polls em 0,5s depois do fix, contra
+  as 113k/s medidas antes. Commit `cdacf84`.
+- A ordem das exceções `ComfyUITimeout`/`ComfyUIError` (o ponto que eu
+  mais temia estar errado) foi **confirmada correta** nos dois lugares
+  que importam (`core.py`, `orchestrator.py`) — e o teste que já existia
+  cobre exatamente esse branch, não só o caminho feliz.
+- `CLAUDE.md` regra 7 reescrita: descrevia um container `minimax-ig-worker`
+  que não existe mais e uma porta de RabbitMQ (15672) que não é a de hoje
+  (15673, containerizado). Agora descreve o mutex automático, como checar
+  status dos dois lados, e o procedimento de destravamento manual pro
+  caso de lock preso sem processo rodando (decisão de design do review:
+  "ComfyUI inalcançável" mantém o lock de propósito, porque liberar seria
+  o erro grave — mas não tem detector de "inalcançável de verdade" ainda,
+  registrado como pendência conhecida, não bloqueante). Commit `81b1981`.
+- `ModelSamplingAV`/`legacy dual-schedule`: a regra antiga já mandava
+  reconferir ao subir a versão do ComfyUI — nunca foi feito depois do
+  upgrade pra v0.39.1 (Task 3). Marcado como pendência explícita.
+
+### Status final da sessão (visão rápida)
+
+Todas as Tasks 0-9 do plano `docs/PLANO_ATUALIZACAO.md` fechadas (✅) ou
+em andamento ativo e saudável (Task 7, fila drenando sozinha). Task 10
+(auditoria SOLID) fechada por outra sessão. **Única pendência real: você
+reiniciar a sessão do OpenCode** para a instância `minimax-video-factory-uv`
+(host, usada por esta própria sessão) e `insta-kb` (agora HTTP)
+recarregarem — sem isso, renders submetidos por esta sessão específica
+não ganham a proteção do mutex de GPU automaticamente (já causou um
+incidente real nesta sessão, documentado acima na seção do mutex).
+
+Containers: `minimax-comfyui`, `minimax-mcp` (reiniciado, pegou o fix do
+loop quente), `devcontainer-{postgres,rabbitmq,ollama,api,worker,mcp}-1`
+(insta_kb) — todos `Up`, saudáveis, testados nesta sessão.
