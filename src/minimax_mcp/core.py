@@ -322,7 +322,7 @@ async def wait_for_video_core(prompt_id: str, timeout: float = 1200.0) -> dict[s
         return {"ok": False, "prompt_id": prompt_id, "error": str(e)}
     except Exception as e:
         _release_gpu_token(prompt_id)
-        return {"ok": False, "error": f"unexpected: {e}"}
+        return {"ok": False, "prompt_id": prompt_id, "error": f"unexpected: {e}"}
 
     _release_gpu_token(prompt_id)
     # Resolve output path (container view) then translate to the host view for the client.
