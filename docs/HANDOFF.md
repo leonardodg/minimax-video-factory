@@ -1232,3 +1232,70 @@ mesmo RAM momentânea e não um limiar que ficou baixo demais.
 - `database.db*` (sqlite vazio, sem schema, não referenciado no código) —
   adicionado ao `.gitignore` do insta_kb; arquivos ainda no disco (remoção
   bloqueada pelo classificador de permissões desta sessão).
+
+---
+
+## 2026-10-07 — Task 3 concluída: ComfyUI v0.39.1 + nodes + pesos novos
+
+Continuação de `docs/PLANO_ATUALIZACAO.md` (Tasks 0-2 já ✅ em sessão
+anterior). Retomei Task 3 a partir de WIP não commitado (bump do
+`COMFYUI_TAG` e decisão `uv sync --frozen` já estavam no working tree,
+de uma sessão anterior ao `/clear`).
+
+- **Backup**: `minimax-comfyui:v0.30.2-backup` já existia (tag preservada).
+- **Nodes** (6 atrasados): já estavam atualizados — nenhum pull necessário
+  nesta sessão (`comfyui_AcademiaSD`, `ComfyUI-Easy-Use`, `ComfyUI-KJNodes`,
+  `ComfyUI-MiniMax-H3-Turbo`, `ComfyUI-VideoHelperSuite`, `rgthree-comfy`
+  todos `git status` limpo e `up to date`).
+- **ComfyUI v0.39.1**: `COMFYUI_TAG` bumped nas 3 fontes
+  (`.env.example`, `docker/Dockerfile` ARG, `docker/docker-compose.yml`
+  default) — consistentes.
+- **`uv sync --frozen`**: decisão da Task 2 (review) aplicada — `docker/Dockerfile`
+  e `docker/Dockerfile.python` agora fazem `COPY pyproject.toml uv.lock` +
+  `uv sync --no-dev --frozen`, em vez de só `pyproject.toml` com resolução
+  solta a cada build. Garante que a imagem reflete exatamente o lock
+  testado (`av==18.1.0`, `fastmcp==4.0.11`).
+- **Rebuild**: `docker compose -f docker/docker-compose.yml --project-directory .
+  build comfyui` (nota: sem `--project-directory .` o compose resolve o
+  Dockerfile relativo à pasta do arquivo compose, não ao repo — dá
+  `lstat docker/docker: no such file`; documentado em `scripts/config.sh`,
+  mas fácil de esquecer rodando o comando cru). `docker ... up -d
+  --force-recreate comfyui` depois, pra garantir que o container usa a
+  imagem nova (o primeiro `up -d` sem `--force-recreate` não trocou,
+  porque compose não detecta mudança de digest sozinho quando a tag não
+  muda).
+- **Pesos novos** (checkpoint do repo `Comfy-Org/MiniMax-H3`, modificado
+  2026-09-29): usuário aprovou 3 de ~15 candidatos "NEW" (o resto são
+  requantizações de modelos que já temos em int8_convrot/nvfp4, redundantes):
+  - `loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` (1,96 GB)
+  - `loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` (1,96 GB)
+  - `vae/minimax_h3_video_vae_int8_convrot.safetensors` (2,81 GB)
+  Baixados via `hf download` (CLI nova; `huggingface-cli` está deprecated).
+  Nenhum outro peso baixado.
+- **Health check**: `curl :8188/system_stats` → `comfyui_version: 0.39.1`,
+  VRAM livre 11,8/12,4 GB pós-recreate (limpo). `curl :8188/models/vae`
+  confirma os 3 arquivos novos visíveis pelo ComfyUI via bind-mount.
+  ⚠️ A tool MCP `health_check()` (instância `minimax-video-factory-uv`,
+  processo stdio de sessão anterior) reportou `models: present=false` pra
+  tudo — **falso negativo de processo stale**, não do código: testado
+  isoladamente com `uv run python` que `MODELS_DIR` resolve certo
+  (`/home/leodg/minimax/models`) e os arquivos existem. A instância MCP
+  antiga está com env/estado desatualizado — resolve sozinho na Task 5
+  (reload do OpenCode). Não bloqueou o render.
+- **Render de validação** (Step 8): turbo, seed 42, 512×320, 5 s —
+  `prompt_id d09d0b64`, sucesso, `output/validation/task3_turbo_00001_.mp4`
+  (1,08 MB, h264 + aac estéreo 2ch, 5,167 s). Frame extraído em 2,5s:
+  composição coerente (raposa em floresta, luz entre as árvores), sem
+  manchas de cor visíveis. Avaliação completa (olhar o clipe inteiro)
+  ainda é do usuário — só a amostra de 1 frame foi conferida aqui.
+- **Commit**: `ae944c1` (`build(docker): ComfyUI v0.39.1 + uv sync --frozen
+  nas imagens MCP`). Code review disparado (subagent em background,
+  resultado ainda pendente no momento deste commit do HANDOFF).
+- **Rollback**: não necessário — tudo passou. Se precisar:
+  `COMFY_IMAGE=minimax-comfyui:v0.30.2-backup` no `.env` + `up -d` sem
+  rebuild.
+
+### Pendências da Task 3
+
+- Resultado do code review do commit `ae944c1` (em andamento).
+- Visual completo do clipe de validação — só 1 frame foi olhado aqui.
