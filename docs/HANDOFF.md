@@ -1493,8 +1493,10 @@ modelos que o `ollama serve` do host já usa (`.ollama` de
 `/home/ollama_models`, 133 GB) — sem duplicar nem rebaixar nada. `OLLAMA_URL` dos 3 serviços
 trocado de `http://host.docker.internal:11434` pra `http://ollama:11434`;
 `extra_hosts` removido (não serve mais pra nada); `ollama` adicionado ao
-`depends_on` dos 3. **Ainda em teste no momento deste registro** (imagem
-`ollama/ollama` baixando — é uma imagem grande, suporte CUDA).
+`depends_on` dos 3. **Validado depois (2026-10-07 ~18:02):** exigiu pinar a imagem em
+`ollama/ollama:0.32.9` (o `latest` 0.40 migra o store pra `manifests-v2`
+e quebra o mount `:ro`) + recriar os containers com a env nova — worker
+drenando com ingests reais (detalhe no HANDOFF do insta_kb).
 
 ---
 
@@ -1522,8 +1524,9 @@ Visão rápida de onde as coisas estão, pros próximos passos:
   via `host.docker.internal` que não funcionava na rede real
 
 **Pendências reais, em ordem de urgência:**
-1. Confirmar que o `ollama` containerizado sobe e o worker volta a
-   processar (build em andamento)
+1. ~~Confirmar que o `ollama` containerizado sobe e o worker volta a
+   processar (build em andamento)~~ ✅ confirmado ~18:02 — worker com
+   ingests reais (docs 3720+), exigiu pin da imagem em `0.32.9`
 2. **Reiniciar a sessão do OpenCode** (ação sua) — destrava Task 5 Step 4/5
    e Task 6 Step 3, e faz o mutex de GPU proteger TODAS as chamadas,
    incluindo as desta sessão
