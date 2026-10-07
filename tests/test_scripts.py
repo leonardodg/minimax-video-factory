@@ -67,6 +67,17 @@ def test_unit_transcriber():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+@pytest.mark.unit
+def test_mcp_docs_not_stale():
+    """docs/MCP_TOOLS.md went undetected as stale for a full domain-removal
+    commit before this check existed (2026-10-07) -- this is the guard."""
+    result = subprocess.run(
+        [sys.executable, "scripts/generate_mcp_docs.py", "--check"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 @pytest.mark.integration_db
 def test_container_deps():
     """The image the README tells users to configure must be able to import
